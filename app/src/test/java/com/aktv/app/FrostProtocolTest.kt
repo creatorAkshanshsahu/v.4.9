@@ -163,4 +163,9 @@ class FrostProtocolTest {
         assertTrue(recovery.take(second)); assertFalse(recovery.take(second))
     }
 
+    @Test fun `source choices show the advertised scraper name but never an injected URL label`() {
+        assertTrue(parse(source().put("scraperName", "CinemaOS")).single().label.contains("CinemaOS"))
+        assertEquals("", parse(source().put("scraperName", "https://private.example/token")).single().scraperName)
+    }
+
 }

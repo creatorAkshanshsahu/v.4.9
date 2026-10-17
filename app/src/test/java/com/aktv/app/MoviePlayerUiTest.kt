@@ -38,7 +38,7 @@ class MoviePlayerUiTest {
         } finally { controller.destroy() }
     }
     @Test fun `native saved position survives screen recreation without persisting a resolved URL`() {
-        val context = RuntimeEnvironment.getApplication<android.app.Application>()
+        val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("aktv", 0)
         prefs.edit().putLong("vod_movie_1288069_0_0", 120_000).putLong("vod_movie_1288069_0_0_duration", 600_000).commit()
         val controller = Robolectric.buildActivity(MoviePlayerActivity::class.java, intent()).create()

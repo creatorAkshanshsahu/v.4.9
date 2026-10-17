@@ -42,9 +42,9 @@ internal class FrostSubtitle(val url: String, val label: String, val language: S
 internal class FrostSource(
     val provider: FrostProvider, val identity: String, val url: String, val format: VodFormat,
     val quality: String, val language: String, val hevc: Boolean?, val headers: Map<String, String>,
-    val subtitles: List<FrostSubtitle>, val credentialOrigin: String = url
+    val subtitles: List<FrostSubtitle>, val credentialOrigin: String = url, val scraperName: String = ""
 ) {
-    val label get() = listOf(provider.label, quality, language, format.name).filter { it.isNotBlank() }.joinToString(" · ")
+    val label get() = listOf(provider.label, scraperName, quality, language, format.name).filter { it.isNotBlank() }.joinToString(" · ")
     override fun toString() = "FrostSource(${provider.name}, ${format.name}, $quality)"
 }
 
@@ -148,6 +148,9 @@ internal object FrostProtocol {
             val format = format(text(item.opt("type")), primary) ?: continue
             val quality = text(item.opt("quality"), 16).takeIf { it.matches(Regex("(?i)([0-9]{3,4}p?|4k|auto)")) }.orEmpty()
             val language = text(item.opt("language"), 40)
+            val scraperName = text(item.opt("scraperName"), 40).takeIf {
+                it.matches(Regex("[\\p{L}\\p{N} ._()-]{1,40}"))
+            }.orEmpty()
             val hevc = item.opt("hevc") as? Boolean // Missing does NOT mean AVC. MPD codec data is authoritative.
             val tracks = subtitles(item.optJSONArray("tracks") ?: item.optJSONArray("subtitles"))
             val urls = arrayListOf(primary)
@@ -158,7 +161,7 @@ internal object FrostProtocol {
             for ((mirror, url) in urls.distinct().withIndex()) {
                 val key = "$provider|$identity|${format.name}|$quality|$language|$mirror"
                 val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
-                result.add(FrostSource(provider, digest, url, format, quality, language, hevc, headers(item.optJSONObject("headers")), tracks, primary))
+                result.add(FrostSource(provider, digest, url, format, quality, language, hevc, headers(item.optJSONObject("headers")), tracks, primary, scraperName))
             }
             if (result.size >= 64) break
         }

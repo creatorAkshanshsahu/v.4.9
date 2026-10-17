@@ -122,7 +122,7 @@ class NativePlaybackPolicyTest {
             android.content.res.Configuration.TOUCHSCREEN_NOTOUCH, android.content.res.Configuration.NAVIGATION_UNDEFINED))
     }
     @Test fun `explicit generic box override enables the TV policy`() {
-        val context = RuntimeEnvironment.getApplication<android.app.Application>()
+        val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("aktv", android.content.Context.MODE_PRIVATE)
         try {
             prefs.edit().putBoolean("native_force_tv", true).commit()
