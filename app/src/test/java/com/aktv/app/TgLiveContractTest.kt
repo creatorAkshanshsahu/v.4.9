@@ -33,8 +33,9 @@ class TgLiveContractTest {
                     val sources = resolver.resolve(id, fresh = false)
                     report.put("sources", JSONArray().apply {
                         sources.forEachIndexed { index, source ->
-                            put(JSONObject().put("index", index + 1).put("type", source.type)
+                            put(JSONObject().put("index", index + 1).put("label", source.label).put("type", source.type)
                                 .put("host", URI(source.url).host).put("cookiePresent", source.cookie.isNotBlank())
+                                .put("tokenSecondsLeft", StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 })
                                 .put("keyCount", source.drm?.let { ClearKey.pairs(it).size } ?: 0))
                         }
                     })
@@ -80,7 +81,8 @@ class TgLiveContractTest {
                     val protections = document.getElementsByTagNameNS("*", "ContentProtection")
                     val schemes = linkedSetOf<String>()
                     for (i in 0 until protections.length) {
-                        schemes.add(protections.item(i).attributes.getNamedItem("schemeIdUri")?.nodeValue.orEmpty())
+                        val scheme = protections.item(i).attributes.getNamedItem("schemeIdUri")?.nodeValue.orEmpty()
+                        schemes.add(if (scheme.startsWith("urn:")) scheme.take(120) else "other")
                     }
                     val bases = document.getElementsByTagNameNS("*", "BaseURL")
                     val hosts = linkedSetOf<String>()

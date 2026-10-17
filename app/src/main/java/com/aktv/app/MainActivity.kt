@@ -880,7 +880,7 @@ class MainActivity : AppCompatActivity() {
     private fun startNative() {
         val source = nativeSources.getOrNull(serverIdx) ?: return
         spinner.visibility = View.VISIBLE
-        infoNext.text = "${source.label} · ${serverIdx + 1} of ${nativeSources.size}" +
+        infoNext.text = "Auto · ${source.label} · ${serverIdx + 1} of ${nativeSources.size}" +
             if (nativeSources.size > 1) "   ·   OK switches server" else ""
         infoNext.visibility = View.VISIBLE
         try { attach(nativeMediaSource(source)) }
@@ -948,7 +948,7 @@ class MainActivity : AppCompatActivity() {
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source"
                 else -> "The live stream stopped responding"
             }
-            advanceNative(message, refreshFirst = code in setOf(401, 403, 410))
+            advanceNative(message)
         }
     }
 
@@ -976,13 +976,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Bounded recovery, always in ExoPlayer: current TG servers, one metadata refresh, then an actionable error. */
-    private fun advanceNative(reason: String, refreshFirst: Boolean = false) {
+    private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
         disarmStall(); releasePlayer()
-        when (val action = recovery.failed(serverIdx, nativeSources.size, refreshFirst)) {
+        when (val action = recovery.failed(serverIdx, nativeSources.size)) {
             is PlaybackRecovery.Action.Source -> {
                 serverIdx = action.index
-                playMsg("Trying ${nativeSources[serverIdx].label}…")
+                playMsg("Automatically trying ${nativeSources[serverIdx].label}…")
                 val token = playToken
                 ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
             }

@@ -88,4 +88,21 @@ class StreamRequestPolicyTest {
         assertFalse(request.headers.containsKey("X-Bad"))
         assertFalse(request.headers.containsKey("Host"))
     }
+
+    @Test fun `the website relay keeps its own query even when TG repeats a Jio cookie`() {
+        val url = "https://allinonereborn2.online/jiotv-m3u/jtv.mpd?id=872"
+        val policy = StreamRequestPolicy(TgStream("Server 2", url, "dash", cookie = "__hdnea__=site-cookie"))
+        assertEquals(url, policy.request(url).url)
+        assertEquals("https://allinonereborn2.online/media.m4s?id=keep", policy.request("https://allinonereborn2.online/media.m4s?id=keep").url)
+        // A successful redirect can still supply the real CDN's independent credentials.
+        policy.observed("https://cdn.example/live.mpd?__hdnea__=cdn-cookie")
+        assertEquals("https://cdn.example/segment.m4s?__hdnea__=cdn-cookie", policy.request("https://cdn.example/segment.m4s").url)
+    }
+
+    @Test fun `a relay name inside a query does not disable authentication for a normal CDN`() {
+        val url = "https://cdn.example/live.mpd?name=allinonereborn"
+        val policy = StreamRequestPolicy(TgStream("Server 1", url, "dash", cookie = "__hdnea__=site-cookie"))
+        assertEquals(url + "&__hdnea__=site-cookie", policy.request(url).url)
+    }
+
 }

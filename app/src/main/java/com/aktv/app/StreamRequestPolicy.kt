@@ -9,13 +9,15 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
     data class Request(val url: String, val headers: Map<String, String>)
     private val origin = originOf(stream.url)
     private val tokens = ConcurrentHashMap<String, String>()
-    private val suppliedToken = cookieToken(stream.cookie)
+    // TG's player explicitly excludes its allinonereborn relay from the Jio query filter.
+    // The relay owns its query/authentication, even when TG repeats the primary cookie on it.
+    private val suppliedToken = cookieToken(stream.cookie)?.takeUnless { ownsQuery(stream.url) }
 
     init { (suppliedToken ?: tokenOf(stream.url))?.let { tokens[origin] = it } }
 
     fun request(url: String): Request {
         val target = originOf(url)
-        val token = tokens[target]?.takeUnless { expired(it, now()) }
+        val token = tokens[target]?.takeUnless { ownsQuery(url) || expired(it, now()) }
         val resolved = when {
             token == null -> url
             url == stream.url && suppliedToken != null -> withToken(url, token, replace = true)
@@ -38,6 +40,9 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
 
     companion object {
         private const val TOKEN = "__hdnea__"
+        private fun ownsQuery(url: String): Boolean = try {
+            URI(url).host.orEmpty().contains("allinonereborn", ignoreCase = true)
+        } catch (_: Exception) { false }
         fun originOf(url: String): String = try {
             val u = URI(url)
             val scheme = u.scheme.orEmpty().lowercase()

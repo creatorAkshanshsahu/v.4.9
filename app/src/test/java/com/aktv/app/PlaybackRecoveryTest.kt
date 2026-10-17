@@ -12,12 +12,14 @@ class PlaybackRecoveryTest {
         assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(1, 2))
     }
 
-    @Test fun `401 and 403 cause immediate fresh credentials not twenty header guesses`() {
+    @Test fun `a rejected source cannot force a reload before trying the other servers`() {
         val recovery = PlaybackRecovery()
-        assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(0, 3, refreshFirst = true))
-        assertEquals(PlaybackRecovery.Action.Source(1), recovery.failed(0, 3, refreshFirst = true))
-        assertEquals(PlaybackRecovery.Action.Source(2), recovery.failed(1, 3, refreshFirst = true))
-        assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(2, 3, refreshFirst = true))
+        assertEquals(PlaybackRecovery.Action.Source(1), recovery.failed(0, 3))
+        assertEquals(PlaybackRecovery.Action.Source(2), recovery.failed(1, 3))
+        assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(2, 3))
+        assertEquals(PlaybackRecovery.Action.Source(1), recovery.failed(0, 3))
+        assertEquals(PlaybackRecovery.Action.Source(2), recovery.failed(1, 3))
+        assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(2, 3))
     }
 
     @Test fun `remembered middle server wraps without skipping the first source`() {

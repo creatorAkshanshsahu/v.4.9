@@ -161,11 +161,28 @@ object TgProtocol {
                         break
                     }
                 }
+                // The deployed website groups all primary URLs under Server 1 and renumbers its
+                // advertised alternatives (an upstream "Server 3" can be the website's Server 2).
+                val siteUrls = node.optJSONArray("urls")
+                val siteServers = siteUrls != null && node.has("backups")
                 // Only traverse playback containers, not logo/EPG/watch links or unrelated channel objects.
                 for (key in children) {
                     val child = node.opt(key) ?: continue
                     val inherited = if (ownsSource && (key == "backups" || key == "servers")) Metadata() else meta
-                    collect(child, page, defaultType, inherited, out, seen, depth + 1)
+                    if (siteServers && key == "backups" && child is JSONArray) {
+                        val firstNumber = if ((siteUrls?.length() ?: 0) > 0) 2 else 1
+                        for (i in 0 until child.length()) {
+                            val first = out.size
+                            collect(child.opt(i), page, defaultType, inherited, out, seen, depth + 1)
+                            for (j in first until out.size) out[j] = out[j].copy(label = "Server ${firstNumber + i}")
+                        }
+                    } else {
+                        val first = out.size
+                        collect(child, page, defaultType, inherited, out, seen, depth + 1)
+                        if (siteServers && key == "urls") {
+                            for (j in first until out.size) out[j] = out[j].copy(label = "Server 1")
+                        }
+                    }
                 }
                 // Some deployments use server1/server2 or source1/source2 rather than an array.
                 node.keys().forEach { k -> if (k.matches(Regex("(?:server|source|url)\\d+"))) collect(node.opt(k), page, defaultType, meta, out, seen, depth + 1) }

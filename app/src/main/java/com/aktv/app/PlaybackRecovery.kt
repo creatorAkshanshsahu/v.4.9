@@ -1,6 +1,8 @@
 package com.aktv.app
 
-/** One attempt per native source, plus one fresh configuration. Reset only on user action or stable playback. */
+/** Match the website: try the next server on failure, including 401/403, before reloading metadata.
+ * One attempt per native source, plus one fresh configuration. Reset only on user action or stable playback.
+ */
 internal class PlaybackRecovery {
     sealed class Action {
         data class Source(val index: Int) : Action()
@@ -12,9 +14,8 @@ internal class PlaybackRecovery {
 
     fun reset() { failed.clear(); refreshed = false }
 
-    fun failed(index: Int, count: Int, refreshFirst: Boolean = false): Action {
+    fun failed(index: Int, count: Int): Action {
         if (index in 0 until count) failed.add(index)
-        if (refreshFirst && !refreshed) return refresh()
         for (step in 1..count) {
             val next = (index + step) % count
             if (next !in failed) return Action.Source(next)

@@ -151,4 +151,22 @@ class TgProtocolTest {
     @Test fun `invalid ClearKey is reported without attempting to hex decode arbitrary text`() {
         assertNull(ClearKey.license(JSONObject("""{"type":"clearkey","keyId":"bad","key":"also bad"}""")))
     }
+
+    @Test fun `deployed flat config keeps URL alternatives together then renumbers advertised servers`() {
+        val streams = parse("""{"urls":["https://media.example/first.mpd","https://media.example/second.mpd"],
+            "cookie":"__hdnea__=primary", "headers":{"Authorization":"primary-only"},
+            "backups":[{"label":"Server 3","urls":["https://relay.example/third.mpd"],"cookie":"__hdnea__=relay","clearKeys":{}}]}""")
+        assertEquals(listOf("https://media.example/first.mpd", "https://media.example/second.mpd", "https://relay.example/third.mpd"), streams.map { it.url })
+        assertEquals(listOf("Server 1", "Server 1", "Server 2"), streams.map { it.label })
+        assertEquals("__hdnea__=relay", streams[2].cookie)
+        assertTrue(streams[2].headers.isEmpty())
+        assertNull(streams[2].drm)
+    }
+
+    @Test fun `an empty primary list starts at the first advertised native server`() {
+        val streams = parse("""{"urls":[], "backups":[{"label":"Server 3","urls":["https://relay.example/live.m3u8"]}]}""")
+        assertEquals("Server 1", streams.single().label)
+        assertEquals("hls", streams.single().type)
+    }
+
 }

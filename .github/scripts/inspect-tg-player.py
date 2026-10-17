@@ -28,10 +28,10 @@ def flush():
     def order(item):
         title = item[0]
         return 0 if title == 'TG RPC' else 1 if title.startswith('TG player code') else 2 if title == 'TG page' else 3
-    text = '\n\n'.join(title + '\n' + body for title, body in sorted(REPORTS, key=order))[:48000]
-    for start in range(0, len(text), 6000):
-        data = text[start:start + 6000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-        print(f"::notice title=TG live inspection {start // 6000 + 1}::{data}", flush=True)
+    text = '\n\n'.join(title + '\n' + body for title, body in sorted(REPORTS, key=order))[:24000]
+    for start in range(0, len(text), 3000):
+        data = text[start:start + 3000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print(f"::notice title=TG live inspection {start // 3000 + 1}::{data}", flush=True)
 
 
 def get(url, rpc=False):
