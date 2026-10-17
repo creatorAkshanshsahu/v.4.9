@@ -61,10 +61,10 @@ internal object JjtvProtocol {
 
     fun urls(channel: JSONObject): List<String> = listOf("url", "url1", "url2", "url3")
         .mapNotNull { channel.opt(it) as? String }.filter { it.isNotBlank() }
-        .map { it.replaceFirst("bpk-tv//", "bpk-tv/") }.distinct()
+        .map { it.trim().replaceFirst("bpk-tv//", "bpk-tv/") }.distinct()
 
     fun isStarUrl(url: String): Boolean = try {
-        URI(url).host.orEmpty().equals("jiotvpllive.cdn.jio.com", ignoreCase = true)
+        URI(url.trim()).host.orEmpty().equals("jiotvpllive.cdn.jio.com", ignoreCase = true)
     } catch (_: Exception) { false }
 
     fun regularCookie(body: String?, fallback: Boolean = false): String {

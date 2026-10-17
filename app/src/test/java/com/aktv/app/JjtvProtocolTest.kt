@@ -75,6 +75,9 @@ class JjtvProtocolTest {
     @Test fun `missing Star cookie never falls back to the regular cookie or a stale signed URL`() {
         val sources = streams("""{"url":"https://jiotvpllive.cdn.jio.com/live.mpd?__hdnea__=old",$keyData}""", star = "")
         assertTrue(sources.isEmpty())
+        val spaced = streams("""{"url":"  https://jiotvpllive.cdn.jio.com/live.mpd  ",$keyData}""", star = "__hdnea__=only-star")
+        assertEquals("__hdnea__=only-star", spaced.single().cookie)
+        assertEquals("https://jiotvpllive.cdn.jio.com/live.mpd", spaced.single().url)
     }
 
     @Test fun `regular sources can use a fallback cookie or no cookie but do not duplicate rounds`() {
