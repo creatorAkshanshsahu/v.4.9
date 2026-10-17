@@ -1,5 +1,7 @@
 package com.aktv.app
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
 /** The subset of browser Fetch behavior needed by the observed no-referrer JJTV metadata requests. */
 internal class MetadataFetch(val url: String, val headers: Map<String, String>, val documentOrigin: String, val cors: Boolean)
 
@@ -21,6 +23,13 @@ internal object JjtvMetadataRequests {
  */
 internal class FetchOrigin(documentOrigin: String, initialUrl: String, private val cors: Boolean = true) {
     private val document = StreamRequestPolicy.originOf(documentOrigin)
+    // originOf deliberately includes the effective port for comparisons. HTTP Origin serialization
+    // must instead omit a default :443/:80, as real browser headers do.
+    private val serializedDocument = documentOrigin.toHttpUrlOrNull()?.let { url ->
+        val host = if (url.host.contains(':')) "[${url.host}]" else url.host
+        val port = if ((url.scheme == "https" && url.port == 443) || (url.scheme == "http" && url.port == 80)) "" else ":${url.port}"
+        "${url.scheme}://$host$port"
+    }
     private var previous = StreamRequestPolicy.originOf(initialUrl)
     private var tainted = false
     fun visit(url: String): String? {
@@ -28,10 +37,10 @@ internal class FetchOrigin(documentOrigin: String, initialUrl: String, private v
         if (previous != document && destination != previous) tainted = true
         previous = destination
         return when {
-            !cors || document.isBlank() -> null
+            !cors || serializedDocument == null -> null
             tainted -> "null"
             destination == document -> null
-            else -> document
+            else -> serializedDocument
         }
     }
 }

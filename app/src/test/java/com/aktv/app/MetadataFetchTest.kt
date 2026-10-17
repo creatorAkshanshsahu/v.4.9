@@ -69,4 +69,11 @@ class MetadataFetchTest {
             assertFalse(response.reply.toString().contains("synthetic-private-value"))
         }
     }
+    @Test fun `Origin header omits default ports but comparison still treats them as the same origin`() {
+        val origin = FetchOrigin("$site:443", "$site/catalogue")
+        assertNull(origin.visit("$site/catalogue"))
+        assertEquals(site, origin.visit("https://tokens.example/data"))
+        assertNull(FetchOrigin("not a URL", "https://tokens.example/data").visit("https://tokens.example/data"))
+    }
+
 }
