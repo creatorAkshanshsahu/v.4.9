@@ -65,12 +65,30 @@ function publicHttps(raw) {
   } catch { return false; }
 }
 
-/** Inspect at most 4 KiB, then close the connection. Never buffer or save a complete movie. */
-function probeBytes(raw, originalHeaders, redirects = 0) {
+function manifestSummary(text, format) {
+  if (format === 'dash') return {
+    dashDocument: /<(?:[a-z0-9_]+:)?MPD(?:\s|>)/i.test(text),
+    completeDocument: /<\/(?:[a-z0-9_]+:)?MPD\s*>/i.test(text),
+    contentProtectionPresent: /\bContentProtection\b/.test(text),
+    segmentBase: /\bSegmentBase\b/.test(text), segmentTemplate: /\bSegmentTemplate\b/.test(text),
+    codecs: [...new Set([...text.matchAll(/\bcodecs=["']([a-z0-9,._ -]{1,120})["']/gi)].flatMap(match => match[1].split(',').map(value => value.trim())))].slice(0, 12),
+    representationCount: (text.match(/<(?:[a-z0-9_]+:)?Representation(?:\s|>)/gi) || []).length
+  };
+  if (format === 'hls') return {
+    hlsDocument: text.trimStart().startsWith('#EXTM3U'), master: text.includes('#EXT-X-STREAM-INF:'),
+    encryptionMethods: [...new Set([...text.matchAll(/#EXT-X-KEY:[^\n]*METHOD=([A-Z0-9-]+)/g)].map(match => match[1]))],
+    variantCount: (text.match(/#EXT-X-STREAM-INF:/g) || []).length
+  };
+  return null;
+}
+
+/** Bounded container/manifest read, then close. No movie or licence body is saved or emitted. */
+function probeBytes(raw, originalHeaders, redirects = 0, format = '') {
+  const maxBytes = ['dash', 'hls'].includes(format) ? 128 * 1024 : 4096;
   if (!publicHttps(raw)) return Promise.resolve({ error: 'non-public-or-insecure-url' });
   const headers = Object.fromEntries(Object.entries(originalHeaders).filter(([name]) =>
     !['host', 'connection', 'content-length', 'accept-encoding', 'range'].includes(name.toLowerCase())));
-  headers.range = 'bytes=0-4095';
+  headers.range = `bytes=0-${maxBytes - 1}`;
   return new Promise(resolve => {
     let completed = false;
     const finish = result => { if (!completed) { completed = true; resolve(result); } };
@@ -86,19 +104,21 @@ function probeBytes(raw, originalHeaders, redirects = 0) {
           if (nextHeaders.origin) nextHeaders.origin = 'null';
         }
         response.destroy();
-        probeBytes(next.href, nextHeaders, redirects + 1).then(result => finish({ ...result, redirected: true })).catch(() => finish({ error: 'redirect-failed' }));
+        probeBytes(next.href, nextHeaders, redirects + 1, format).then(result => finish({ ...result, redirected: true })).catch(() => finish({ error: 'redirect-failed' }));
         return;
       }
       let bytesRead = 0, sample = Buffer.alloc(0);
       const result = () => ({ status, type: String(response.headers['content-type'] || '').split(';')[0],
-        finalUrl: safeUrl(raw), partialContent: status === 206 || !!response.headers['content-range'], bytesRead,
+        finalUrl: safeUrl(raw), partialContent: status === 206 || !!response.headers['content-range'], bytesRead, maxBytes,
         mp4Header: sample.length >= 12 && sample.toString('ascii', 4, 8) === 'ftyp',
-        hlsHeader: sample.toString('utf8').trimStart().startsWith('#EXTM3U') });
+        hlsHeader: sample.toString('utf8').trimStart().startsWith('#EXTM3U'),
+        manifest: manifestSummary(sample.toString('utf8'), format) });
       response.on('data', data => {
-        const part = data.subarray(0, Math.max(0, 4096 - bytesRead));
-        if (sample.length < 32) sample = Buffer.concat([sample, part.subarray(0, 32 - sample.length)]);
+        const part = data.subarray(0, Math.max(0, maxBytes - bytesRead));
+        const sampleLimit = format === 'dash' || format === 'hls' ? maxBytes : 32;
+        if (sample.length < sampleLimit) sample = Buffer.concat([sample, part.subarray(0, sampleLimit - sample.length)]);
         bytesRead += part.length;
-        if (bytesRead >= 4096) { finish(result()); response.destroy(); request.destroy(); }
+        if (bytesRead >= maxBytes) { finish(result()); response.destroy(); request.destroy(); }
       });
       response.on('end', () => finish(result()));
       response.on('error', () => finish({ ...result(), interrupted: true }));
@@ -257,7 +277,7 @@ function sourceApiUrl(server, sample) {
   }
   return SITE + '/api/sources?' + query;
 }
-async function inspectSourceApi(server, sample) {
+async function inspectSourceApi(server, sample, details = false) {
   const url = sourceApiUrl(server, sample), started = Date.now();
   const report = { server, sample: sample.name, url: safeUrl(url), playbackTested: false,
     requestCookiePresent: false, requestAuthorizationPresent: false };
@@ -288,14 +308,16 @@ async function inspectSourceApi(server, sample) {
       hevc: source.hevc === true,
       url: typeof source.url === 'string' ? safeUrl(new URL(source.url, SITE).href) : 'missing'
     }));
-    const source = sources.find(value => typeof value.url === 'string' && publicHttps(new URL(value.url, SITE).href));
-    if (source) {
+    const candidates = sources.filter(value => typeof value.url === 'string' && publicHttps(new URL(value.url, SITE).href));
+    const selected = details ? ['dash', 'hls', 'mp4'].map(format => candidates.find(source => source.type === format)).filter(Boolean) : candidates.slice(0, 1);
+    report.sourceProbes = [];
+    for (const source of selected) {
       const headers = {};
       for (const [name, value] of Object.entries(source.headers || {}))
         if (/^(?:origin|referer|user-agent|authorization|cookie)$/i.test(name) && typeof value === 'string') headers[name.toLowerCase()] = value;
-      report.rawSourceProbe = await probeBytes(new URL(source.url, SITE).href, headers);
-      report.rawSourceProbe.headerNames = Object.keys(headers);
-      report.rawSourceProbe.scope = 'first returned URL, at most 4096 body bytes; not decoded playback';
+      const probe = await probeBytes(new URL(source.url, SITE).href, headers, 0, details ? source.type : '');
+      report.sourceProbes.push({ ...probe, sourceType: /^(?:dash|hls|mp4)$/.test(source.type) ? source.type : 'other',
+        headerNames: Object.keys(headers), scope: 'first URL per selected format; bounded body read, not decoded playback' });
     }
     report.errorPresent = !!body.error;
     return report;
@@ -311,17 +333,19 @@ function emitReports(reports) {
   }
 }
 async function inspectApi() {
+  const details = process.argv.includes('--details');
   const samples = [
     { name: 'movie-1288069', type: 'movie', id: 1288069 },
     { name: 'episode-213562-S1E1', type: 'tv', id: 213562, season: 1, episode: 1 },
     { name: 'movie-253412', type: 'movie', id: 253412 }
   ];
   // One request at a time. No retry, proxy or alternate identity on access/rate-limit responses.
-  for (const sample of samples) {
-    const result = await inspectSourceApi('tgflix', sample);
+  for (const sample of (details ? samples.slice(0, 2) : samples)) {
+    const result = await inspectSourceApi('tgflix', sample, details);
     emitReports(['FROST_SOURCE_API ' + JSON.stringify(result) + '\n']);
     if ([401, 403, 429].includes(result.status)) return;
   }
+  if (details) return;
   for (const sample of [samples[2], samples[1]]) {
     const result = await inspectSourceApi('tgout', sample);
     emitReports(['FROST_SOURCE_API ' + JSON.stringify(result) + '\n']);
@@ -351,7 +375,7 @@ async function main() {
     emitReports(reports);
   } finally { await browser.close(); }
 }
-module.exports = { safeUrl, redactCode, sourceShape, publicHttps, sourceApiUrl };
+module.exports = { safeUrl, redactCode, sourceShape, publicHttps, sourceApiUrl, manifestSummary };
 if (require.main === module) (process.argv.includes('--api') ? inspectApi() : main()).catch(error => {
   console.log(`::warning title=TG Frost inspection unavailable::${error.name || 'ProbeError'}; native playback feasibility was not established.`);
   process.exitCode = 1;

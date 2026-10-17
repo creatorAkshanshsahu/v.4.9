@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { safeUrl, redactCode, sourceShape, publicHttps, sourceApiUrl } = require('./inspect-tgfrost-player.cjs');
+const { safeUrl, redactCode, sourceShape, publicHttps, sourceApiUrl, manifestSummary } = require('./inspect-tgfrost-player.cjs');
 
 const secret = 'synthetic-secret-not-a-real-token';
 
@@ -102,4 +102,26 @@ test('source API guard does not invent a native TG BOLT contract or accept inval
     assert.throws(() => sourceApiUrl('tgflix', sample));
   }
   assert.throws(() => sourceApiUrl('tgbolt', { type: 'movie', id: 253412 }));
+});
+
+
+test('DASH summary distinguishes complete metadata and protection without disclosing IDs', () => {
+  const text = `<MPD><Period><AdaptationSet><ContentProtection cenc:default_KID="${secret}"/><Representation codecs="avc1.640028,mp4a.40.2"><BaseURL>https://media.example.test/${secret}</BaseURL><SegmentBase indexRange="100-200"/></Representation></AdaptationSet></Period></MPD>`;
+  const summary = manifestSummary(text, 'dash');
+  assert.equal(summary.dashDocument, true);
+  assert.equal(summary.completeDocument, true);
+  assert.equal(summary.contentProtectionPresent, true);
+  assert.equal(summary.segmentBase, true);
+  assert.deepEqual(summary.codecs, ['avc1.640028', 'mp4a.40.2']);
+  assert.equal(summary.representationCount, 1);
+  assert.ok(!JSON.stringify(summary).includes(secret));
+  assert.equal(manifestSummary('<MPD><Period>', 'dash').completeDocument, false);
+  assert.equal(manifestSummary('<html>Not a manifest</html>', 'dash').dashDocument, false);
+});
+
+test('HLS summaries identify encryption method without saving key or segment URLs', () => {
+  const summary = manifestSummary(`#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="https://keys.example.test/${secret}"\n#EXTINF:6,\nhttps://media.example.test/${secret}`, 'hls');
+  assert.equal(summary.hlsDocument, true);
+  assert.deepEqual(summary.encryptionMethods, ['AES-128']);
+  assert.ok(!JSON.stringify(summary).includes(secret));
 });

@@ -21,4 +21,4 @@ jobs:
       - name: Inspect the movie source API without saving credentials or media
         timeout-minutes: 4
         run: |
-          node .github/scripts/inspect-tgfrost-player.cjs --api
+          node .github/scripts/inspect-tgfrost-player.cjs --api --details
