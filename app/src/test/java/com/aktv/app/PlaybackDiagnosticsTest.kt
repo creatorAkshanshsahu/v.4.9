@@ -108,4 +108,42 @@ class PlaybackDiagnosticsTest {
         attempt.audioStarted()
         assertTrue(attempt.report().contains("first video frame: false; audio position advanced: true"))
     }
+    @Test fun `a missing manifest or waiting DRM session must not trigger a decoder retry`() {
+        val attempt = begin()
+        assertFalse(attempt.canRetryDecoder())
+        attempt.loaded(PlaybackDiagnostics.Load.MANIFEST, 1024)
+        attempt.tracks(1, 1, 0, 0)
+        attempt.drmStep(PlaybackDiagnostics.DrmStep.SESSION_OPEN)
+        assertFalse(attempt.canRetryDecoder())
+        attempt.drmStep(PlaybackDiagnostics.DrmStep.KEY_RESPONSE)
+        assertFalse(attempt.canRetryDecoder())
+        attempt.drmStep(PlaybackDiagnostics.DrmStep.KEYS_LOADED)
+        assertTrue(attempt.canRetryDecoder())
+    }
+
+    @Test fun `unencrypted selected video can retry a decoder but encrypted video without configured DRM cannot`() {
+        val attempt = begin(drm = PlaybackDiagnostics.Drm.NONE)
+        attempt.tracks(1, 1, 0, 0)
+        assertTrue(attempt.canRetryDecoder())
+        attempt.format(true, "video/avc", 1280, 720, scheme = "cenc")
+        assertFalse(attempt.canRetryDecoder())
+    }
+
+    @Test fun `an initialized decoder that produces no picture can retry regardless of callback order`() {
+        val attempt = begin()
+        attempt.decoder(true, "OMX.vendor.avc.decoder")
+        assertTrue(attempt.canRetryDecoder())
+    }
+
+    @Test fun `a pending JJTV lookup must not be reported as the previous TG player attempt`() {
+        val log = PlaybackDiagnostics()
+        log.begin(PlaybackDiagnostics.Provider.TG, PlaybackDiagnostics.Media.DASH, PlaybackDiagnostics.Drm.NONE, false, false).timeout()
+        log.resolving(PlaybackDiagnostics.Provider.JJTV)
+        assertTrue(log.summary().startsWith("Resolving JJTV"))
+        log.metadataFailed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.HTTP, http = 403))
+        assertTrue(log.summary().contains("JJTV lookup: HTTP 403"))
+        begin(log)
+        assertFalse(log.summary().contains("lookup"))
+    }
+
 }

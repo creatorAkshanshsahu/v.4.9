@@ -3,6 +3,8 @@ package com.aktv.app
 import org.json.JSONObject
 import java.io.IOException
 
+internal class JjtvHttpException(val status: Int) : IOException("JJTV metadata HTTP $status")
+
 /** Fresh JJTV-owned URLs, keys and cookies for the same V1/Jio channel ID. Never a web-player fallback. */
 internal class JjtvResolver(
     private val http: TgTransport = TgHttp(),
@@ -107,7 +109,7 @@ internal class JjtvResolver(
             "Cache-Control" to "no-cache, no-store", "Pragma" to "no-cache"
         ))
         checkInterrupted()
-        if (response.code !in 200..299) throw IOException("JJTV request failed (HTTP ${response.code})")
+        if (response.code !in 200..299) throw JjtvHttpException(response.code)
         require(response.body.size <= TgProtocol.MAX_BODY) { "JJTV response too large" }
         return response.body.toString(Charsets.UTF_8)
     }

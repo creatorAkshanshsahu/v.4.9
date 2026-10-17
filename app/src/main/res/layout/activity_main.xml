@@ -252,7 +252,7 @@
         <ProgressBar android:id="@+id/spinner" android:layout_width="56dp" android:layout_height="56dp"
             android:layout_gravity="center" android:indeterminateTint="@color/ion"/>
         <TextView android:id="@+id/playStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_gravity="center" android:layout_marginTop="124dp" android:textColor="@color/text_dim"
+            android:layout_gravity="top|center_horizontal" android:layout_marginTop="28dp" android:textColor="@color/text_dim"
             android:gravity="center" android:maxWidth="700dp" android:paddingStart="24dp" android:paddingEnd="24dp"
             android:textSize="14sp" android:visibility="gone"/>
     </FrameLayout>

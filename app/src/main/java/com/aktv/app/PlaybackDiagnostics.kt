@@ -23,17 +23,24 @@ internal class PlaybackDiagnostics {
     private val attempts = ArrayDeque<Attempt>()
     private var sequence = 0
     private var metadataProblem: Problem? = null
+    private var resolvingProvider: Provider? = null
+    private var resolvingProblem: Problem? = null
+    @Synchronized fun resolving(provider: Provider) { resolvingProvider = provider; resolvingProblem = null }
     @Synchronized fun begin(provider: Provider, media: Media, drm: Drm, browserStyle: Boolean, compatible: Boolean): Attempt {
+        resolvingProvider = null; resolvingProblem = null
         val attempt = Attempt(++sequence, provider, media, drm, browserStyle, compatible)
         if (attempts.size == 12) attempts.removeFirst()
         attempts.addLast(attempt)
         return attempt
     }
-    @Synchronized fun metadataFailed(problem: Problem) { metadataProblem = problem }
+    @Synchronized fun metadataFailed(problem: Problem) { metadataProblem = problem; resolvingProblem = problem }
     @Synchronized fun hasClearKey() = attempts.any { it.drm == Drm.CLEARKEY }
-    @Synchronized fun summary(): String = attempts.lastOrNull()?.summary()
+    @Synchronized fun summary(): String = resolvingProvider?.let { provider ->
+        resolvingProblem?.let { "$provider lookup: ${it.describe()}" } ?: "Resolving $provider configuration (no player yet)"
+    } ?: attempts.lastOrNull()?.summary()
         ?: metadataProblem?.let { "Stream lookup: ${it.describe()}" } ?: "Waiting for stream configuration"
     @Synchronized fun report(): String = buildString {
+        if (resolvingProvider != null) append("Current work: ${summary()}\n\nPrevious player attempt:\n")
         append(attempts.lastOrNull()?.report() ?: summary())
         val failures = attempts.mapNotNull { it.failureLine() }.takeLast(5)
         if (failures.isNotEmpty()) append("\n\nRecent attempts (original errors retained):\n" + failures.joinToString("\n"))
@@ -96,6 +103,13 @@ internal class PlaybackDiagnostics {
             if (isVideo) video = "$name ${width.coerceIn(0, 16384)}x${height.coerceIn(0, 16384)}"
             else audio = "$name ${channels.coerceIn(0, 32)}ch"
         }
+        /** A missing picture is not necessarily a decoder fault. Downloads and keys must get a
+         * chance to complete before a software-decoder retry can help. Explicit codec errors are
+         * handled separately by the caller, even if initialization never completed.
+         */
+        @Synchronized fun canRetryDecoder(): Boolean = videoDecoder != "not initialized" ||
+            (selectedVideo > 0 && (step == DrmStep.KEYS_LOADED || (drm == Drm.NONE && schemes.isEmpty())))
+
         @Synchronized fun summary(): String = when {
             terminalProblem != null -> terminalProblem!!.describe()
             firstFrame -> "Media3 reported a video frame; visible picture still requires device verification"

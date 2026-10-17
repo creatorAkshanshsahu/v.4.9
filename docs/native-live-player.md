@@ -1,4 +1,22 @@
-# Native live TV (4.9.14)
+# Native live TV (4.9.15)
+
+## 4.9.15 — give JJTV a real startup opportunity on the box
+
+The supplied photos show working **JJTV / browser request** playback on the phone, while the box's timeout shows **Server 2** and **decoder: not initialized**. The phone example is Star Sports 1 Hindi HD; the box title appears to be the non-HD Hindi variant. Their channel IDs/keys are not interchangeable and are not remapped. The box reports the generic model AndroidTV and release 14; the user says the firmware is actually Android 9. The release string is not treated as proof of its underlying API or DRM implementation.
+
+A concrete scheduling defect was found: a global last-working-TG hint made unrelated untried channels start on TG; metadata lookup plus two 15-second no-picture attempts and an unnecessary same-source decoder retry could consume the 60-second total budget before JJTV was reached or its metadata completed. The old source label could also remain on screen while the next provider was resolving. The photos do not prove that JJTV was never attempted, nor that the box's DRM is broken, but this code path could starve it.
+
+- Untried V1 channels now start with **JJTV**, matching the native route visibly working on the phone. A provider that actually worked for that exact channel still takes precedence. An unrelated channel's TG success no longer changes this order. V2 remains TG-only.
+- Each provider gets at most **25 seconds including lookup and native startup**, within the existing 60-second whole-cycle deadline. Source/codec retries cannot renew that provider window. On expiry, that provider's pending lookup is invalidated and its current sources are retired, allowing the other provider and then the one bounded fresh pass. A rendered frame clears both startup timers.
+- A no-picture event does **not** trigger a software-decoder retry while no decoder has initialized and selected video is still waiting for keys. Explicit codec failures, or selected video with accepted keys, can still use the existing native compatibility retry. Crypto/DRM exceptions are not reclassified as decoder errors merely because they are wrapped in a generic playback error.
+- Decoder retry state and stable compatibility preferences are scoped to the provider as well as channel. A failed TG attempt must not force an untried JJTV stream into software mode. Old stable preferences migrate only to the provider that actually rendered that channel.
+- **MENU → Play JJTV now (native)** directly fetches JJTV for the same V1 channel without waiting for TG. TG and Automatic choices remain available. This changes the first provider, not the player engine; automatic fallback remains. Explicit choices are not saved as successful until a frame is reported.
+- Provider labels update immediately during lookup, distinguish TG explicitly, and cannot be overwritten by a late programme-guide callback. Error text sits above the channel card; the card is hidden on final failure to avoid the overlap visible in the photo.
+- Retain the 4.9.14 diagnostic report/self-test. Metadata HTTP errors retain numeric status without leaking exception messages. **MENU → Playback details**, INFO, or OK after failure opens the report; Check DRM remains an explicit local test, not a playback fix.
+
+New deterministic cases replay slow TG metadata / TG server 1 and 2 timeouts, verify that JJTV gets a turn before the global deadline, prevent decoder-mode carryover, check manual selection/V2 separation, and ensure waiting for DRM/downloads cannot trigger an ineffective software-codec retry. The existing resolver/header/key tests remain in place. No source keys, requests, cipher modes or security requirements have been weakened to compensate for a spoofed version string.
+
+**Device acceptance:** install 4.9.15, try the exact **Star Sports 1 Hindi HD** variant shown working on the phone, and use MENU → Play JJTV now if necessary. Confirm the source line says JJTV / browser request, then check picture/audio and sustained playback. Also test the SD variant and other affected channels separately. The scheduling defect is testable without the box; successful playback on this particular firmware remains unverified until the device test. If direct JJTV still fails, its native report—not a stale TG label—will identify the next failing stage.
 
 ## 4.9.14 — identify the Android 9 TV failure instead of guessing
 
@@ -69,11 +87,11 @@ These rules are implemented as native metadata resolution, not by opening either
 ## Native playback and automatic selection
 
 1. Keep exact catalogue IDs. V1/Jio and V2 IDs are different namespaces. **Never pass a V2 channel ID to JJTV.** The supplied JJTV example, 816, is Cartoon Network Hindi; Sony YAY Hindi remains 872.
-2. For a channel with no history, start with the last native provider that actually rendered video, or TG on a first installation. A channel's own successful provider takes precedence over that general hint. V2 always uses TG.
+2. For a V1 channel with no successful history, start with JJTV. A channel's own successful provider takes precedence; an explicit MENU source choice takes precedence for that tuning session. An unrelated channel's provider no longer changes this order. V2 always uses TG.
 3. Resolve current metadata from that provider. Try its native sources automatically in order, including after HTTP 401/403, a native playback/DRM error, or a startup/buffering watchdog timeout.
-4. Only if that list fails, load the other authorized provider's native configuration for the same V1 channel. Do not delay a working TG source while looking up JJTV. Do not mix one provider's keys or credentials into the other provider's stream object.
+4. If that list fails or the provider's 25-second lookup/startup window expires, load the other authorized provider's native configuration for the same V1 channel. Do not mix one provider's keys or credentials into the other provider's stream object.
 5. After all sources fail, perform one forced refresh of the configuration and credentials, then try one more bounded pass. Report an error rather than retrying indefinitely or opening an iframe.
-6. Remember a non-secret source fingerprint and provider only after a rendered frame, not merely `STATE_READY`. New channels can use the last working V1 provider without repeating failures from a known-unavailable provider. Previews also try subsequent native sources and respect channel/lifecycle generation guards.
+6. Remember a non-secret source fingerprint and provider only after a rendered frame, not merely `STATE_READY`. Remembering a working provider is channel-specific, not a global preference for unrelated channels. Previews also try subsequent native sources and respect channel/lifecycle generation guards.
 
 Both full-screen playback and muted previews use the same Media3/ExoPlayer media-source builder and HTTP policy. Hindi-named channels prefer Hindi audio during full-screen playback. The initial buffer threshold is 750 ms, but network, server and decoder startup still determine actual time to first picture; “instant” playback is not guaranteed.
 
@@ -115,7 +133,8 @@ Both full-screen playback and muted previews use the same Media3/ExoPlayer media
 | OK | Show information; switch resolved native source when information is visible and multiple sources exist |
 | Left | Next resolved source; reload if only one exists |
 | Hold OK | Fetch fresh player configuration and credentials |
-| Menu / Info; OK after a final error | Open native playback diagnostics and the optional local ClearKey self-test |
+| Menu | Choose JJTV / TG / Automatic native source, or open Playback details |
+| Info; OK after a final error | Open native playback diagnostics and the optional local ClearKey self-test |
 | Back | Close native playback |
 
 ## Verification and limits
@@ -141,7 +160,7 @@ This uses the **production** resolvers, protocol parsers and stream transport. T
 
 ### Device acceptance checklist — still required
 
-For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.14** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
+For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.15** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
 
 - Confirm video, the expected audio language and sustained playback for Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada; Sony YAY Hindi; and Cartoon Network Hindi 816.
 - Test a normal TG DASH channel, an HLS channel, a JJTV native source and a V2 channel. Verify that V2 never uses the Jio/JJTV namespace.

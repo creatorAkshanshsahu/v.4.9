@@ -103,6 +103,10 @@ class MainActivity : AppCompatActivity() {
     private var nativeProviders = listOf(LiveProvider.TG)
     private var nextNativeProvider = 1
     private var nativePassFresh = false
+    private var currentNativeProvider = LiveProvider.JJTV
+    private var requestedNativeProvider: Pair<String, LiveProvider>? = null
+    private val providerWindow = NativeProviderWindow()
+    private val decoderRetries = NativeDecoderRetries()
     private val recovery = PlaybackRecovery()
     private var okLong = false
     private var renderedFrame = false
@@ -115,10 +119,11 @@ class MainActivity : AppCompatActivity() {
     private var diagnostics = PlaybackDiagnostics()
     private var activeAttempt: PlaybackDiagnostics.Attempt? = null
     private var diagnosticsDialog: AlertDialog? = null
+    private var sourceMenu: AlertDialog? = null
     private var diagnosticsText: TextView? = null
     private val drmProbeIo = Executors.newSingleThreadExecutor()
     private var drmProbeRunning = false
-    private var drmProbeStatus = "ClearKey self-test: not run (MENU > Check DRM)."
+    private var drmProbeStatus = "ClearKey self-test: not run (MENU > Playback details > Check DRM)."
     private val appVersion by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" }
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
@@ -803,12 +808,12 @@ class MainActivity : AppCompatActivity() {
     }
     private fun fillInfoGuide(g: Guide?) {
         val n = g?.now
-        if (n == null) { infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE; infoNext.visibility = View.GONE; return }
+        if (n == null) { infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE; return }
         infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
         infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
         infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
-        val nx = g.next
-        if (nx != null) { infoNext.text = progLine("NEXT", nx); infoNext.visibility = View.VISIBLE } else infoNext.visibility = View.GONE
+        // infoNext belongs to native source selection. A late EPG callback must not replace or hide
+        // the active provider label while a different provider is resolving.
     }
     private fun playMsg(msg: String?) {
         if (msg == null) playStatus.visibility = View.GONE else { playStatus.text = msg; playStatus.visibility = View.VISIBLE }
@@ -820,6 +825,7 @@ class MainActivity : AppCompatActivity() {
         if (shown.isEmpty()) return
         if (drmProbeRunning) { playMsg("The local DRM check is still running. Please wait, or restart the app if the system service is stuck."); return }
         current = (index + shown.size) % shown.size
+        requestedNativeProvider = null
         val ch = shown[current]
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
         nativeSources = emptyList(); serverIdx = 0
@@ -836,8 +842,11 @@ class MainActivity : AppCompatActivity() {
         nativeSources = emptyList(); serverIdx = 0
         nativeProviders = providerOrder(ch); nextNativeProvider = 1; nativePassFresh = fresh
         val provider = nativeProviders.first()
+        enterNativeProvider(ch, provider)
         releasePlayer(); spinner.visibility = View.VISIBLE
-        playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Finding a working server…")
+        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        infoNext.visibility = View.VISIBLE
+        playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Connecting to ${providerName(provider)}…")
         resolveJob = playbackIo.submit {
             try {
                 val sources = TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)
@@ -861,22 +870,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun providerOrder(ch: Channel) = LiveProviders.order(ch.v2, prefs.getString("source_provider_${ch.key}", null),
-        prefs.getString("last_native_v1_provider", null))
+        requestedNativeProvider?.takeIf { it.first == ch.key }?.second)
+    private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(
+        "native_compat_${ch.key}_${provider.name}",
+        prefs.getString("source_provider_${ch.key}", null) == provider.website && prefs.getBoolean("native_compat_${ch.key}", false))
+    private fun enterNativeProvider(ch: Channel, provider: LiveProvider) {
+        currentNativeProvider = provider
+        diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
+        compatiblePlayback = savedCompatibility(ch, provider) || decoderRetries.used(provider)
+        providerWindow.enter(SystemClock.elapsedRealtime())
+    }
     private fun providerName(provider: LiveProvider) = if (provider == LiveProvider.TG) "TG TV" else "JJTV"
     private fun sourceKey(source: TgStream) = LiveProviders.sourceKey(source)
     private fun rememberNativeSource(ch: Channel, source: TgStream) {
         prefs.edit().putString("source_${ch.key}", sourceKey(source))
-            .putString("source_provider_${ch.key}", source.requestOrigin)
-            .apply { if (!ch.v2) putString("last_native_v1_provider", source.requestOrigin) }.apply()
+            .putString("source_provider_${ch.key}", source.requestOrigin).apply()
     }
 
     /** Load another advertised native source only after the current list fails. Keep one player engine. */
     private fun loadMoreNative(ch: Channel, fresh: Boolean, reason: String) {
         val providerIndex = nextNativeProvider
         val provider = nativeProviders.getOrNull(providerIndex) ?: run { advanceNative(reason); return }
+        nextNativeProvider = providerIndex + 1
+        enterNativeProvider(ch, provider)
         val token = ++playToken
         resolveJob?.cancel(true)
         spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        infoNext.visibility = View.VISIBLE
         playMsg("Automatically trying ${providerName(provider)} native streams…")
         resolveJob = playbackIo.submit {
             var failureReason = reason
@@ -887,7 +908,6 @@ class MainActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
-                nextNativeProvider = providerIndex + 1
                 if (extra.isEmpty()) advanceNative(failureReason)
                 else {
                     val first = nativeSources.size
@@ -942,7 +962,8 @@ class MainActivity : AppCompatActivity() {
     private fun startNative() {
         val source = nativeSources.getOrNull(serverIdx) ?: return
         spinner.visibility = View.VISIBLE
-        infoNext.text = "Auto · ${source.label} · ${serverIdx + 1} of ${nativeSources.size}" +
+        val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG) "TG TV · ${source.label}" else source.label
+        infoNext.text = "Auto · $sourceLabel · ${serverIdx + 1} of ${nativeSources.size}" +
             if (nativeSources.size > 1) "   ·   OK switches server" else ""
         infoNext.visibility = View.VISIBLE
         val trace = diagnostics.begin(
@@ -996,8 +1017,8 @@ class MainActivity : AppCompatActivity() {
                     activeAttempt?.surfaceReady()
                     try { owner.prepare() } catch (error: Exception) {
                         activeAttempt?.failed(PlaybackProblems.from(error))
-                        if (player === owner && !retryCompatibleDecoder("The TV could not start its video decoder"))
-                            advanceNative("The native video decoder could not be started")
+                        if (player === owner && !(PlaybackProblems.from(error).family == PlaybackDiagnostics.Family.DECODER &&
+                            retryCompatibleDecoder("The TV could not start its video decoder"))) advanceNative("The native video decoder could not be started")
                     }
                 }
             )
@@ -1019,7 +1040,7 @@ class MainActivity : AppCompatActivity() {
                 Player.STATE_READY -> {
                     if (renderedFrame || !expectsVideo()) {
                         spinner.visibility = View.GONE; playMsg(null)
-                        if (!expectsVideo()) startupBudget.rendered()
+                        if (!expectsVideo()) { startupBudget.rendered(); providerWindow.rendered() }
                     } else {
                         spinner.visibility = View.VISIBLE
                         playMsg("Stream connected — waiting for the first picture…")
@@ -1034,7 +1055,7 @@ class MainActivity : AppCompatActivity() {
             renderedFrame = true
             trace.frameRendered()
             playbackHealth?.firstFrame(SystemClock.elapsedRealtime())
-            startupBudget.rendered()
+            startupBudget.rendered(); providerWindow.rendered()
             if (owner.playbackState == Player.STATE_READY) { spinner.visibility = View.GONE; playMsg(null) }
             val ch = shown.getOrNull(current) ?: return
             nativeSources.getOrNull(serverIdx)?.let { rememberNativeSource(ch, it) }
@@ -1051,7 +1072,8 @@ class MainActivity : AppCompatActivity() {
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
                 else -> "The live stream stopped responding (code ${error.errorCode})"
             }
-            if (code == null && error.errorCode in 4000..4999 && retryCompatibleDecoder(message)) return
+            if (code == null && PlaybackProblems.from(error, error.errorCode).family == PlaybackDiagnostics.Family.DECODER &&
+                retryCompatibleDecoder(message)) return
             advanceNative(message)
         }
     }
@@ -1069,14 +1091,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
-        diagnostics = PlaybackDiagnostics()
-        compatiblePlayback = prefs.getBoolean("native_compat_${ch.key}", false)
+        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); providerWindow.clear()
+        compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
     }
 
     private fun endNativeSession() {
-        playbackActive = false; startupBudget.clear(); ui.removeCallbacks(nativeHealthCheck)
+        playbackActive = false; startupBudget.clear(); providerWindow.clear(); ui.removeCallbacks(nativeHealthCheck)
     }
 
     private val nativeHealthCheck = object : Runnable {
@@ -1086,6 +1108,13 @@ class MainActivity : AppCompatActivity() {
             if (startupBudget.expired(now)) {
                 activeAttempt?.timeout()
                 fail("No playable picture within 60 seconds. Hold OK to retry.")
+                return
+            }
+            if (providerWindow.expired(now)) {
+                activeAttempt?.timeout()
+                recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == currentNativeProvider })
+                advanceNative("${providerName(currentNativeProvider)} did not start within its 25-second turn")
+                if (playbackActive) ui.postDelayed(this, 500)
                 return
             }
             val p = player
@@ -1101,15 +1130,15 @@ class MainActivity : AppCompatActivity() {
                 if (result.failure != null) activeAttempt?.timeout()
                 when (result.failure) {
                     PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
-                        val reason = if (surfaceWait != null) "The TV video surface is not ready" else "The decoder did not produce a picture"
-                        if (!retryCompatibleDecoder(reason)) advanceNative(reason)
+                        val reason = if (surfaceWait != null) "The TV video surface is not ready" else "No picture from ${providerName(currentNativeProvider)}"
+                        if (activeAttempt?.canRetryDecoder() != true || !retryCompatibleDecoder(reason)) advanceNative(reason)
                     }
                     PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
                         advanceNative("The live stream stopped responding")
                     null -> if (result.stable) {
                         recovery.reset()
                         shown.getOrNull(current)?.let { ch ->
-                            prefs.edit().putBoolean("native_compat_${ch.key}", compatiblePlayback).apply()
+                            prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
                     }
                 }
@@ -1125,7 +1154,8 @@ class MainActivity : AppCompatActivity() {
     private fun retryCompatibleDecoder(reason: String): Boolean {
         if (compatiblePlayback || !expectsVideo() || nativeSources.getOrNull(serverIdx) == null ||
             startupBudget.expired(SystemClock.elapsedRealtime())) return false
-        compatiblePlayback = true
+        compatiblePlayback = true; decoderRetries.mark(currentNativeProvider)
+        providerWindow.recover(SystemClock.elapsedRealtime())
         startupBudget.recover(SystemClock.elapsedRealtime())
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
@@ -1138,11 +1168,14 @@ class MainActivity : AppCompatActivity() {
     private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
         startupBudget.recover(SystemClock.elapsedRealtime())
+        providerWindow.recover(SystemClock.elapsedRealtime())
         releasePlayer()
         if (startupBudget.expired(SystemClock.elapsedRealtime())) { fail("No playable picture within 60 seconds. Hold OK to retry."); return }
         when (val action = recovery.failed(serverIdx, nativeSources.size, canLoadMore = nextNativeProvider < nativeProviders.size)) {
             is PlaybackRecovery.Action.Source -> {
                 serverIdx = action.index
+                val provider = LiveProviders.provider(nativeSources[serverIdx])
+                if (provider != currentNativeProvider) enterNativeProvider(ch, provider)
                 playMsg("Automatically trying ${nativeSources[serverIdx].label}…")
                 val token = playToken
                 ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
@@ -1164,6 +1197,7 @@ class MainActivity : AppCompatActivity() {
         shown.getOrNull(current)?.let { beginNativeSession(it) }
         releasePlayer()
         serverIdx = (serverIdx + 1) % nativeSources.size
+        shown.getOrNull(current)?.let { enterNativeProvider(it, LiveProviders.provider(nativeSources[serverIdx])) }
         playMsg("Switching to ${nativeSources[serverIdx].label}…")
         startNative()
     }
@@ -1173,6 +1207,31 @@ class MainActivity : AppCompatActivity() {
         if (drmProbeRunning) { showPlaybackDetails(); return }
         val ch = shown.getOrNull(current) ?: return
         recovery.reset(); beginNativeSession(ch); TgServers.invalidate(ch.id, ch.v2)
+        resolveAndStart(ch, fresh = true)
+    }
+
+    private fun showNativeSourceMenu() {
+        val ch = shown.getOrNull(current) ?: return
+        if (sourceMenu?.isShowing == true) return
+        val choices = ArrayList<Pair<String, () -> Unit>>()
+        choices.add("Automatic native source" to { selectNativeProvider(null) })
+        if (!ch.v2) choices.add("Play JJTV now (native)" to { selectNativeProvider(LiveProvider.JJTV) })
+        choices.add("Play TG TV now (native)" to { selectNativeProvider(LiveProvider.TG) })
+        choices.add("Playback details" to { showPlaybackDetails() })
+        val dialog = AlertDialog.Builder(this).setTitle("Native stream source")
+            .setItems(choices.map { it.first }.toTypedArray()) { _, index -> choices[index].second() }
+            .setNegativeButton("Close", null).create()
+        sourceMenu = dialog
+        dialog.setOnDismissListener { if (sourceMenu === dialog) sourceMenu = null }
+        dialog.show()
+    }
+
+    private fun selectNativeProvider(provider: LiveProvider?) {
+        val ch = shown.getOrNull(current) ?: return
+        if (drmProbeRunning) { showPlaybackDetails(); return }
+        if (ch.v2 && provider == LiveProvider.JJTV) return
+        requestedNativeProvider = provider?.let { ch.key to it }
+        recovery.reset(); beginNativeSession(ch)
         resolveAndStart(ch, fresh = true)
     }
 
@@ -1247,8 +1306,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun fail(message: String) {
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
-        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} · ${Build.MODEL.take(48)}\nPress OK / MENU for playback details; hold OK to retry.")
-        showInfo()
+        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        ui.removeCallbacks(hideInfo); hideInfo.run()
     }
 
     private fun releasePlayer() {
@@ -1259,6 +1318,7 @@ class MainActivity : AppCompatActivity() {
         old?.removeAnalyticsListener(dropWatcher); old?.release()
     }
     private fun closePlayer() {
+        sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null)
         releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
@@ -1288,7 +1348,8 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
-            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> { showPlaybackDetails(); return true }
+            KeyEvent.KEYCODE_MENU -> { showNativeSourceMenu(); return true }
+            KeyEvent.KEYCODE_INFO -> { showPlaybackDetails(); return true }
             KeyEvent.KEYCODE_DPAD_LEFT -> { switchServer(); return true }
         }
         // Back from a lower row goes back to the top of the page (the hero row) first; Back again leaves the app.
@@ -1364,6 +1425,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null); resolveJob?.cancel(true); previewJob?.cancel(true)
+        sourceMenu?.dismiss(); sourceMenu = null
         diagnosticsDialog?.dismiss(); diagnosticsDialog = null; diagnosticsText = null
         playbackIo.shutdownNow(); io.shutdownNow(); drmProbeIo.shutdownNow()
         super.onDestroy()
@@ -1769,7 +1831,7 @@ class MainActivity : AppCompatActivity() {
             ui.post { if (previewIsCurrent(ch, token)) playPreview(sources, index + 1, ch, token, providers, providerIndex) }
         }
         try {
-            val profile = NativePlaybackPolicy.profile(television, lowEnd, prefs.getBoolean("native_compat_${ch.key}", false), 720)
+            val profile = NativePlaybackPolicy.profile(television, lowEnd, savedCompatibility(ch, LiveProviders.provider(source)), 720)
             val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
                 .setLoadControl(NativePlaybackPolicy.buffers(profile))
                 .setTrackSelector(NativePlaybackPolicy.tracks(this, profile, ch.name.contains("Hindi", true))).build()

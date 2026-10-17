@@ -207,4 +207,10 @@ class JjtvResolverTest {
             assertEquals(1, http.requests.size)
         } finally { executor.shutdownNow() }
     }
+    @Test fun `a refused JJTV page exposes a typed HTTP status rather than a decoder error`() {
+        val http = Fake { _, _ -> TgResponse(403, ByteArray(0)) }
+        try { JjtvResolver(http).resolve("1108"); fail("Expected the page rejection") }
+        catch (error: JjtvHttpException) { assertEquals(403, error.status) }
+    }
+
 }

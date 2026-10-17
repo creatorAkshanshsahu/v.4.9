@@ -4,17 +4,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LiveProvidersTest {
-    @Test fun `TG is first until another native provider actually renders a frame`() {
-        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, null))
-        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, "https://unknown.example"))
+    @Test fun `untried V1 channels start on JJTV rather than inheriting another channels TG success`() {
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, null))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, "https://unknown.example"))
     }
 
     @Test fun `a known working JJTV source is tried first without removing TG recovery`() {
         assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, JjtvResolver.SITE))
     }
 
-    @Test fun `V2 must never reinterpret its numeric channel ids as Jio ids`() {
-        assertEquals(listOf(LiveProvider.TG), LiveProviders.order(true, JjtvResolver.SITE))
+    @Test fun `V2 must never reinterpret its numeric channel ids as Jio ids even with a JJTV request`() {
+        assertEquals(listOf(LiveProvider.TG), LiveProviders.order(true, JjtvResolver.SITE, LiveProvider.JJTV))
     }
 
     @Test fun `remembered source identity separates providers but does not retain expiring credentials`() {
@@ -26,13 +26,19 @@ class LiveProvidersTest {
         assertEquals(64, LiveProviders.sourceKey(original).length)
     }
 
-    @Test fun `new channels can start with the last provider that actually rendered video`() {
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, null, JjtvResolver.SITE))
-        assertEquals(listOf(LiveProvider.TG), LiveProviders.order(true, null, JjtvResolver.SITE))
+    @Test fun `a working TG source is retained for that channel only`() {
+        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, TgResolver.SITE))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, null))
     }
 
-    @Test fun `a channel specific working provider takes priority over the global hint`() {
-        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, TgResolver.SITE, JjtvResolver.SITE))
+    @Test fun `explicit JJTV choice overrides even a previously remembered TG source`() {
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, TgResolver.SITE, LiveProvider.JJTV))
+        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, JjtvResolver.SITE, LiveProvider.TG))
     }
 
+    @Test fun `provider identity uses its explicit origin rather than an upstream server label`() {
+        val source = TgStream("Server 2", "https://media.example/live.mpd", "dash")
+        assertEquals(LiveProvider.TG, LiveProviders.provider(source))
+        assertEquals(LiveProvider.JJTV, LiveProviders.provider(source.copy(requestOrigin = JjtvResolver.SITE)))
+    }
 }

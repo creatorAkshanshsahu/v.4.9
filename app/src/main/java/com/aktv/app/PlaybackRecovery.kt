@@ -14,6 +14,11 @@ internal class PlaybackRecovery {
 
     fun reset() { failed.clear(); refreshed = false; moreRequested = false }
 
+    /** Retire every source from a provider whose metadata/startup window elapsed. The other provider
+     * and one fresh pass remain available, but cycling back cannot restart this same failed window.
+     */
+    fun skip(indices: Iterable<Int>) { failed.addAll(indices.filter { it >= 0 }) }
+
     fun failed(index: Int, count: Int, canLoadMore: Boolean = false): Action {
         if (index in 0 until count) failed.add(index)
         for (step in 1..count) {

@@ -32,6 +32,8 @@ internal object PlaybackProblems {
             chain.add(item); cause = item.cause
         }
         val http = chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
+            ?: chain.filterIsInstance<JjtvHttpException>().firstOrNull()?.status
+            ?: chain.filterIsInstance<TgResolveException>().firstOrNull()?.status
         val crypto = chain.filterIsInstance<MediaCodec.CryptoException>().firstOrNull()?.errorCode
         val family = when {
             http != null -> PlaybackDiagnostics.Family.HTTP

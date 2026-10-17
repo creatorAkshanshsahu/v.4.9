@@ -142,4 +142,10 @@ class NativeDrmDiagnosticsTest {
         observer.acquire(); observer.release(); observer.release()
         assertEquals(listOf("acquire", "release", "release"), platform.calls)
     }
+    @Test fun `metadata HTTP status is retained without reading exception messages`() {
+        assertEquals(403, PlaybackProblems.from(JjtvHttpException(403)).http)
+        assertEquals(451, PlaybackProblems.from(TgResolveException(451)).http)
+        assertEquals(PlaybackDiagnostics.Family.HTTP, PlaybackProblems.from(JjtvHttpException(403)).family)
+    }
+
 }
