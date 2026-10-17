@@ -2,6 +2,8 @@
 import concurrent.futures
 import base64
 import json
+import time
+from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -21,6 +23,7 @@ SITE = 'https://jjtvxweb.pages.dev'
 PAGE = SITE + '/pind?id=816'
 reports = []
 endpoints = {}
+http_times = {}
 
 
 class Scripts(HTMLParser):
@@ -51,6 +54,12 @@ def get(url):
         'Cache-Control': 'no-cache', 'Accept': 'text/html, application/javascript, application/json'})
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
+            try:
+                date = parsedate_to_datetime(response.headers.get('Date', '')).timestamp()
+                age = max(0, int(response.headers.get('Age', '0')))
+                http_times[url] = {'serverEpochSeconds': int(date + age), 'ageSeconds': age}
+            except (ValueError, TypeError, OverflowError):
+                http_times[url] = {}
             body = response.read(4 * 1024 * 1024 + 1)
             if len(body) > 4 * 1024 * 1024:
                 return 0, 'too-large', ''
@@ -119,10 +128,35 @@ def inspect():
             pending.difference_update(visited)
 
 
+def token_health(text, clock):
+    """Only lifetimes/counts. Never return signatures, cookies or raw signed URLs."""
+    values = re.findall(r'__hdnea__=([^&\s;"\x27<>]+)', text)
+    expiries = []
+    for value in set(values):
+        match = re.search(r'(?:^|~)exp=(\d+)(?:~|$)', urllib.parse.unquote(value))
+        if match:
+            expiries.append(int(match.group(1)) - clock)
+    return {'distinctTokens': len(set(values)), 'knownExpiry': len(expiries),
+            'expired': sum(value <= 0 for value in expiries),
+            'nearExpiry30s': sum(0 < value <= 30 for value in expiries),
+            'minimumSecondsLeft': min(expiries, default=None), 'maximumSecondsLeft': max(expiries, default=None)}
+
+
 def inspect_data():
     for name, url in endpoints.items():
         status, kind, text = get(url)
-        report = {'endpoint': name, 'url': safe_url(url), 'status': status, 'type': kind, 'bytes': len(text)}
+        report = {'endpoint': name, 'url': safe_url(url), 'status': status, 'type': kind, 'bytes': len(text),
+                  'httpTime': http_times.get(url, {})}
+        if name.startswith('COOKIE_'):
+            reference = http_times.get(url, {}).get('serverEpochSeconds', int(time.time()))
+            report['tokenHealth'] = token_health(text, reference)
+            # Only public metadata endpoints, never append a cache-buster to a signed media URL.
+            if not urllib.parse.urlsplit(url).query:
+                fresh_url = url + '?_aktv_probe=' + str(time.time_ns())
+                fresh_status, _, fresh_text = get(fresh_url)
+                fresh_reference = http_times.get(fresh_url, {}).get('serverEpochSeconds', int(time.time()))
+                report['uncachedMetadata'] = {'status': fresh_status, 'bodyChanged': fresh_text != text,
+                    'httpTime': http_times.get(fresh_url, {}), 'tokenHealth': token_health(fresh_text, fresh_reference)}
         try:
             clean = text.lstrip('\ufeff').strip()
             if name == 'CHANNELS_URL' and not clean.startswith('['):
@@ -131,7 +165,7 @@ def inspect_data():
             report['schema'] = list(data.keys()) if isinstance(data, dict) else 'array'
             if name == 'CHANNELS_URL':
                 report['channelCount'] = len(data)
-                selected = [entry for entry in data if str(entry.get('id')) in ('816', '872', '1106')]
+                selected = [entry for entry in data if str(entry.get('id')) in ('816', '872', '1106', '1108', '362')]
                 report['selected'] = shared['sanitize'](selected)
                 report['keyFormats'] = {str(entry.get('id')): [
                     {key: len(str(value)) for key, value in pair.items()}
@@ -164,7 +198,7 @@ def inspect_data():
             elif name == 'COOKIE_STAR_SPORTS':
                 entries = (data.get('successful_results') or []) + (data.get('failed_results') or [])
                 report['resultCount'] = len(entries)
-                selected = [entry for entry in entries if str(entry.get('channel_id')) in ('816', '872', '1106')]
+                selected = [entry for entry in entries if str(entry.get('channel_id')) in ('816', '872', '1106', '1108', '362')]
                 report['selected'] = shared['sanitize'](selected)
             else:
                 report['data'] = shared['sanitize'](data[:2] if isinstance(data, list) else data)
