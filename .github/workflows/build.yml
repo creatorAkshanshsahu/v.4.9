@@ -23,6 +23,8 @@ jobs:
           persist-credentials: false
       - name: Inspect live player metadata without saving credentials
         run: python3 .github/scripts/inspect-tg-player.py
+      - name: Inspect the user-provided JJTV native stream contract
+        run: python3 .github/scripts/inspect-jjtv-player.py
   build:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'inspect'
     runs-on: ubuntu-latest
