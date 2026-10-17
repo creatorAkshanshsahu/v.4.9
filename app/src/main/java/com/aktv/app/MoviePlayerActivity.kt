@@ -490,7 +490,7 @@ class MoviePlayerActivity : Activity() {
         val text = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 13f; typeface = Typeface.MONOSPACE
             setPadding(px(18), px(12), px(18), px(12))
-            text = "TG Frost · native Media3 VOD\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n" +
+            text = "${AppBuildInfo.label(this@MoviePlayerActivity)}\nTG Frost · native Media3 VOD\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n" +
                 "${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull().orEmpty()}\n" +
                 "App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n" +
                 "TMDB ${title.id} · ${title.type} · S${title.season} E${title.episode}\n" +

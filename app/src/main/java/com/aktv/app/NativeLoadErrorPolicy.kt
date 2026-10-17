@@ -8,7 +8,8 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
  * invalid token. Ordinary network/server errors keep Media3's existing retry/fallback behavior.
  */
 internal class NativeLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
-    private fun rejected(info: LoadErrorHandlingPolicy.LoadErrorInfo) = PlaybackProblems.from(info.exception).http.let { it == 401 || it == 403 }
+    private fun rejected(info: LoadErrorHandlingPolicy.LoadErrorInfo) = ManifestReplies.error(info.exception) != null ||
+        PlaybackProblems.from(info.exception).http.let { it == 401 || it == 403 }
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
         if (rejected(loadErrorInfo)) C.TIME_UNSET else super.getRetryDelayMsFor(loadErrorInfo)
     override fun getFallbackSelectionFor(fallbackOptions: LoadErrorHandlingPolicy.FallbackOptions,

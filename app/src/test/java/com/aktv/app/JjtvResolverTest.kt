@@ -49,7 +49,10 @@ class JjtvResolverTest {
         assertNull(source.headers["User-Agent"])
         assertEquals("plaYtv/7.1.5", sources[1].headers["User-Agent"])
         assertEquals(3, http.requests.size)
-        assertTrue(http.requests.all { it.second["Origin"] == site && it.second["Referer"] == "$site/pind?id=872" })
+        assertTrue(http.requests.all { it.second["Referer"] == null })
+        assertTrue(http.requests.filter { URI(it.first).host == URI(site).host }.all { it.second["Origin"] == null })
+        assertEquals(site, http.requests.first { URI(it.first).path == "/general.json" }.second["Origin"])
+        assertEquals("id=872", URI(http.requests.first().first).query)
         assertTrue(http.requests.all { it.second["Cache-Control"] == "no-cache, no-store" })
     }
 
@@ -224,7 +227,8 @@ class JjtvResolverTest {
         val source = JjtvResolver(http, now = { 100_000 }, elapsed = { 0 }).resolve("872").first()
         assertTrue(source.cookie.contains("hmac=current"))
         assertEquals(2, cookieCalls)
-        assertTrue(http.requests.last().first.contains("?_aktv_refresh="))
+        assertNull(URI(http.requests.last().first).query)
+        assertEquals("no-cache, no-store", http.requests.last().second["Cache-Control"])
     }
 
     @Test fun `a cookie service that keeps returning stale data is fetched at most twice`() {
@@ -274,7 +278,7 @@ class JjtvResolverTest {
         assertEquals(2, http.count("/general.json"))
     }
 
-    @Test fun `explicit refresh cache-busts public metadata but never the supplied signed stream URL`() {
+    @Test fun `explicit refresh uses canonical metadata URLs and no-store rather than invented query parameters`() {
         val http = Fake { url, _ -> when (URI(url).path) {
             "/pind" -> response(page())
             "/channels.json" -> response("[${channel("872")}]" )
@@ -283,12 +287,12 @@ class JjtvResolverTest {
         } }
         val source = JjtvResolver(http).resolve("872", fresh = true).first()
         assertTrue(http.requests.filter { URI(it.first).path in setOf("/channels.json", "/general.json") }
-            .all { it.first.contains("?_aktv_refresh=") })
+            .all { URI(it.first).query == null && it.second["Cache-Control"] == "no-cache, no-store" })
         assertFalse(source.url.contains("_aktv_refresh"))
         assertTrue(source.url.endsWith("__hdnea__=old"))
     }
 
-    @Test fun `an endpoint owning a query is not damaged by metadata cache busting`() {
+    @Test fun `an endpoint owning a signed query is preserved on every metadata refresh`() {
         val http = Fake { url, _ -> when (URI(url).path) {
             "/pind" -> response(page("/channels.json?signature=keep%2Bme"))
             "/channels.json" -> response("[${channel("872")}]" )
@@ -308,6 +312,40 @@ class JjtvResolverTest {
         } }
         try { JjtvResolver(http).resolve("1108"); fail("Expected the token endpoint failure") }
         catch (error: JjtvHttpException) { assertEquals(503, error.status) }
+    }
+
+    @Test fun `HTTP denials identify page catalogue and Star cookie stages without response credentials`() {
+        for (stage in listOf(JjtvLookupStage.PAGE, JjtvLookupStage.CATALOGUE, JjtvLookupStage.STAR_COOKIE)) {
+            val http = Fake { url, _ ->
+                val path = URI(url).path
+                val denied = when (stage) { JjtvLookupStage.PAGE -> path == "/pind"
+                    JjtvLookupStage.CATALOGUE -> path == "/channels.json"; else -> path == "/star.json" }
+                if (denied) TgResponse(403, "<html>token=synthetic-secret</html>".toByteArray(), "text/html")
+                else when (path) { "/pind" -> response(page()); "/channels.json" -> response("[${channel("1108", star = true)}]")
+                    else -> throw AssertionError("Only the advertised required endpoint should be requested") }
+            }
+            val error = assertThrows(JjtvHttpException::class.java) { JjtvResolver(http).resolve("1108") }
+            assertEquals(stage, error.stage); assertEquals(403, error.status)
+            assertEquals(HttpReply.Body.HTML, error.reply!!.body)
+            assertFalse(error.message.orEmpty().contains("synthetic-secret"))
+        }
+    }
+    @Test fun `an HTML catalogue with HTTP 200 is a metadata format error before keys or media are touched`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page())
+            "/channels.json" -> response("<html>not a catalogue</html>")
+            else -> throw AssertionError("No cookie or media request should be made")
+        } }
+        val error = assertThrows(JjtvDataException::class.java) { JjtvResolver(http).resolve("872") }
+        assertEquals(JjtvLookupStage.CATALOGUE, error.stage)
+        assertEquals(200, error.reply!!.status); assertEquals(HttpReply.Body.HTML, error.reply!!.body)
+    }
+    @Test fun `a declared challenge is reported not executed or followed as player code`() {
+        val reply = HttpReply.of(200, "text/html", "<html>challenge</html>".toByteArray(), challenge = true)
+        val http = Fake { _, _ -> response("<script src='/challenge.js'></script>").copy(reply = reply) }
+        val error = assertThrows(JjtvDataException::class.java) { JjtvResolver(http).resolve("872") }
+        assertEquals(JjtvLookupStage.PAGE, error.stage); assertTrue(error.reply!!.challenge)
+        assertEquals(1, http.requests.size)
     }
 
 }

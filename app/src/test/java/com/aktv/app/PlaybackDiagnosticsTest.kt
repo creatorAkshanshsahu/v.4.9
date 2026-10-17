@@ -157,4 +157,13 @@ class PlaybackDiagnosticsTest {
         assertTrue(attempt.summary().contains("Media3 reported a video frame"))
     }
 
+    @Test fun `a manifest response can be identified before any parsed load has completed`() {
+        val attempt = begin(drm = PlaybackDiagnostics.Drm.NONE)
+        attempt.httpResponse(HttpReply.of(200, "text/html", "<html>token=secret</html>".toByteArray()))
+        val report = attempt.report()
+        assertTrue(report.contains("manifest 0, init 0, media 0; 0 bytes"))
+        assertTrue(report.contains("Initial manifest response: HTTP 200; MIME HTML; body HTML"))
+        assertFalse(report.contains("secret"))
+    }
+
 }

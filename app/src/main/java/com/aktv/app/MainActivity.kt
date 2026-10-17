@@ -929,7 +929,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Shared by full-screen playback and previews so headers, type, redirects and DRM cannot drift apart. */
     private fun nativeMediaSource(source: TgStream, trace: PlaybackDiagnostics.Attempt? = null): MediaSource {
-        val data = Streams.factory(source)
+        val data = Streams.factory(source, trace)
         val factory: MediaSource.Factory = when (source.type) {
             "hls" -> HlsMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
             "mp4" -> ProgressiveMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
@@ -962,6 +962,8 @@ class MainActivity : AppCompatActivity() {
         }
         return factory.createMediaSource(item.build())
     }
+
+    private val manifestTypes = ManifestTypeRecovery()
 
     private fun startNative() {
         val source = nativeSources.getOrNull(serverIdx) ?: return
@@ -1067,11 +1069,16 @@ class MainActivity : AppCompatActivity() {
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
             trace.failed(PlaybackProblems.from(error, error.errorCode))
+            refreshPlaybackDetails()
+            val manifestError = ManifestReplies.error(error)
+            if (manifestError != null && retryManifestFormat(manifestError)) return
             val code = httpCode(error)
             val provider = if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) "JJTV" else "TG TV"
             val message = when {
                 code == 451 -> "$provider's upstream blocked this stream (HTTP 451)"
                 code != null -> "$provider's stream returned HTTP $code"
+                manifestError != null -> "$provider returned ${manifestError.reply.body.name} instead of a ${manifestError.expected.uppercase()} manifest"
+                error.errorCode in 3000..3999 -> "$provider returned a manifest or media format the player could not parse (code ${error.errorCode})"
                 error.errorCode in 6000..6999 -> "$provider DRM could not be opened (code ${error.errorCode})"
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
                 else -> "The live stream stopped responding (code ${error.errorCode})"
@@ -1081,6 +1088,19 @@ class MainActivity : AppCompatActivity() {
                 retryCompatibleDecoder(message)) return
             advanceNative(message)
         }
+    }
+
+    /** Correct only a verified DASH/HLS signature on this exact supplied URL. No alternate keys or web player. */
+    private fun retryManifestFormat(error: ManifestReplyException): Boolean {
+        if (startupBudget.expired(SystemClock.elapsedRealtime()) || providerWindow.expired(SystemClock.elapsedRealtime())) return false
+        val source = nativeSources.getOrNull(serverIdx) ?: return false
+        val corrected = manifestTypes.correct(source, error.reply) ?: return false
+        nativeSources = nativeSources.toMutableList().apply { set(serverIdx, corrected) }
+        val token = ++playToken
+        releasePlayer()
+        playMsg("The supplied manifest is ${corrected.type.uppercase()}; opening that native format…")
+        ui.post { if (playbackActive && token == playToken && layer.visibility == View.VISIBLE) startNative() }
+        return true
     }
 
     private fun httpCode(error: Throwable): Int? {
@@ -1096,7 +1116,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
-        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear()
+        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear(); manifestTypes.reset()
         compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -1290,14 +1310,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playbackDetailsText(): String = buildString {
-        append("AK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n")
+        append("${AppBuildInfo.label(this@MainActivity)}\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n")
         append("${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown ABI"}\n")
         append("App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n")
         append("Device UTC: ${java.time.Instant.ofEpochMilli(System.currentTimeMillis())}\n")
         append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
         append("TV reported codec-limit fallback: $television (unsupported DRM remains rejected)\n")
-        shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""}\n") }
+        shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""} · ${it.name.take(80)}\n") }
         append("\n${diagnostics.report()}\n\n$drmProbeStatus\n")
+        append("\nHTTP refusals and invalid manifests occur before decoding; a DRM self-test cannot repair those server responses.\n")
         append("\nCheck DRM stops playback and tests only this device's local ClearKey service. It does not test a real channel or prove decoded video.")
     }
 
@@ -1311,8 +1332,18 @@ class MainActivity : AppCompatActivity() {
             setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
         }
         val scroll = ScrollView(this).apply { addView(text); isFocusable = true }
-        val holder = FrameLayout(this).apply {
-            addView(scroll, FrameLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.56f).toInt()))
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.45f).toInt()))
+            addView(Button(this@MainActivity).apply {
+                text = "Copy redacted report"
+                isFocusable = true
+                setOnClickListener {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("AK TV playback details", playbackDetailsText()))
+                    Toast.makeText(this@MainActivity, "Report copied — no URLs, cookies or keys", Toast.LENGTH_SHORT).show()
+                }
+            }, LinearLayout.LayoutParams(-1, -2))
         }
         val dialog = AlertDialog.Builder(this).setTitle("Native playback details")
             .setView(holder).setNegativeButton("Close", null).setPositiveButton("Retry", null)
@@ -1362,7 +1393,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun fail(message: String) {
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
-        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        playMsg("$message\n${diagnostics.summary()}\n${AppBuildInfo.label(this)} · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        refreshPlaybackDetails()
         ui.removeCallbacks(hideInfo); hideInfo.run()
     }
 

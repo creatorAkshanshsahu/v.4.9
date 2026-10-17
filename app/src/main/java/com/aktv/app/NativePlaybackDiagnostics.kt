@@ -6,6 +6,7 @@ import android.media.MediaDrm
 import android.media.MediaDrmException
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.ParserException
 import androidx.media3.common.Tracks
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
@@ -35,9 +36,16 @@ internal object PlaybackProblems {
             ?: chain.filterIsInstance<JjtvHttpException>().firstOrNull()?.status
             ?: chain.filterIsInstance<TgResolveException>().firstOrNull()?.status
             ?: chain.filterIsInstance<FrostResolveException>().firstOrNull()?.status
+        val deniedLookup = chain.filterIsInstance<JjtvHttpException>().firstOrNull()
+        val badLookup = chain.filterIsInstance<JjtvDataException>().firstOrNull()
+        val badManifest = chain.filterIsInstance<ManifestReplyException>().firstOrNull()
+        val reply = deniedLookup?.reply ?: badLookup?.reply ?: badManifest?.reply
+        val lookupStage = deniedLookup?.stage ?: badLookup?.stage
         val crypto = chain.filterIsInstance<MediaCodec.CryptoException>().firstOrNull()?.errorCode
         val family = when {
             http != null -> PlaybackDiagnostics.Family.HTTP
+            badLookup != null || badManifest != null || (playerCode != null && playerCode in 3000..3999) ||
+                chain.any { it is ParserException } -> PlaybackDiagnostics.Family.FORMAT
             chain.any { it is SSLException || (it is FrostResolveException && it.kind == "tls") } -> PlaybackDiagnostics.Family.TLS
             chain.any { it is SocketTimeoutException || it is UnknownHostException || (it is FrostResolveException && it.kind in setOf("dns", "timeout")) } -> PlaybackDiagnostics.Family.NETWORK
             (playerCode != null && playerCode in 6000..6999) || chain.any { it is MediaDrmException || it is MediaDrm.MediaDrmStateException ||
@@ -55,7 +63,7 @@ internal object PlaybackProblems {
             }
             info?.takeIf { code -> code.matches(Regex("android\\.media\\.[A-Za-z0-9_.-]{1,70}")) }
         }
-        return PlaybackDiagnostics.Problem(family, playerCode, http, listOfNotNull(names, native).joinToString(" : ").take(180), crypto)
+        return PlaybackDiagnostics.Problem(family, playerCode, http, listOfNotNull(names, native).joinToString(" : ").take(180), crypto, reply, lookupStage)
     }
 }
 

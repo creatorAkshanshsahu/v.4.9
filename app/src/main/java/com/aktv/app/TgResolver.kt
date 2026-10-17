@@ -12,18 +12,34 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null)
-internal fun interface TgTransport { fun get(url: String, headers: Map<String, String>): TgResponse }
+internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null, val reply: HttpReply? = null)
+internal fun interface TgTransport {
+    fun get(url: String, headers: Map<String, String>): TgResponse
+    fun get(request: MetadataFetch): TgResponse = get(request.url, request.headers)
+}
 
 internal class TgHttp : TgTransport {
-    override fun get(url: String, headers: Map<String, String>): TgResponse {
+    override fun get(url: String, headers: Map<String, String>): TgResponse = execute(url, headers)
+    override fun get(request: MetadataFetch): TgResponse = execute(request.url, request.headers, request)
+
+    private fun execute(url: String, headers: Map<String, String>, fetch: MetadataFetch? = null): TgResponse {
         checkInterrupted()
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT)
         headers.forEach { (key, value) -> request.header(key, value) }
         // OkHttp sends Origin/Sec-Fetch-* unchanged; some URLConnection implementations silently drop them.
-        client.newCall(request.build()).execute().use { response ->
+        val transport = if (fetch == null) client else {
+            val origin = FetchOrigin(fetch.documentOrigin, url, fetch.cors)
+            client.newBuilder().followSslRedirects(false).addNetworkInterceptor { chain ->
+                val original = chain.request()
+                val builder = original.newBuilder().removeHeader("Referer").removeHeader("Origin")
+                origin.visit(original.url.toString())?.let { builder.header("Origin", it) }
+                chain.proceed(builder.build())
+            }.build()
+        }
+        transport.newCall(request.build()).execute().use { response ->
+            val reply = HttpReply.inspect(response)
             val serverTime = HttpReferenceClock.parse(response.header("Date"), response.header("Age"))
-            if (!response.isSuccessful) return TgResponse(response.code, ByteArray(0), serverTimeMs = serverTime)
+            if (!response.isSuccessful) return TgResponse(response.code, ByteArray(0), response.header("Content-Type").orEmpty(), serverTime, reply)
             val body = response.body?.byteStream()?.use { input ->
                 val output = java.io.ByteArrayOutputStream()
                 val buffer = ByteArray(8192)
@@ -36,7 +52,7 @@ internal class TgHttp : TgTransport {
                 }
                 output.toByteArray()
             } ?: ByteArray(0)
-            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime)
+            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime, reply)
         }
     }
 

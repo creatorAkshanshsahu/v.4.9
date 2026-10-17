@@ -1,27 +1,17 @@
 package com.aktv.app
 
 import okhttp3.OkHttpClient
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.util.concurrent.TimeUnit
 
 /** The same transport is used by Media3 and JVM redirect/header integration tests. */
 internal object StreamHttp {
-    /** Fetch taints Origin after a cross-origin redirect, but only for that individual request.
-     * The next direct media request starts with a clean origin again, even on the same connection.
-     */
-    private class BrowserRedirectContext(var previous: String) {
-        var tainted = false
-        fun visit(url: String) {
-            val origin = StreamRequestPolicy.originOf(url)
-            if (origin != previous) tainted = true
-            previous = origin
-        }
-    }
     private val base = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS)
         .followRedirects(true).followSslRedirects(true)
         .build()
 
-    fun client(stream: TgStream): OkHttpClient {
+    fun client(stream: TgStream, observeManifest: ((HttpReply) -> Unit)? = null): OkHttpClient {
         val policy = StreamRequestPolicy(stream)
         val browserRequests = stream.omitReferrer || (stream.requestOrigin == TgResolver.SITE &&
             stream.headers.keys.none { it.equals("Origin", true) || it.equals("User-Agent", true) })
@@ -29,9 +19,18 @@ internal object StreamHttp {
         // Network interceptors run on EVERY redirect, unlike application interceptors.
         return base.newBuilder().addInterceptor { chain ->
             val request = chain.request()
-            if (!browserRequests) chain.proceed(request)
-            else chain.proceed(request.newBuilder().tag(BrowserRedirectContext::class.java,
-                BrowserRedirectContext(StreamRequestPolicy.originOf(request.url.toString()))).build())
+            val outgoing = if (!browserRequests) request else request.newBuilder().tag(FetchOrigin::class.java,
+                FetchOrigin(stream.requestOrigin, request.url.toString())).build()
+            val response = chain.proceed(outgoing)
+            if (stream.type in setOf("dash", "hls") && request.url == stream.url.toHttpUrlOrNull()) {
+                val reply = HttpReply.inspect(response)
+                observeManifest?.invoke(reply)
+                if (ManifestReplies.invalid(stream.type, reply)) {
+                    response.close()
+                    throw ManifestReplyException(reply, stream.type)
+                }
+            }
+            response
         }.addNetworkInterceptor { chain ->
             val original = chain.request()
             val request = policy.request(original.url.toString())
@@ -40,9 +39,9 @@ internal object StreamHttp {
             if (stream.omitReferrer) builder.removeHeader("Referer")
             builder.header("User-Agent", TgHttp.USER_AGENT)
             request.headers.forEach { (key, value) -> builder.header(key, value) }
-            original.tag(BrowserRedirectContext::class.java)?.let { context ->
-                context.visit(original.url.toString())
-                if (context.tainted) builder.header("Origin", "null")
+            original.tag(FetchOrigin::class.java)?.let { context ->
+                builder.removeHeader("Origin")
+                context.visit(original.url.toString())?.let { builder.header("Origin", it) }
             }
             val response = chain.proceed(builder.build())
             // Observe on the network side: OkHttp's BridgeInterceptor restores the caller's
