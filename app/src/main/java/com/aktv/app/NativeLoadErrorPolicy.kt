@@ -5,7 +5,8 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 
 /** Let the app renew rejected credentials instead of retrying or blacklisting tracks with the same
- * invalid token. Ordinary network/server errors keep Media3's existing retry/fallback behavior.
+ * invalid token. Known error-page/manifest-type replies also go directly to bounded source recovery.
+ * Ordinary network/server errors keep Media3's existing retry/fallback behavior.
  */
 internal class NativeLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     private fun rejected(info: LoadErrorHandlingPolicy.LoadErrorInfo) = ManifestReplies.error(info.exception) != null ||

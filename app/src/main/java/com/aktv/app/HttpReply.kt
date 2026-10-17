@@ -99,13 +99,19 @@ internal object ManifestReplies {
     }
 }
 
-/** At most one signature-backed DASH/HLS correction per exact URL, never HTML -> guessed media. */
+/** One signature-backed correction per exact URL/request profile. Never HTML -> guessed media. */
 internal class ManifestTypeRecovery {
     private val corrected = HashSet<String>()
     fun reset() = corrected.clear()
     fun correct(source: TgStream, reply: HttpReply): TgStream? {
         val actual = when (reply.body) { HttpReply.Body.DASH -> "dash"; HttpReply.Body.HLS -> "hls"; else -> return null }
-        if (reply.status !in 200..299 || source.type !in setOf("dash", "hls") || actual == source.type || !corrected.add(source.url)) return null
+        if (reply.status !in 200..299 || source.type !in setOf("dash", "hls") || actual == source.type) return null
+        // Browser/native header variants may legitimately negotiate different formats on one URL.
+        val identity = source.url + "\n" + source.requestOrigin + "\n" + source.omitReferrer + "\n" +
+            source.cookie + "\n" + source.headers.toSortedMap().entries.joinToString("\n") { "${it.key}:${it.value}" }
+        val fingerprint = java.security.MessageDigest.getInstance("SHA-256").digest(identity.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        if (!corrected.add(fingerprint)) return null
         return source.copy(type = actual)
     }
 }

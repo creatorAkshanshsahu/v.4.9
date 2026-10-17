@@ -1336,7 +1336,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             addView(scroll, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.45f).toInt()))
             addView(Button(this@MainActivity).apply {
-                text = "Copy redacted report"
+                this.text = "Copy redacted report"
                 isFocusable = true
                 setOnClickListener {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager

@@ -79,4 +79,14 @@ class HttpReplyTest {
         assertSame(original, ManifestReplies.error(IOException("unsafe-message", original)))
         assertFalse(original.message.orEmpty().contains("secret"))
     }
+    @Test fun `header variants have separate one-shot format correction budgets without changing their credentials`() {
+        val recovery = ManifestTypeRecovery()
+        val source = TgStream("Source", "https://media.example/stream", "dash", headers = mapOf("Origin" to TgResolver.SITE))
+        val native = source.copy(headers = source.headers + ("User-Agent" to "declared-native"))
+        assertNotNull(recovery.correct(source, reply("#EXTM3U")))
+        assertNull(recovery.correct(source, reply("#EXTM3U")))
+        assertNotNull(recovery.correct(native, reply("#EXTM3U")))
+        assertNull(recovery.correct(native, reply("#EXTM3U")))
+    }
+
 }

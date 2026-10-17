@@ -1,3 +1,9 @@
+## 4.9.19: phone HTTP/manifest failures
+
+The user confirmed current mobile failures before decoding: JJTV metadata HTTP 403, TG HTTP 403, and a manifest parsing error. [Investigation and changes](mobile-http-errors.md) cover the newly traced JJTV metadata Origin/Referer mismatch, canonical metadata URLs, per-stage HTTP response classification, guarded native format correction, and **Copy redacted report** with an exact build ID. This is not a confirmed codec/Gecko failure or a verified on-phone fix; the current same-channel website comparison remains untested.
+
+---
+
 ## 4.9.18: recovered TV compatibility behavior
 
 The [4.7.2 comparison](tv-4.7.2-comparison.md) found the same Gecko/Media3 dependencies and manifest, but different native track-capability selection and an old remembered browser fallback. The native TV policy now restores the reported codec-limit fallback, while still rejecting unsupported DRM and absent codecs. Touch-phone defaults are unchanged. Generic no-touch D-pad boxes are recognized, and Menu includes an explicit TV-mode override if firmware still misidentifies the device. Playback Details separates reported-limit exceedance from unsupported codecs and reports API level plus process bitness.
