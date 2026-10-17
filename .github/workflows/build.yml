@@ -14,7 +14,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.9 }
       - name: Test stream resolution and build both APKs
-        run: gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace
+        run: |
+          set -o pipefail
+          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+      - name: Report build errors
+        if: failure()
+        run: python3 .github/scripts/report-build-errors.py
       - name: Rename APKs
         run: |
           mkdir -p out
