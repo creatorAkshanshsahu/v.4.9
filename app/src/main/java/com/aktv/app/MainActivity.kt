@@ -9,6 +9,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.os.Bundle
+import android.os.Build
+import android.os.SystemClock
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -25,8 +27,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.res.ResourcesCompat
 import androidx.media3.common.*
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.dash.DashMediaSource
@@ -34,7 +34,6 @@ import androidx.media3.exoplayer.drm.*
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
-import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.*
 import coil.load
@@ -106,6 +105,13 @@ class MainActivity : AppCompatActivity() {
     private val recovery = PlaybackRecovery()
     private var okLong = false
     private var renderedFrame = false
+    private val television by lazy { NativePlaybackPolicy.isTelevision(this) }
+    private var compatiblePlayback = false
+    private var playbackActive = false
+    private val startupBudget = PlaybackStartupBudget()
+    private var playbackHealth: PlaybackHealth? = null
+    private var surfaceWait: Pair<SurfaceHolder, SurfaceHolder.Callback>? = null
+    private var activeDecoder = "not initialized"
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
     private var capH = 1080; private var badSeconds = 0
@@ -115,7 +121,8 @@ class MainActivity : AppCompatActivity() {
     private fun startCap(): Int {
         val ch = shown.getOrNull(current)
         val saved = if (ch != null) prefs.getInt("q_${ch.key}", 0) else 0     // what worked last time for this channel
-        return if (saved > 0) saved else if (lowEnd) 720 else 1080
+        val ceiling = if (lowEnd || television) 720 else 1080
+        return if (saved > 0) minOf(saved, ceiling) else ceiling
     }
     private val dropWatcher = object : AnalyticsListener {
         override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
@@ -805,7 +812,7 @@ class MainActivity : AppCompatActivity() {
         if (shown.isEmpty()) return
         current = (index + shown.size) % shown.size
         val ch = shown[current]
-        stopPreview(); rememberChannel(ch); recovery.reset()
+        stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
         nativeSources = emptyList(); serverIdx = 0
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = true
         if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
@@ -820,7 +827,7 @@ class MainActivity : AppCompatActivity() {
         nativeSources = emptyList(); serverIdx = 0
         nativeProviders = providerOrder(ch); nextNativeProvider = 1; nativePassFresh = fresh
         val provider = nativeProviders.first()
-        disarmStall(); releasePlayer(); spinner.visibility = View.VISIBLE
+        releasePlayer(); spinner.visibility = View.VISIBLE
         playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Finding a working server…")
         resolveJob = playbackIo.submit {
             try {
@@ -933,29 +940,58 @@ class MainActivity : AppCompatActivity() {
     private fun attach(ms: MediaSource) {
         releasePlayer()
         stopPreview()
-        val rf = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
-            .forceEnableMediaCodecAsynchronousQueueing()   // smoother 1080p / 50fps decoding on TV boxes
-        val lc = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 40000, 750, 2500).setBackBuffer(0, false)
-            .setTargetBufferBytes(96 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(true).build()
-        capH = startCap(); badSeconds = 0
-        // steadier quality: switch up only after 30 s of headroom, so adaptive HD streams stop flip-flopping between sizes
-        val ts = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(this, AdaptiveTrackSelection.Factory(15_000, 20_000, 20_000, 0.75f)).apply {
-            setParameters(buildUponParameters()
-                .setMaxVideoSize(capH * 16 / 9, capH)
-                .setPreferredAudioLanguages(*if (shown.getOrNull(current)?.name?.contains("Hindi", true) == true) arrayOf("hi", "hin") else emptyArray())
-                .setViewportSizeToPhysicalDisplaySize(this@MainActivity, true)   // prefer what the screen can show...
-                .setExceedVideoConstraintsIfNecessary(true)                      // ...but if every track is bigger, still play the smallest
-                .setExceedRendererCapabilitiesIfNecessary(true))                 // (false here left audio playing over a black picture)
-        }
-        val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(4_000_000L).build()
-        val p = ExoPlayer.Builder(this, rf).setLoadControl(lc).setTrackSelector(ts).setBandwidthMeter(bw).build()
+        val profile = NativePlaybackPolicy.profile(television, lowEnd, compatiblePlayback, startCap())
+        capH = profile.height; badSeconds = 0; activeDecoder = "not initialized"
+        val ts = NativePlaybackPolicy.tracks(this, profile, shown.getOrNull(current)?.name?.contains("Hindi", true) == true)
+        val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
+            .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
+        val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
+            .setLoadControl(NativePlaybackPolicy.buffers(profile)).setTrackSelector(ts).setBandwidthMeter(bw).build()
         p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         trackSel = ts; p.addAnalyticsListener(dropWatcher)
+        p.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String,
+                                                   initializedTimestampMs: Long, initializationDurationMs: Long) {
+                if (player === p) activeDecoder = decoderName.take(80)
+            }
+        })
         renderedFrame = false
+        val health = PlaybackHealth(SystemClock.elapsedRealtime(), expectsVideo())
+        playbackHealth = health
+        p.setVideoFrameMetadataListener { _, _, _, _ -> health.videoProgress(SystemClock.elapsedRealtime()) }
         p.setMediaSource(ms); p.playWhenReady = true; p.addListener(listenerFor(p))
-        pv.player = p; player = p; p.prepare()
-        armStall(10000)
+        pv.player = p; player = p
+        prepareOnSurface(p)
         showInfo()
+    }
+
+    /** Avoid configuring an older TV codec against a placeholder before its real SurfaceView exists. */
+    private fun prepareOnSurface(owner: ExoPlayer) {
+        val view = pv.videoSurfaceView as? SurfaceView
+        if (view == null || view.holder.surface.isValid) { owner.prepare(); return }
+        playMsg("Waiting for the TV video surface…")
+        val holder = view.holder
+        val callback = object : SurfaceHolder.Callback {
+            private val gate = SurfaceStartGate(
+                active = { player === owner && playbackActive },
+                ready = { holder.surface.isValid },
+                prepare = {
+                    holder.removeCallback(this)
+                    if (surfaceWait?.second === this) surfaceWait = null
+                    try { owner.prepare() } catch (_: Exception) {
+                        if (player === owner && !retryCompatibleDecoder("The TV could not start its video decoder"))
+                            advanceNative("The native video decoder could not be started")
+                    }
+                }
+            )
+            override fun surfaceCreated(holder: SurfaceHolder) = gate.signal()
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = gate.signal()
+            override fun surfaceDestroyed(holder: SurfaceHolder) = Unit
+        }
+        surfaceWait = holder to callback
+        holder.addCallback(callback)
+        // Surface creation can race registration; the callback is idempotent.
+        if (holder.surface.isValid) callback.surfaceCreated(holder)
     }
 
     private fun listenerFor(owner: ExoPlayer) = object : Player.Listener {
@@ -963,21 +999,24 @@ class MainActivity : AppCompatActivity() {
             if (player !== owner) return
             when (state) {
                 Player.STATE_READY -> {
-                    spinner.visibility = View.GONE; playMsg(null); disarmStall()
-                    ui.removeCallbacks(videoCheck)
-                    if (!renderedFrame) ui.postDelayed(videoCheck, 6000)
-                    ui.removeCallbacks(stablePlayback); ui.postDelayed(stablePlayback, 30_000)
+                    if (renderedFrame || !expectsVideo()) {
+                        spinner.visibility = View.GONE; playMsg(null)
+                        if (!expectsVideo()) startupBudget.rendered()
+                    } else {
+                        spinner.visibility = View.VISIBLE
+                        playMsg("Stream connected — waiting for the first picture…")
+                    }
                 }
-                Player.STATE_BUFFERING -> {
-                    ui.removeCallbacks(stablePlayback)
-                    spinner.visibility = View.VISIBLE; armStall(11000)
-                }
-                Player.STATE_ENDED -> onStall()
+                Player.STATE_BUFFERING -> spinner.visibility = View.VISIBLE
+                Player.STATE_ENDED -> advanceNative("The live stream ended")
             }
         }
         override fun onRenderedFirstFrame() {
             if (player !== owner) return
-            renderedFrame = true; ui.removeCallbacks(videoCheck)
+            renderedFrame = true
+            playbackHealth?.firstFrame(SystemClock.elapsedRealtime())
+            startupBudget.rendered()
+            if (owner.playbackState == Player.STATE_READY) { spinner.visibility = View.GONE; playMsg(null) }
             val ch = shown.getOrNull(current) ?: return
             nativeSources.getOrNull(serverIdx)?.let { rememberNativeSource(ch, it) }
         }
@@ -992,6 +1031,7 @@ class MainActivity : AppCompatActivity() {
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
                 else -> "The live stream stopped responding (code ${error.errorCode})"
             }
+            if (code == null && error.errorCode in 4000..4999 && retryCompatibleDecoder(message)) return
             advanceNative(message)
         }
     }
@@ -1005,24 +1045,78 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
-    // READY alone isn't proof of a working stream. Reset the retry budget only after sustained playback.
-    private val stablePlayback = Runnable { if (player?.isPlaying == true) recovery.reset() }
-    private val videoCheck = Runnable {
-        val p = player ?: return@Runnable
-        if (layer.visibility == View.VISIBLE && p.playbackState == Player.STATE_READY &&
-            !renderedFrame && p.currentTracks.containsType(C.TRACK_TYPE_VIDEO)) advanceNative("No picture from this source")
+    private fun expectsVideo() = shown.getOrNull(current)?.category?.equals("Radio", true) != true
+
+    private fun beginNativeSession(ch: Channel) {
+        playbackActive = true
+        activeDecoder = "not initialized"
+        compatiblePlayback = prefs.getBoolean("native_compat_${ch.key}", false)
+        startupBudget.start(SystemClock.elapsedRealtime())
+        ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
     }
-    private val stallRunnable = Runnable { onStall() }
-    private fun armStall(ms: Long) { ui.removeCallbacks(stallRunnable); ui.postDelayed(stallRunnable, ms) }
-    private fun disarmStall() { ui.removeCallbacks(stallRunnable) }
-    private fun onStall() {
-        if (layer.visibility == View.VISIBLE && player != null) advanceNative("The live stream stopped responding")
+
+    private fun endNativeSession() {
+        playbackActive = false; startupBudget.clear(); ui.removeCallbacks(nativeHealthCheck)
+    }
+
+    private val nativeHealthCheck = object : Runnable {
+        override fun run() {
+            if (!playbackActive || layer.visibility != View.VISIBLE) return
+            val now = SystemClock.elapsedRealtime()
+            if (startupBudget.expired(now)) {
+                fail("No playable picture within 60 seconds. Hold OK to retry.")
+                return
+            }
+            val p = player
+            val health = playbackHealth
+            if (p != null && health != null) {
+                val state = when (p.playbackState) {
+                    Player.STATE_READY -> PlaybackHealth.State.READY
+                    Player.STATE_BUFFERING -> PlaybackHealth.State.BUFFERING
+                    Player.STATE_ENDED -> PlaybackHealth.State.ENDED
+                    else -> PlaybackHealth.State.IDLE
+                }
+                val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady)
+                when (result.failure) {
+                    PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
+                        val reason = if (surfaceWait != null) "The TV video surface is not ready" else "The decoder did not produce a picture"
+                        if (!retryCompatibleDecoder(reason)) advanceNative(reason)
+                    }
+                    PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
+                        advanceNative("The live stream stopped responding")
+                    null -> if (result.stable) {
+                        recovery.reset()
+                        shown.getOrNull(current)?.let { ch ->
+                            prefs.edit().putBoolean("native_compat_${ch.key}", compatiblePlayback).apply()
+                        }
+                    }
+                }
+            }
+            if (playbackActive) ui.postDelayed(this, 500)
+        }
+    }
+
+    /** One same-source retry: synchronous adapters, supported AVC/AAC, lower load, software preferred.
+     * The codec selector still enforces secure-decoder requirements. This does not bypass DRM.
+     */
+    private fun retryCompatibleDecoder(reason: String): Boolean {
+        if (compatiblePlayback || !expectsVideo() || nativeSources.getOrNull(serverIdx) == null ||
+            startupBudget.expired(SystemClock.elapsedRealtime())) return false
+        compatiblePlayback = true
+        startupBudget.recover(SystemClock.elapsedRealtime())
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        playMsg("$reason. Trying native TV compatibility mode…")
+        ui.post { if (playbackActive && token == playToken && layer.visibility == View.VISIBLE) startNative() }
+        return true
     }
 
     /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
     private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
-        disarmStall(); releasePlayer()
+        startupBudget.recover(SystemClock.elapsedRealtime())
+        releasePlayer()
+        if (startupBudget.expired(SystemClock.elapsedRealtime())) { fail("No playable picture within 60 seconds. Hold OK to retry."); return }
         when (val action = recovery.failed(serverIdx, nativeSources.size, canLoadMore = nextNativeProvider < nativeProviders.size)) {
             is PlaybackRecovery.Action.Source -> {
                 serverIdx = action.index
@@ -1043,7 +1137,8 @@ class MainActivity : AppCompatActivity() {
     private fun switchServer() {
         if (nativeSources.size < 2) { reloadStream(); return }
         playToken++; resolveJob?.cancel(true); recovery.reset()
-        disarmStall(); releasePlayer()
+        shown.getOrNull(current)?.let { beginNativeSession(it) }
+        releasePlayer()
         serverIdx = (serverIdx + 1) % nativeSources.size
         playMsg("Switching to ${nativeSources[serverIdx].label}…")
         startNative()
@@ -1052,23 +1147,25 @@ class MainActivity : AppCompatActivity() {
     /** Manual reload really bypasses cached signed URLs and re-reads the site's current player configuration. */
     private fun reloadStream() {
         val ch = shown.getOrNull(current) ?: return
-        recovery.reset(); TgServers.invalidate(ch.id, ch.v2)
+        recovery.reset(); beginNativeSession(ch); TgServers.invalidate(ch.id, ch.v2)
         resolveAndStart(ch, fresh = true)
     }
 
     private fun fail(message: String) {
-        disarmStall(); releasePlayer(); spinner.visibility = View.GONE
-        playMsg(message); showInfo()
+        endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
+        val device = "${Build.MODEL.take(48)} · Android ${Build.VERSION.RELEASE} · ${if (compatiblePlayback) "compatible" else "standard"} · decoder: $activeDecoder"
+        playMsg("$message\n$device"); showInfo()
     }
 
     private fun releasePlayer() {
-        ui.removeCallbacks(videoCheck); ui.removeCallbacks(stablePlayback)
-        pv.player = null
+        surfaceWait?.let { (holder, callback) -> holder.removeCallback(callback) }; surfaceWait = null
+        playbackHealth = null
         val old = player; player = null; trackSel = null
+        pv.player = null
         old?.removeAnalyticsListener(dropWatcher); old?.release()
     }
     private fun closePlayer() {
-        playToken++; resolveJob?.cancel(true); disarmStall(); playMsg(null)
+        endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null)
         releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
         layer.animate().cancel(); layer.visibility = View.GONE
@@ -1166,7 +1263,7 @@ class MainActivity : AppCompatActivity() {
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
-        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); playToken++; resolveJob?.cancel(true); disarmStall(); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; layer.keepScreenOn = false; resetGuide()
+        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; layer.keepScreenOn = false; resetGuide()
         if (searchShown) hideSearch(false)
     }
 
@@ -1524,7 +1621,7 @@ class MainActivity : AppCompatActivity() {
     private fun schedulePreview(c: Channel?) {
         stopPreview()
         // no live preview on the movie tabs, while the hero is folded away, or by default on weak boxes (it runs a second decoder)
-        if (c != null && tab < 2 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd)) ui.postDelayed(previewRunnable, 1200)
+        if (c != null && tab < 2 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
     }
     private fun stopPreview() {
         ui.removeCallbacks(previewRunnable); previewToken++; previewJob?.cancel(true)
@@ -1576,37 +1673,44 @@ class MainActivity : AppCompatActivity() {
             ui.post { if (previewIsCurrent(ch, token)) playPreview(sources, index + 1, ch, token, providers, providerIndex) }
         }
         try {
-            val p = ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)).build()
+            val profile = NativePlaybackPolicy.profile(television, lowEnd, prefs.getBoolean("native_compat_${ch.key}", false), 720)
+            val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
+                .setLoadControl(NativePlaybackPolicy.buffers(profile))
+                .setTrackSelector(NativePlaybackPolicy.tracks(this, profile, ch.name.contains("Hindi", true))).build()
             p.volume = 0f
-            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setMaxVideoSize(1280, 720).build()
             previewPlayer = p
-            var rendered = false
-            fun watch(ms: Long) {
-                previewStall?.let { ui.removeCallbacks(it) }
-                previewStall = Runnable { if (previewPlayer === p && previewIsCurrent(ch, token) && (p.playbackState != Player.STATE_READY || !rendered)) next() }
-                ui.postDelayed(requireNotNull(previewStall), ms)
+            val health = PlaybackHealth(SystemClock.elapsedRealtime(),
+                expectsVideo = !ch.category.equals("Radio", true), firstFrameTimeoutMs = 12_000)
+            val monitor = object : Runnable {
+                override fun run() {
+                    if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
+                    val state = when (p.playbackState) {
+                        Player.STATE_READY -> PlaybackHealth.State.READY
+                        Player.STATE_BUFFERING -> PlaybackHealth.State.BUFFERING
+                        Player.STATE_ENDED -> PlaybackHealth.State.ENDED
+                        else -> PlaybackHealth.State.IDLE
+                    }
+                    if (health.sample(SystemClock.elapsedRealtime(), state, p.isPlaying, p.currentPosition, p.playWhenReady).failure != null) next()
+                    else ui.postDelayed(this, 500)
+                }
             }
+            p.setVideoFrameMetadataListener { _, _, _, _ -> health.videoProgress(SystemClock.elapsedRealtime()) }
             p.setMediaSource(nativeMediaSource(source))
             p.addListener(object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
-                    rendered = true
-                    previewStall?.let { ui.removeCallbacks(it) }
+                    health.firstFrame(SystemClock.elapsedRealtime())
                     rememberNativeSource(ch, source)
                     heroPreview.animate().cancel(); heroPreview.animate().alpha(1f).setDuration(450).start()
                 }
                 override fun onPlaybackStateChanged(state: Int) {
                     if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
-                    when (state) {
-                        Player.STATE_BUFFERING -> watch(11000)
-                        Player.STATE_READY -> if (rendered) previewStall?.let { ui.removeCallbacks(it) } else watch(6000)
-                        Player.STATE_ENDED -> next()
-                    }
+                    if (state == Player.STATE_ENDED) next()
                 }
                 override fun onPlayerError(error: PlaybackException) { if (previewPlayer === p) next() }
             })
             previewPv.player = p; p.playWhenReady = true; p.prepare()
-            watch(10000)
+            previewStall = monitor; ui.postDelayed(monitor, 500)
         } catch (_: Exception) { releasePreviewPlayer(); next() }
     }
 

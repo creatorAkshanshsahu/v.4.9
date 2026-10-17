@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 29; versionName = "4.9.12" }
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 30; versionName = "4.9.13" }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
     lint { abortOnError = false; checkReleaseBuilds = false }
     testOptions { unitTests.all { it.systemProperty("aktv.live.tg", project.findProperty("liveTg")?.toString() ?: "false") } }
