@@ -14,7 +14,7 @@ jobs:
   inspect:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'inspect')
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -25,6 +25,12 @@ jobs:
         run: python3 .github/scripts/inspect-tg-player.py
       - name: Inspect the user-provided JJTV native stream contract
         run: python3 .github/scripts/inspect-jjtv-player.py
+      - name: Trace the website's real browser playback requests
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          npm install --prefix "$RUNNER_TEMP/tg-browser" --no-save --ignore-scripts playwright@1.56.0
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/tg-browser/node_modules/playwright" node .github/scripts/trace-tg-browser.cjs
   build:
     if: github.event_name != 'workflow_dispatch' || inputs.mode != 'inspect'
     runs-on: ubuntu-latest
