@@ -1,5 +1,6 @@
 """Inspect the user-provided JJTV player contract without executing or publishing its credentials."""
 import concurrent.futures
+import json
 from html.parser import HTMLParser
 from pathlib import Path
 import re
@@ -18,6 +19,7 @@ def safe_url(value):
 SITE = 'https://jjtvxweb.pages.dev'
 PAGE = SITE + '/pind?id=816'
 reports = []
+endpoints = {}
 
 
 class Scripts(HTMLParser):
@@ -48,8 +50,8 @@ def get(url):
         'Cache-Control': 'no-cache', 'Accept': 'text/html, application/javascript, application/json'})
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
-            body = response.read(2 * 1024 * 1024 + 1)
-            if len(body) > 2 * 1024 * 1024:
+            body = response.read(4 * 1024 * 1024 + 1)
+            if len(body) > 4 * 1024 * 1024:
                 return 0, 'too-large', ''
             return response.status, response.headers.get('Content-Type', ''), body.decode('utf-8', 'replace')
     except urllib.error.HTTPError as error:
@@ -70,6 +72,13 @@ def redact(code):
 
 
 def code_report(name, code):
+    for key, quote, value in re.findall(r'''\b(?:const|let|var)\s+(CHANNELS_URL|COOKIE_PRIMARY|COOKIE_FALLBACK|COOKIE_STAR_SPORTS)\s*=\s*(["'`])([^"'`]*)\2''', code):
+        if value and '${' not in value:
+            endpoints[key] = urllib.parse.urljoin(PAGE, value)
+    if 'function extractStarCookie' in code:
+        start = code.index('function extractStarCookie')
+        end = code.find('function isJioPlLiveUrl', start)
+        reports.append('Full Star-cookie selector\n' + redact(code[start:end if end > start else start + 2500]))
     imports = re.findall(r'''["'`]([^"'`\s]+\.m?js(?:\?[^"'`\s]*)?)["'`]''', code)
     urls = list(dict.fromkeys(safe_url(m) for m in re.findall(r'https?://[^\s"\x27<>`\\]+', code)))
     reports.append(name + '\n' + str({'bytes': len(code), 'urls': urls[:30]}))
@@ -109,9 +118,41 @@ def inspect():
             pending.difference_update(visited)
 
 
+def inspect_data():
+    for name, url in endpoints.items():
+        status, kind, text = get(url)
+        report = {'endpoint': name, 'url': safe_url(url), 'status': status, 'type': kind, 'bytes': len(text)}
+        try:
+            clean = text.lstrip('\ufeff').strip()
+            if name == 'CHANNELS_URL' and not clean.startswith('['):
+                clean = '[' + clean + ']'
+            data = json.loads(clean)
+            report['schema'] = list(data.keys()) if isinstance(data, dict) else 'array'
+            if name == 'CHANNELS_URL':
+                report['channelCount'] = len(data)
+                selected = [entry for entry in data if str(entry.get('id')) in ('816', '872', '1106')]
+                report['selected'] = shared['sanitize'](selected)
+                report['keyFormats'] = {str(entry.get('id')): [
+                    {key: len(str(value)) for key, value in pair.items()}
+                    for pair in entry.get('keys', [])[:4] if isinstance(pair, dict)
+                ] for entry in selected}
+            elif name == 'COOKIE_STAR_SPORTS':
+                entries = (data.get('successful_results') or []) + (data.get('failed_results') or [])
+                report['resultCount'] = len(entries)
+                selected = [entry for entry in entries if str(entry.get('channel_id')) in ('816', '872', '1106')]
+                report['selected'] = shared['sanitize'](selected)
+            else:
+                report['data'] = shared['sanitize'](data[:2] if isinstance(data, list) else data)
+        except Exception as error:
+            report['decodeError'] = type(error).__name__
+        # Results come before long code excerpts to fit the annotation budget.
+        reports.insert(0, 'JJTV data\n' + json.dumps(report, ensure_ascii=True))
+
+
 if __name__ == '__main__':
     try:
         inspect()
+        inspect_data()
     finally:
         text = '\n\n'.join(reports)[:24000]
         for start in range(0, len(text), 3000):
