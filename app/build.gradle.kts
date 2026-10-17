@@ -21,6 +21,7 @@ dependencies {
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("androidx.palette:palette:1.0.0")
     "arm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
