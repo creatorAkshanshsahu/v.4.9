@@ -924,7 +924,7 @@ class MainActivity : AppCompatActivity() {
         val tgF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.fetch(ch.id, fresh) } catch (_: Exception) { emptyList() } })
         val apiF = io.submit(java.util.concurrent.Callable<String> { get(if (ch.v2) "$BASE_V2/${ch.id}" else "$BASE/${ch.id}", 2, Streams.CHROME) })
         // backup server (jjtvxweb.pages.dev) streams, played in the native player as extra servers
-        val altF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.scrapeAlt(ch.name) } catch (_: Exception) { emptyList() } })
+        val altF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.scrapeAlt(ch.name, ch.id) } catch (_: Exception) { emptyList() } })
         fun altList(wait: Long = 12): List<TgServers.Server> = try { altF.get(wait, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
         io.execute {
             try {
@@ -934,7 +934,7 @@ class MainActivity : AppCompatActivity() {
                 if (ch.v2) {
                     val list = ArrayList<Pair<String, String>>(); val extra = ArrayList<Pair<JSONObject?, Int>>()
                     fun addTg(l: List<TgServers.Server>) = l.forEach { sv ->
-                        if (list.none { it.first == sv.url }) { list.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); extra.add(sv.drm to (if (TgServers.isJioPl(sv.url)) 8 else if (Streams.isJio(sv.url)) 6 else 5)) }
+                        if (list.none { it.first == sv.url }) { list.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); extra.add(sv.drm to (if (Streams.isJio(sv.url)) 8 else 5)) }
                     }
                     addTg(tg)   // every server the site's own player gets (fresh tokens + all keys) first...
                     if (apiBody != null) try {   // ...then the relay servers
@@ -963,7 +963,7 @@ class MainActivity : AppCompatActivity() {
                                 .forEach { more.add(it); moreX.add(null to -1) }
                         } catch (_: Exception) {}
                         altList().forEach { sv -> if (list.none { it.first == sv.url } && more.none { it.first == sv.url }) {
-                            more.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); moreX.add(sv.drm to (if (Streams.isJio(sv.url)) 6 else 5)) } }
+                            more.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); moreX.add(sv.drm to (if (Streams.isJio(sv.url)) 8 else 5)) } }
                         if (more.isNotEmpty()) runOnUiThread { if (token == playToken && v2Servers === list) {
                             v2Servers = list + more; v2Extra = extra + moreX
                             infoNext.text = "Server ${serverIdx + 1} of ${v2Servers.size}   ·   OK switches server" } }
@@ -1001,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
         val n = Streams.PROFILES.size
         val first = prefs.getInt("p_${ch.key}", -1)
         // every site server gets the same treatment: the website player's own presentation first (token as cookie + on every segment)
-        val jioOrder = listOf(6, 7, 5, 0)
+        val jioOrder = listOf(8, 6, 7, 5, 0)   // 8 = exactly the backup website player (plaYtv UA, JioTV Referer, token everywhere)
         val webOrder = listOf(5, 1, 3, 2)
         val out = ArrayList<Pair<Int, Int>>()
         for ((i, u) in urls.withIndex()) {

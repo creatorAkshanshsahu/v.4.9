@@ -227,6 +227,7 @@ object TgServers {
         val now = System.currentTimeMillis(); if (now - lastAltCfg < 30 * 60_000L) return; lastAltCfg = now
         val h = get("$ALT_SITE/pind?id=1106") ?: return
         Regex("COOKIE_STAR_SPORTS\\s*=\\s*[\"']([^\"']+)").find(h)?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { starCookieUrl = it }
+        Regex("COOKIE_PRIMARY\\s*=\\s*[\"']([^\"']+)").find(h)?.groupValues?.get(1)?.takeIf { it.startsWith("http") }?.let { primaryCookieUrl = it }
         Regex("CHANNELS_URL\\s*=\\s*[\"']([^\"']+)").find(h)?.groupValues?.get(1)?.let { c ->
             altChannelsUrl = if (c.startsWith("http")) c else ALT_SITE + (if (c.startsWith("/")) c else "/$c") }
     }
@@ -322,17 +323,59 @@ object TgServers {
         return out
     }
 
-    /** Last resort: stream links on jjtvxweb.pages.dev (and its scripts) that belong to this channel's name. */
-    fun scrapeAlt(name: String): List<Server> {
-        val key = Playlist.norm(name); if (key.length < 3) return emptyList()
-        val html = get(ALT_SITE) ?: return emptyList()
-        val texts = arrayListOf(clean(html))
-        Regex("src=\"([^\"]+\\.js)\"").findAll(html).map { it.groupValues[1] }.distinct().take(6).map { s ->
-            val u = if (s.startsWith("http")) s else ALT_SITE + (if (s.startsWith("/")) s else "/$s")
-            pool.submit(Callable { get(u) })
-        }.forEach { f -> try { f.get(8, TimeUnit.SECONDS)?.let { texts.add(clean(it)) } } catch (_: Exception) {} }
+    // ---------- jjtvxweb.pages.dev, played natively exactly like its /pind player ----------
+    @Volatile private var primaryCookieUrl = "https://allinonereborn2.online/jstrweb2/cookies.json"
+    @Volatile private var primaryCookie: Pair<Long, String> = 0L to ""
+
+    /** The site-wide "__hdnea__=..." token the /pind player puts on every non-jiotvpllive stream (re-read every minute). */
+    private fun primaryCookie(): String {
+        val now = System.currentTimeMillis()
+        if (now - primaryCookie.first < 60_000L && primaryCookie.second.isNotEmpty()) return primaryCookie.second
+        try { altConfig() } catch (_: Exception) {}
+        val body = get(primaryCookieUrl, timeout = 8000) ?: return primaryCookie.second
+        try {
+            val a = JSONArray(body)
+            for (i in 0 until a.length()) { val c = a.optJSONObject(i)?.optString("cookie", "").orEmpty()
+                if (c.contains("__hdnea__=")) { primaryCookie = now to c.trim(); break } }
+        } catch (_: Exception) {
+            Regex("__hdnea__=[^\"&\s]+").find(body)?.let { primaryCookie = now to it.value }
+        }
+        return primaryCookie.second
+    }
+
+    /** The backup site's channel entry for this channel: same name first, then the same id. */
+    private fun altEntry(id: String, name: String): JSONObject? {
+        altChannel(id)   // loads / refreshes the list
+        val all = altChannels.second
+        val key = Playlist.norm(name)
+        prefs?.getString("alt_$key", null)?.let { all[it]?.let { e -> return e } }
+        if (key.length >= 3) {
+            all.values.firstOrNull { Playlist.norm(it.optString("name")) == key }?.let { return it }
+            all.values.firstOrNull { val n = Playlist.norm(it.optString("name")); n.length >= 3 && (n.startsWith(key) || key.startsWith(n)) }?.let { return it }
+        }
+        return all[id]
+    }
+
+    /**
+     * Exactly what jjtvxweb.pages.dev/pind?id=.. does, but in the native player: the channel's url, url1, url2, url3 from
+     * its channel list, every ClearKey key, the per-channel Star token for jiotvpllive streams and the site-wide token
+     * for all others, token as the whole query (Streams profile "jioweb" carries it to every segment with plaYtv UA +
+     * JioTV Referer, same as the site's request filter).
+     */
+    fun scrapeAlt(name: String, id: String = ""): List<Server> {
+        val e = altEntry(id, name) ?: return emptyList()
+        val eid = e.optString("id")
+        prefs?.edit()?.putString("alt_${Playlist.norm(name)}", eid)?.apply()
+        val drm = drmOf(e)
+        val urls = listOf("url", "url1", "url2", "url3").map { e.optString(it, "") }
+            .filter { it.startsWith("http") }.map { it.replace("bpk-tv//", "bpk-tv/") }
         val out = ArrayList<Server>()
-        for (t in texts) LINK.findAll(t).forEach { m -> if (Playlist.norm(m.value).contains(key) && out.none { it.url == m.value }) out.add(Server("Backup", m.value, null)) }
+        for (u in urls) {
+            val cookie = if (isJioPl(u)) (try { starCookie(eid) } catch (_: Exception) { null } ?: continue)
+                         else try { primaryCookie() } catch (_: Exception) { "" }
+            val full = if (cookie.isNotEmpty()) withCookie(u, cookie) else u
+            if (out.none { it.url == full }) out.add(Server("Backup ${out.size + 1}", full, drm))
+        }
         return out
     }
 
