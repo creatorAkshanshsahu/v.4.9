@@ -105,4 +105,31 @@ class StreamRequestPolicyTest {
         assertEquals(url + "&__hdnea__=site-cookie", policy.request(url).url)
     }
 
+
+    @Test fun `JJTV provenance survives redirects but its source-specific headers and cookie do not`() {
+        val source = TgStream("JJTV", "https://relay.example/live.mpd", "dash",
+            headers = mapOf("User-Agent" to "plaYtv/7.1.5", "Referer" to "https://www.jiotv.com/", "Authorization" to "relay-only"),
+            cookie = "__hdnea__=relay-cookie", requestOrigin = JjtvResolver.SITE)
+        val policy = StreamRequestPolicy(source)
+        assertEquals("plaYtv/7.1.5", policy.request(source.url).headers["User-Agent"])
+        val redirected = policy.request("https://cdn.example/live.mpd")
+        assertEquals(JjtvResolver.SITE, redirected.headers["Origin"])
+        assertEquals(JjtvResolver.SITE + "/", redirected.headers["Referer"])
+        assertNull(redirected.headers["Authorization"])
+        assertNull(redirected.headers["User-Agent"])
+        assertEquals("https://cdn.example/live.mpd", redirected.url)
+    }
+
+    @Test fun `TG relay exceptions do not replace the JJTV website request policy`() {
+        val source = TgStream("JJTV", "https://allinonereborn2.online/fixture.mpd?id=872", "dash",
+            cookie = "__hdnea__=jjtv-cookie", requestOrigin = JjtvResolver.SITE)
+        assertEquals(source.url + "&__hdnea__=jjtv-cookie", StreamRequestPolicy(source).request(source.url).url)
+    }
+
+    @Test fun `JJTV replaces a stale playlist signature with the freshly selected channel cookie`() {
+        val source = TgStream("JJTV", "https://jiotvpllive.cdn.jio.com/fixture.mpd?__hdnea__=old&keep=a%2Bb", "dash",
+            cookie = "__hdnea__=new-channel-token", requestOrigin = JjtvResolver.SITE)
+        assertEquals("https://jiotvpllive.cdn.jio.com/fixture.mpd?keep=a%2Bb&__hdnea__=new-channel-token", StreamRequestPolicy(source).request(source.url).url)
+    }
+
 }

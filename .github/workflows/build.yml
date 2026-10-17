@@ -38,7 +38,7 @@ jobs:
         run: |
           set -o pipefail
           gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
-      - name: Check native resolution against the current TG deployment
+      - name: Check current TG and JJTV native configuration
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true
         timeout-minutes: 5

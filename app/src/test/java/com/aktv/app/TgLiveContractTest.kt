@@ -28,7 +28,7 @@ class TgLiveContractTest {
         var functionSaved = false
         TgResolver(tracked, saveFunction = { functionSaved = true }).use { resolver ->
             for (id in ids) {
-                val report = JSONObject().put("channel", id)
+                val report = JSONObject().put("provider", "TG").put("channel", id)
                 try {
                     val sources = resolver.resolve(id, fresh = false)
                     report.put("sources", JSONArray().apply {
@@ -53,6 +53,39 @@ class TgLiveContractTest {
         assertTrue("TG metadata unavailable for channel IDs: ${missing.joinToString()}", missing.isEmpty())
         assertFalse("Native resolution fell back to the incomplete public API instead of TG's player configuration",
             requested.any { it.startsWith("/api/public/channels/") })
+    }
+
+    @Test fun `JJTV native configuration supplies exact channel keys and per-channel cookies`() {
+        assumeTrue(System.getProperty("aktv.live.tg") == "true")
+        val ids = listOf("816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+            "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
+        val resolver = JjtvResolver()
+        val missing = ArrayList<String>()
+        val missingKeys = ArrayList<String>()
+        for (id in ids) {
+            val report = JSONObject().put("provider", "JJTV").put("channel", id)
+            try {
+                val sources = resolver.resolve(id)
+                report.put("sources", JSONArray().apply {
+                    sources.forEach { source ->
+                        put(JSONObject().put("host", URI(source.url).host).put("type", source.type)
+                            .put("keyCount", source.drm?.let { ClearKey.pairs(it).size } ?: 0)
+                            .put("cookiePresent", source.cookie.isNotBlank())
+                            .put("tokenSecondsLeft", StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 }))
+                    }
+                })
+                if (id in setOf("816", "872", "1106")) {
+                    if (sources.none { it.drm?.let { drm -> ClearKey.pairs(drm).isNotEmpty() } == true }) missingKeys.add(id)
+                    report.put("manifests", JSONArray().apply { sources.take(2).forEach { put(probe(it)) } })
+                }
+            } catch (error: Exception) {
+                missing.add(id)
+                report.put("metadataError", error.javaClass.simpleName)
+            }
+            println("TG_NATIVE $report")
+        }
+        assertTrue("JJTV metadata unavailable for exact channel IDs: ${missing.joinToString()}", missing.isEmpty())
+        assertTrue("JJTV omitted expected key data for channel IDs: ${missingKeys.joinToString()}", missingKeys.isEmpty())
     }
 
     /** Inspect the Media3 transport, not a second guessed HTTP profile. A manifest is NOT playback proof. */

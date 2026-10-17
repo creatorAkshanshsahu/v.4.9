@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object TgServers {
     const val SITE = TgResolver.SITE
     @Volatile private var resolver = TgResolver()
+    @Volatile private var jjtv = JjtvResolver()
     private val refreshExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "tg-site-refresh").apply { isDaemon = true } }
     private val refreshing = AtomicBoolean(false)
     @Volatile private var refreshChannel: String? = null
@@ -16,6 +17,7 @@ object TgServers {
         val prefs = ctx.getSharedPreferences("aktv_tg", Context.MODE_PRIVATE)
         if (prefs.getInt("native_schema", 0) != 2) prefs.edit().clear().putInt("native_schema", 2).apply()
         resolver.close()
+        jjtv = JjtvResolver()
         resolver = TgResolver(initialFunction = prefs.getString("native_function", null), saveFunction = {
             prefs.edit().putString("native_function", it).apply()
         })
@@ -24,6 +26,14 @@ object TgServers {
     fun fetch(id: String, fresh: Boolean = false, v2: Boolean = false): List<TgStream> {
         if (!v2) refreshChannel = id
         return resolver.resolve(id, v2, fresh)
+    }
+
+    internal fun fetchFrom(provider: LiveProvider, id: String, fresh: Boolean = false, v2: Boolean = false): List<TgStream> = when (provider) {
+        LiveProvider.TG -> fetch(id, fresh, v2)
+        LiveProvider.JJTV -> {
+            require(!v2) { "JJTV uses V1/Jio IDs, not V2 catalogue IDs" }
+            jjtv.resolve(id, fresh)
+        }
     }
 
     fun invalidate(id: String, v2: Boolean = false) = resolver.invalidate(id, v2)

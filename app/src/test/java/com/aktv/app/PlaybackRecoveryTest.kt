@@ -42,4 +42,29 @@ class PlaybackRecoveryTest {
         recovery.reset()
         assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(0, 1))
     }
+
+    @Test fun `additional native sources load only after the current server list fails`() {
+        val recovery = PlaybackRecovery()
+        assertEquals(PlaybackRecovery.Action.Source(1), recovery.failed(0, 2, canLoadMore = true))
+        assertEquals(PlaybackRecovery.Action.MoreSources(false), recovery.failed(1, 2, canLoadMore = true))
+        // One extra provider appended source 2. The failed TG indices must stay failed.
+        assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(2, 3))
+    }
+
+    @Test fun `empty additional metadata cannot cause an endless provider lookup`() {
+        val recovery = PlaybackRecovery()
+        assertEquals(PlaybackRecovery.Action.MoreSources(false), recovery.failed(0, 0, canLoadMore = true))
+        assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(0, 0, canLoadMore = true))
+        assertEquals(PlaybackRecovery.Action.MoreSources(true), recovery.failed(0, 0, canLoadMore = true))
+        assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(0, 0, canLoadMore = true))
+    }
+
+    @Test fun `fresh recovery also refreshes the additional provider once and then stops`() {
+        val recovery = PlaybackRecovery()
+        assertEquals(PlaybackRecovery.Action.MoreSources(false), recovery.failed(0, 1, canLoadMore = true))
+        assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(1, 2))
+        assertEquals(PlaybackRecovery.Action.MoreSources(true), recovery.failed(0, 1, canLoadMore = true))
+        assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(1, 2))
+    }
+
 }

@@ -11,19 +11,20 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
     private val tokens = ConcurrentHashMap<String, String>()
     // TG's player explicitly excludes its allinonereborn relay from the Jio query filter.
     // The relay owns its query/authentication, even when TG repeats the primary cookie on it.
-    private val suppliedToken = cookieToken(stream.cookie)?.takeUnless { ownsQuery(stream.url) }
+    private val preserveRelayQuery = stream.requestOrigin == TgResolver.SITE
+    private val suppliedToken = cookieToken(stream.cookie)?.takeUnless { preserveRelayQuery && ownsQuery(stream.url) }
 
     init { (suppliedToken ?: tokenOf(stream.url))?.let { tokens[origin] = it } }
 
     fun request(url: String): Request {
         val target = originOf(url)
-        val token = tokens[target]?.takeUnless { ownsQuery(url) || expired(it, now()) }
+        val token = tokens[target]?.takeUnless { (preserveRelayQuery && ownsQuery(url)) || expired(it, now()) }
         val resolved = when {
             token == null -> url
             url == stream.url && suppliedToken != null -> withToken(url, token, replace = true)
             else -> withToken(url, token, replace = false)
         }
-        val headers = linkedMapOf("Referer" to "https://livetgtv.lovable.app/", "Origin" to "https://livetgtv.lovable.app")
+        val headers = linkedMapOf("Referer" to stream.requestOrigin.trimEnd('/') + "/", "Origin" to stream.requestOrigin.trimEnd('/'))
         // Headers supplied for one relay must not become the credentials of its redirect/segment host.
         if (target == origin) stream.headers.forEach { (key, value) ->
             headers.keys.firstOrNull { it.equals(key, true) }?.let { headers.remove(it) }

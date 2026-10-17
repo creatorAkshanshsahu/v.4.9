@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroBackdrop: ImageView; private lateinit var heroPreview: View; private lateinit var previewPv: PlayerView
     private var previewPlayer: ExoPlayer? = null; private var previewToken = 0
     private var previewJob: Future<*>? = null
+    private var previewStall: Runnable? = null
     // ➜ CHANNEL UPDATE LINKS: the app re-reads both lists from here every launch
     private val SITE = TgServers.SITE
     private val BASE = "$SITE/api/public/channels"            // V1 live TV
@@ -99,6 +100,8 @@ class MainActivity : AppCompatActivity() {
     private val playbackIo = Executors.newFixedThreadPool(2)
     private var nativeSources = emptyList<TgStream>()
     private var serverIdx = 0
+    private var nativeProviders = listOf(LiveProvider.TG)
+    private var nextNativeProvider = 1
     private val recovery = PlaybackRecovery()
     private var okLong = false
     private var renderedFrame = false
@@ -809,37 +812,67 @@ class MainActivity : AppCompatActivity() {
         resolveAndStart(ch)
     }
 
-    /** Signed URLs/keys come from TG at playback time. There is no wait for another website or playlist. */
+    /** Resolve the last working native provider first; never wait for a web player or bundled playlist. */
     private fun resolveAndStart(ch: Channel, fresh: Boolean = false) {
         val token = ++playToken
         resolveJob?.cancel(true)
         nativeSources = emptyList(); serverIdx = 0
+        nativeProviders = providerOrder(ch); nextNativeProvider = 1
+        val provider = nativeProviders.first()
         disarmStall(); releasePlayer(); spinner.visibility = View.VISIBLE
-        playMsg(if (fresh) "Refreshing TG TV stream…" else "Tuning in…")
+        playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Finding a working server…")
         resolveJob = playbackIo.submit {
             try {
-                val sources = TgServers.fetch(ch.id, fresh = fresh, v2 = ch.v2)
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                     nativeSources = sources
-                    // Remember a server, not its expiring URL/keys. A redeploy can safely change the list/order.
                     val saved = prefs.getString("source_${ch.key}", null)
                     serverIdx = sources.indexOfFirst { sourceKey(it) == saved }.coerceAtLeast(0)
-                    startNative()
+                    if (sources.isEmpty()) advanceNative("No native stream was advertised") else startNative()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     if (token == playToken && layer.visibility == View.VISIBLE) {
                         nativeSources = emptyList()
-                        advanceNative(if (e is TgResolveException) e.message.orEmpty() else "Couldn't reach TG TV")
+                        advanceNative(if (e is TgResolveException) e.message.orEmpty() else "Couldn't load ${providerName(provider)}'s current streams")
                     }
                 }
             }
         }
     }
 
-    private fun sourceKey(source: TgStream): String = java.security.MessageDigest.getInstance("SHA-256")
-        .digest(source.url.substringBefore('?').toByteArray()).joinToString("") { "%02x".format(it) }
+    private fun providerOrder(ch: Channel) = LiveProviders.order(ch.v2, prefs.getString("source_provider_${ch.key}", null))
+    private fun providerName(provider: LiveProvider) = if (provider == LiveProvider.TG) "TG TV" else "JJTV"
+    private fun sourceKey(source: TgStream) = LiveProviders.sourceKey(source)
+    private fun rememberNativeSource(ch: Channel, source: TgStream) {
+        prefs.edit().putString("source_${ch.key}", sourceKey(source))
+            .putString("source_provider_${ch.key}", source.requestOrigin).apply()
+    }
+
+    /** Load another advertised native source only after the current list fails. Keep one player engine. */
+    private fun loadMoreNative(ch: Channel, fresh: Boolean, reason: String) {
+        val providerIndex = nextNativeProvider
+        val provider = nativeProviders.getOrNull(providerIndex) ?: run { advanceNative(reason); return }
+        val token = ++playToken
+        resolveJob?.cancel(true)
+        spinner.visibility = View.VISIBLE
+        playMsg("Automatically trying ${providerName(provider)} native streams…")
+        resolveJob = playbackIo.submit {
+            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
+                nextNativeProvider = providerIndex + 1
+                if (extra.isEmpty()) advanceNative(reason)
+                else {
+                    val first = nativeSources.size
+                    nativeSources = nativeSources + extra
+                    serverIdx = first
+                    startNative()
+                }
+            }
+        }
+    }
 
     // Keep a comfortable live buffer, but don't wait for the full buffer before showing the first frame.
     private fun liveCfg() = MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(12000)
@@ -936,7 +969,7 @@ class MainActivity : AppCompatActivity() {
             if (player !== owner) return
             renderedFrame = true; ui.removeCallbacks(videoCheck)
             val ch = shown.getOrNull(current) ?: return
-            nativeSources.getOrNull(serverIdx)?.let { prefs.edit().putString("source_${ch.key}", sourceKey(it)).apply() }
+            nativeSources.getOrNull(serverIdx)?.let { rememberNativeSource(ch, it) }
         }
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
@@ -975,17 +1008,18 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility == View.VISIBLE && player != null) advanceNative("The live stream stopped responding")
     }
 
-    /** Bounded recovery, always in ExoPlayer: current TG servers, one metadata refresh, then an actionable error. */
+    /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
     private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
         disarmStall(); releasePlayer()
-        when (val action = recovery.failed(serverIdx, nativeSources.size)) {
+        when (val action = recovery.failed(serverIdx, nativeSources.size, canLoadMore = nextNativeProvider < nativeProviders.size)) {
             is PlaybackRecovery.Action.Source -> {
                 serverIdx = action.index
                 playMsg("Automatically trying ${nativeSources[serverIdx].label}…")
                 val token = playToken
                 ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
             }
+            is PlaybackRecovery.Action.MoreSources -> loadMoreNative(ch, action.fresh, reason)
             PlaybackRecovery.Action.Refresh -> {
                 TgServers.invalidate(ch.id, ch.v2)
                 resolveAndStart(ch, fresh = true)
@@ -994,7 +1028,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Left / OK switches TG sources, not players; a single-source channel simply reloads. */
+    /** Left / OK switches native sources, not players; a single-source channel simply reloads. */
     private fun switchServer() {
         if (nativeSources.size < 2) { reloadStream(); return }
         playToken++; resolveJob?.cancel(true); recovery.reset()
@@ -1039,7 +1073,7 @@ class MainActivity : AppCompatActivity() {
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && guideShown) return guideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER)) {
-            // tap OK = info / next TG source, hold OK = fetch a fresh stream
+            // tap OK = info / next native source, hold OK = fetch a fresh stream
             if (e.action == KeyEvent.ACTION_DOWN) {
                 if (e.repeatCount == 0) okLong = false
                 else if (e.repeatCount == 8 && !okLong) { okLong = true; reloadStream() }
@@ -1483,38 +1517,86 @@ class MainActivity : AppCompatActivity() {
     }
     private fun stopPreview() {
         ui.removeCallbacks(previewRunnable); previewToken++; previewJob?.cancel(true)
-        previewPv.player = null
-        previewPlayer?.let { try { it.release() } catch (_: Exception) {} }; previewPlayer = null
-        // never GONE: a TextureView only gets its surface while laid out, and the first frame is what fades it in
+        releasePreviewPlayer()
+        // A TextureView must remain laid out for the first frame to fade in.
         heroPreview.animate().cancel(); if (heroPreview.alpha > 0f) heroPreview.animate().alpha(0f).setDuration(200).start()
     }
+    private fun releasePreviewPlayer() {
+        previewStall?.let { ui.removeCallbacks(it) }; previewStall = null
+        previewPv.player = null
+        val old = previewPlayer; previewPlayer = null
+        old?.let { try { it.release() } catch (_: Exception) {} }
+    }
+    private fun previewIsCurrent(ch: Channel, token: Int) = token == previewToken && layer.visibility != View.VISIBLE &&
+        !searchShown && tab < 2 && !heroCollapsed && (heroTile as? Tile.Ch)?.c?.key == ch.key
+
     private fun startPreview() {
         val ch = (heroTile as? Tile.Ch)?.c ?: return
         if (layer.visibility == View.VISIBLE || searchShown) return
         val token = ++previewToken
+        loadPreviewProvider(ch, token, providerOrder(ch), 0)
+    }
+    private fun loadPreviewProvider(ch: Channel, token: Int, providers: List<LiveProvider>, providerIndex: Int) {
+        if (!previewIsCurrent(ch, token)) return
+        releasePreviewPlayer()
+        val provider = providers.getOrNull(providerIndex) ?: run { stopPreview(); return }
         previewJob = io.submit {
-            try {
-                val source = TgServers.fetch(ch.id, v2 = ch.v2).firstOrNull() ?: return@submit
-                runOnUiThread { if (token == previewToken && layer.visibility != View.VISIBLE) playPreview(source) }
-            } catch (_: Exception) { }
+            val sources = try { TgServers.fetchFrom(provider, ch.id, v2 = ch.v2) } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                if (!previewIsCurrent(ch, token)) return@runOnUiThread
+                // Put a previously rendered source first without removing the other native candidates.
+                val saved = prefs.getString("source_${ch.key}", null)
+                val ordered = sources.sortedBy { if (sourceKey(it) == saved) 0 else 1 }
+                playPreview(ordered, 0, ch, token, providers, providerIndex)
+            }
         }
     }
-    private fun playPreview(source: TgStream) {
+    private fun playPreview(sources: List<TgStream>, index: Int, ch: Channel, token: Int,
+                            providers: List<LiveProvider>, providerIndex: Int) {
+        if (!previewIsCurrent(ch, token)) return
+        releasePreviewPlayer()
+        val source = sources.getOrNull(index) ?: run {
+            loadPreviewProvider(ch, token, providers, providerIndex + 1); return
+        }
+        var advancing = false
+        fun next() {
+            if (advancing || !previewIsCurrent(ch, token)) return
+            advancing = true
+            ui.post { if (previewIsCurrent(ch, token)) playPreview(sources, index + 1, ch, token, providers, providerIndex) }
+        }
         try {
-            val p = ExoPlayer.Builder(this).build()
+            val p = ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableDecoderFallback(true)).build()
             p.volume = 0f
             p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setMaxVideoSize(1280, 720).build()
             previewPlayer = p
+            var rendered = false
+            fun watch(ms: Long) {
+                previewStall?.let { ui.removeCallbacks(it) }
+                previewStall = Runnable { if (previewPlayer === p && previewIsCurrent(ch, token) && (p.playbackState != Player.STATE_READY || !rendered)) next() }
+                ui.postDelayed(requireNotNull(previewStall), ms)
+            }
             p.setMediaSource(nativeMediaSource(source))
             p.addListener(object : Player.Listener {
                 override fun onRenderedFirstFrame() {
-                    if (previewPlayer !== p) return
+                    if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
+                    rendered = true
+                    previewStall?.let { ui.removeCallbacks(it) }
+                    rememberNativeSource(ch, source)
                     heroPreview.animate().cancel(); heroPreview.animate().alpha(1f).setDuration(450).start()
                 }
-                override fun onPlayerError(error: PlaybackException) { if (previewPlayer === p) stopPreview() }
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
+                    when (state) {
+                        Player.STATE_BUFFERING -> watch(11000)
+                        Player.STATE_READY -> if (rendered) previewStall?.let { ui.removeCallbacks(it) } else watch(6000)
+                        Player.STATE_ENDED -> next()
+                    }
+                }
+                override fun onPlayerError(error: PlaybackException) { if (previewPlayer === p) next() }
             })
             previewPv.player = p; p.playWhenReady = true; p.prepare()
-        } catch (_: Exception) { stopPreview() }
+            watch(10000)
+        } catch (_: Exception) { releasePreviewPlayer(); next() }
     }
 
     /** Rebuilds the rows (e.g. a new "Recently watched" entry) without losing the scroll position. */
