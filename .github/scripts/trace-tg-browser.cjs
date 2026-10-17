@@ -38,7 +38,7 @@ function configShape(value) {
     keyEntryCount: Array.isArray(source.keys) ? source.keys.length : 0
   })) };
 }
-async function trace(browser, channel) {
+async function trace(browser, channel, entrypoint = "TG-embedded") {
   const context = await browser.newContext();
   const records = [], outstanding = new Set();
   let blocked = 0;
@@ -113,7 +113,7 @@ async function trace(browser, channel) {
     }
   });
   try {
-    await page.goto(TG + '/watch/' + channel, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(entrypoint === 'JJTV-direct' ? JJ + '/pind?id=' + channel : TG + '/watch/' + channel, { waitUntil: 'domcontentloaded', timeout: 30000 });
     for (let round = 0; round < 13; round++) {
       await page.waitForTimeout(5000);
       const frames = [];
@@ -136,20 +136,22 @@ async function trace(browser, channel) {
   } catch (error) { records.push({ event: 'trace-error', name: error.name }); }
   await Promise.allSettled([...outstanding]);
   await context.close();
-  return { channel, videoObserved: lastFrames.some(f => f.videos.some(v => v.time >= 3 && v.width > 0 && !v.paused)),
+  return { channel, entrypoint, videoObserved: lastFrames.some(f => f.videos.some(v => v.time >= 3 && v.width > 0 && !v.paused)),
     lastFrames, blockedHosts, blockedNonPlayerRequests: blocked, records };
 }
 (async () => {
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage'] });
   try {
-    const results = await Promise.all(['1106', '872'].map(channel => trace(browser, channel)));
+    const cases = [['1108', 'TG-embedded'], ['1108', 'JJTV-direct'], ['872', 'JJTV-direct'], ['816', 'JJTV-direct']];
+    const results = await Promise.all(cases.map(([channel, entrypoint]) => trace(browser, channel, entrypoint)));
     for (const result of results) {
       const channel = result.channel;
-      const report = JSON.stringify(result);
-      for (let start = 0; start < Math.min(report.length, 12000); start += 3000) {
+      // Keep the final state and actual requests, not thirteen duplicate video-state snapshots.
+      const report = JSON.stringify({ ...result, records: result.records.filter(record => record.event !== 'state') });
+      for (let start = 0; start < Math.min(report.length, 6000); start += 3000) {
         const text = report.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
-        console.log(`::notice title=Browser trace ${channel} ${start / 3000 + 1}::${text}`);
+        console.log(`::notice title=Browser trace ${result.entrypoint} ${channel} ${start / 3000 + 1}::${text}`);
       }
     }
   } finally { await browser.close(); }
