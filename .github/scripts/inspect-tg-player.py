@@ -7,6 +7,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 
 SITE = "https://livetgtv.lovable.app"
 CHANNEL = "872"
@@ -157,6 +158,40 @@ def records(body, content_type):
                     yield json.loads(line)
 
 
+def probe_media(config):
+    """The current website's manifest request filter, for comparison with the native transport."""
+    reports = []
+    for server in [config] + (config.get('backups') or [])[:3]:
+        for source in (server.get('urls') or [])[:2]:
+            report = {'host': urllib.parse.urlsplit(source).hostname, 'policy': 'website-manifest-filter'}
+            url = source
+            if server.get('cookie') and 'allinonereborn' not in source:
+                url = source.split('?')[0] + '?' + server['cookie']
+            headers = {'User-Agent': UA, 'Origin': SITE, 'Referer': SITE + '/'}
+            try:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=12) as response:
+                    body = response.read(512 * 1024)
+                    report.update(status=response.status, finalHost=urllib.parse.urlsplit(response.url).hostname, bytes=len(body))
+                    text = body.lstrip()
+                    if text.startswith(b'#EXTM3U'):
+                        report.update(format='hls', encrypted=b'#EXT-X-KEY:' in text)
+                    elif text.startswith(b'<') and b'<MPD' in text:
+                        root = ET.fromstring(body)
+                        protections = [node for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'ContentProtection']
+                        bases = [node.text for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'BaseURL' and node.text]
+                        report.update(format='dash', encrypted=bool(protections),
+                                      drmSchemes=sorted(set(node.get('schemeIdUri', '') for node in protections)),
+                                      mediaHosts=sorted(set(urllib.parse.urlsplit(urllib.parse.urljoin(response.url, base)).hostname for base in bases)))
+                    else:
+                        report['format'] = 'not-a-manifest'
+            except urllib.error.HTTPError as error:
+                report['status'] = error.code
+            except Exception as error:
+                report['error'] = type(error).__name__
+            reports.append(sanitize(report))
+    return reports
+
+
 def inspect():
     page = f'{SITE}/watch/{CHANNEL}?_contract={int(time.time())}'
     status, kind, html = get(page)
@@ -178,7 +213,7 @@ def inspect():
                 for fn in ids:
                     found[fn] = min(found.get(fn, 99), priority(url))
                 pending.update(set(scripts(script, url)) - visited)
-                if priority(url) < 3:
+                if priority(url) < 3 and 'shaka-player' not in url:
                     bodies[url] = script
     for url, script in bodies.items():
         parts = []
@@ -189,18 +224,29 @@ def inspect():
             if part not in parts:
                 parts.append(part)
         emit('TG player code ' + urllib.parse.urlsplit(url).path.rsplit('/', 1)[-1], '\n'.join(parts[:22]))
-    inner = {'t': 10, 'i': 0, 'p': {'k': ['data'], 'v': [
-        {'t': 10, 'i': 1, 'p': {'k': ['id'], 'v': [{'t': 1, 's': CHANNEL}]}, 'o': 0}]}, 'o': 0}
-    payload = urllib.parse.quote(json.dumps({'t': inner, 'f': 127, 'm': []}, separators=(',', ':')))
-    for fn in sorted(found, key=found.get)[:10]:
-        code, kind, body = get(f'{SITE}/_serverFn/{fn}?payload={payload}', rpc=True)
-        report = {'function': fn, 'status': code, 'type': kind, 'bytes': len(body)}
-        try:
-            refs = {}
-            report['decoded'] = [sanitize(decode(record, refs)) for record in records(body, kind)]
-        except Exception as error:
-            report['decodeError'] = type(error).__name__
-        emit('TG RPC', report)
+    player_ids = [fn for fn in found if found[fn] == 0]
+    if not player_ids:
+        emit('TG RPC', {'error': 'No function found in the deployed servers chunk'})
+        raise SystemExit(1)
+    for channel in ('872', '1106'):
+        inner = {'t': 10, 'i': 0, 'p': {'k': ['data'], 'v': [
+            {'t': 10, 'i': 1, 'p': {'k': ['id'], 'v': [{'t': 1, 's': channel}]}, 'o': 0}]}, 'o': 0}
+        payload = urllib.parse.quote(json.dumps({'t': inner, 'f': 127, 'm': []}, separators=(',', ':')))
+        for fn in player_ids[:3]:
+            code, kind, body = get(f'{SITE}/_serverFn/{fn}?payload={payload}', rpc=True)
+            report = {'channel': channel, 'function': fn, 'status': code, 'type': kind, 'bytes': len(body)}
+            try:
+                refs = {}
+                decoded = [decode(record, refs) for record in records(body, kind)]
+                report['decoded'] = sanitize(decoded)
+                for record in decoded:
+                    config = record.get('result') if isinstance(record, dict) else None
+                    if isinstance(config, dict) and 'urls' in config:
+                        report['manifests'] = probe_media(config)
+            except Exception as error:
+                report['decodeError'] = type(error).__name__
+            emit('TG RPC', report)
+
 
 
 if __name__ == '__main__':

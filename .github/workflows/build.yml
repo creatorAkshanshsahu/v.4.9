@@ -36,6 +36,14 @@ jobs:
         run: |
           set -o pipefail
           gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+      - name: Check native resolution against the current TG deployment
+        # Upstream/geographic outages must not make deterministic unit tests flaky.
+        continue-on-error: true
+        timeout-minutes: 5
+        run: gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' -PliveTg=true --console=plain
+      - name: Report live native checks without credentials
+        if: always()
+        run: python3 .github/scripts/report-live-player.py
       - name: Report build errors
         if: failure()
         run: python3 .github/scripts/report-build-errors.py

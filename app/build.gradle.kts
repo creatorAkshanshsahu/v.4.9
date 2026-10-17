@@ -5,6 +5,7 @@ android {
     defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 25; versionName = "4.9.8" }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
     lint { abortOnError = false; checkReleaseBuilds = false }
+    testOptions { unitTests.all { it.systemProperty("aktv.live.tg", project.findProperty("liveTg")?.toString() ?: "false") } }
     flavorDimensions += "abi"
     productFlavors { create("arm32") { dimension = "abi" }; create("arm64") { dimension = "abi" } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
