@@ -12,7 +12,7 @@ on:
         default: build
 jobs:
   inspect:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'inspect'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'inspect')
     runs-on: ubuntu-latest
     timeout-minutes: 6
     permissions:
