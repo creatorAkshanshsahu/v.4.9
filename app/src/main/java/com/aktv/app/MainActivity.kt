@@ -1227,6 +1227,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectNativeProvider(provider: LiveProvider?) {
+        if (layer.visibility != View.VISIBLE) return
         val ch = shown.getOrNull(current) ?: return
         if (drmProbeRunning) { showPlaybackDetails(); return }
         if (ch.v2 && provider == LiveProvider.JJTV) return
@@ -1419,6 +1420,7 @@ class MainActivity : AppCompatActivity() {
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
+        sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; layer.keepScreenOn = false; resetGuide()
         if (searchShown) hideSearch(false)
     }
