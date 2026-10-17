@@ -1,4 +1,19 @@
-# Native live TV (4.9.12)
+# Native live TV (4.9.13)
+
+## 4.9.13 — TV-only black/loading report
+
+The user reports that JJTV streams play in the installed APK on a phone, while their TV connects but remains loading/black. This is device-specific evidence, not evidence of another missing server. **Live TV already uses native Media3 and a SurfaceView, not WebView or GeckoView.** This update leaves the working TG/JJTV resolution, request styles, tokens and DRM configuration unchanged. The TV model, Android version and decoder error have not yet been supplied; no particular hardware fault has been confirmed.
+
+- `NativePlaybackPolicy` removes the forced asynchronous codec adapter. TVs use synchronous adapters; normal phones retain Media3's platform defaults. Decoder initialization fallback stays enabled.
+- TVs prefer supported AVC/AAC formats, a 720p/30 fps/3 Mbps ceiling and a 24–32 MiB buffer target rather than the former 96 MiB target. Compatibility mode prefers 480p/low bitrate and the platform's software decoders, **if available**. These are preferences: a supported variant may exceed the quality constraints if no constrained variant exists, but tracks outside the renderer's reported capabilities are no longer forced. There is no bundled new codec engine.
+- A decoder error or missing/frozen picture permits one same-source compatibility retry before normal source/provider recovery. Software preference retains the original secure/tunnelling requirements and keeps hardware decoders available. It does not bypass DRM or change licence security. HTTP and DRM errors continue through source recovery instead of being disguised as decoder errors.
+- Full-screen preparation waits for a valid SurfaceView; the gate is single-shot and ignores released/replaced players. Surface callbacks are detached on release.
+- `PlaybackHealth` uses a monotonic 15-second first-picture deadline (12 seconds for previews). READY, audio progress and about-to-render metadata do not substitute for the first rendered-frame callback or extend that deadline. Rebuffering or stopped video also has a 12-second watchdog. Explicit Radio channels may be audio-only.
+- The whole full-screen startup/recovery cycle has a 60-second budget including metadata lookups and decoder/source retries. A first frame clears that budget; a later failure starts a new bounded recovery cycle. Only 30 seconds of real video progress (or progressing audio for Radio) resets the source-recovery counter. Compatibility preference is remembered per channel only after that stable interval.
+- TV hero previews default to off unless the user explicitly enables them. Enabled previews use the same safer track/codec/buffer policy and non-resetting first-frame watchdog. Movies/series playback is unchanged.
+- A final error stops loading, invalidates outstanding work and shows the device model, Android version, decoder mode and last initialized decoder name, without URLs, keys or tokens.
+
+Build [39036283985](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39036283985) passed both ABI release builds and 140 offline test methods, including 23 new TV-policy/health/surface cases. The two separate live metadata diagnostics also passed, but do not decode video. The new tests cover health deadlines/progress, whole-cycle budgets, stale surface gates, actual Media3 track-selector parameters and secure/tunnelling-preserving decoder ordering. They do not exercise a physical TV codec. **The changed APK still needs verification on the affected TV**; successful compilation and these tests are not proof of rendered video on that hardware.
 
 ## 4.9.12 — real browser request comparison
 
@@ -86,7 +101,7 @@ Both full-screen playback and muted previews use the same Media3/ExoPlayer media
 
 ## Verification and limits
 
-Offline tests cover static-literal discovery, protocol parsing, multi-key and legacy ClearKey formats, exact Hindi/Star IDs, source order, PL-specific cookie selection, cache expiry and redeployment, header/redirect isolation, V1/V2 separation, provider preference, interruption and bounded recovery. Their URLs and key/token values are synthetic.
+Offline tests cover first-picture/stall deadlines, whole-cycle retry budgets, surface preparation gates, native TV track/decoder policy, static-literal discovery, protocol parsing, multi-key and legacy ClearKey formats, exact Hindi/Star IDs, source order, PL-specific cookie selection, cache expiry and redeployment, header/redirect isolation, V1/V2 separation, provider preference, interruption and bounded recovery. Their URLs and key/token values are synthetic.
 
 With JDK 17, Gradle 8.9 and Android SDK 35:
 
@@ -106,6 +121,8 @@ This uses the **production** resolvers, protocol parsers and stream transport. T
 `.github/scripts/inspect-tg-player.py` and `inspect-jjtv-player.py` inspect current public player contracts; `report-live-player.py` exposes redacted test summaries and individual live-test outcomes in GitHub Checks. Build success, a non-empty source list and available key data are not device-playback proof.
 
 ### Device acceptance checklist — still required
+
+For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.13** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
 
 - Confirm video, the expected audio language and sustained playback for Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada; Sony YAY Hindi; and Cartoon Network Hindi 816.
 - Test a normal TG DASH channel, an HLS channel, a JJTV native source and a V2 channel. Verify that V2 never uses the Jio/JJTV namespace.
