@@ -19,16 +19,19 @@ import java.util.UUID
  * Only the key IDs from THIS source's supplied, validated keys are used. No key is generated or fetched.
  */
 internal class ClearKeyDashManifestParser(drm: JSONObject) : DashManifestParser() {
-    private val common: DrmInitData.SchemeData
+    private val common = schemeData(drm)
 
-    init {
-        require(ClearKey.license(drm) != null) { "An explicit valid ClearKey configuration is required" }
-        val keyIds = ClearKey.pairs(drm).keys.map { encoded ->
-            val bytes = ByteBuffer.wrap(Base64.getUrlDecoder().decode(encoded))
-            UUID(bytes.long, bytes.long)
-        }.toTypedArray()
-        common = DrmInitData.SchemeData(C.COMMON_PSSH_UUID, MimeTypes.VIDEO_MP4,
-            PsshAtomUtil.buildPsshAtom(C.COMMON_PSSH_UUID, keyIds, null))
+    companion object {
+        /** Also used by the offline device self-test; no separate initialization recipe. */
+        fun schemeData(drm: JSONObject): DrmInitData.SchemeData {
+            require(ClearKey.license(drm) != null) { "An explicit valid ClearKey configuration is required" }
+            val keyIds = ClearKey.pairs(drm).keys.map { encoded ->
+                val bytes = ByteBuffer.wrap(Base64.getUrlDecoder().decode(encoded))
+                UUID(bytes.long, bytes.long)
+            }.toTypedArray()
+            return DrmInitData.SchemeData(C.COMMON_PSSH_UUID, MimeTypes.VIDEO_MP4,
+                PsshAtomUtil.buildPsshAtom(C.COMMON_PSSH_UUID, keyIds, null))
+        }
     }
 
     override fun buildRepresentation(

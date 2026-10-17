@@ -24,6 +24,7 @@ import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.res.ResourcesCompat
 import androidx.media3.common.*
 import androidx.media3.datasource.HttpDataSource
@@ -111,7 +112,14 @@ class MainActivity : AppCompatActivity() {
     private val startupBudget = PlaybackStartupBudget()
     private var playbackHealth: PlaybackHealth? = null
     private var surfaceWait: Pair<SurfaceHolder, SurfaceHolder.Callback>? = null
-    private var activeDecoder = "not initialized"
+    private var diagnostics = PlaybackDiagnostics()
+    private var activeAttempt: PlaybackDiagnostics.Attempt? = null
+    private var diagnosticsDialog: AlertDialog? = null
+    private var diagnosticsText: TextView? = null
+    private val drmProbeIo = Executors.newSingleThreadExecutor()
+    private var drmProbeRunning = false
+    private var drmProbeStatus = "ClearKey self-test: not run (MENU > Check DRM)."
+    private val appVersion by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" }
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
     private var capH = 1080; private var badSeconds = 0
@@ -810,6 +818,7 @@ class MainActivity : AppCompatActivity() {
     /** User picked a channel (or zapped): start with the site's current sources, never a saved web engine. */
     private fun play(index: Int) {
         if (shown.isEmpty()) return
+        if (drmProbeRunning) { playMsg("The local DRM check is still running. Please wait, or restart the app if the system service is stuck."); return }
         current = (index + shown.size) % shown.size
         val ch = shown[current]
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
@@ -842,6 +851,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     if (token == playToken && layer.visibility == View.VISIBLE) {
+                        diagnostics.metadataFailed(PlaybackProblems.from(e))
                         nativeSources = emptyList()
                         advanceNative(if (e is TgResolveException) e.message.orEmpty() else "Couldn't load ${providerName(provider)}'s current streams")
                     }
@@ -870,7 +880,8 @@ class MainActivity : AppCompatActivity() {
         playMsg("Automatically trying ${providerName(provider)} native streams…")
         resolveJob = playbackIo.submit {
             var failureReason = reason
-            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (_: Exception) {
+            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
+                runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error)) }
                 failureReason = "Couldn't load ${providerName(provider)}'s current native stream configuration"
                 emptyList()
             }
@@ -893,7 +904,7 @@ class MainActivity : AppCompatActivity() {
         .setMinOffsetMs(6000).setMaxOffsetMs(40000).setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build()
 
     /** Shared by full-screen playback and previews so headers, type, redirects and DRM cannot drift apart. */
-    private fun nativeMediaSource(source: TgStream): MediaSource {
+    private fun nativeMediaSource(source: TgStream, trace: PlaybackDiagnostics.Attempt? = null): MediaSource {
         val data = Streams.factory(source)
         val factory: MediaSource.Factory = when (source.type) {
             "hls" -> HlsMediaSource.Factory(data)
@@ -909,7 +920,8 @@ class MainActivity : AppCompatActivity() {
                 // licence alone is insufficient for Widevine-only MPDs or missing default_KID tags.
                 (factory as? DashMediaSource.Factory)?.setManifestParser(ClearKeyDashManifestParser(drm))
                 val manager = DefaultDrmSessionManager.Builder()
-                    .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
+                    .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID,
+                        trace?.let { ObservedMediaDrm.provider(it) } ?: FrameworkMediaDrm.DEFAULT_PROVIDER)
                     .setMultiSession(true).setPlayClearSamplesWithoutKeys(true)
                     .build(LocalMediaDrmCallback(license))
                 factory.setDrmSessionManagerProvider { manager }
@@ -933,33 +945,36 @@ class MainActivity : AppCompatActivity() {
         infoNext.text = "Auto · ${source.label} · ${serverIdx + 1} of ${nativeSources.size}" +
             if (nativeSources.size > 1) "   ·   OK switches server" else ""
         infoNext.visibility = View.VISIBLE
-        try { attach(nativeMediaSource(source)) }
-        catch (_: Exception) { advanceNative("This source could not be opened by the native player") }
+        val trace = diagnostics.begin(
+            if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG,
+            when (source.type) { "hls" -> PlaybackDiagnostics.Media.HLS; "mp4" -> PlaybackDiagnostics.Media.FILE; else -> PlaybackDiagnostics.Media.DASH },
+            when { source.drm == null -> PlaybackDiagnostics.Drm.NONE
+                ClearKey.license(source.drm) != null -> PlaybackDiagnostics.Drm.CLEARKEY
+                else -> PlaybackDiagnostics.Drm.WIDEVINE },
+            source.omitReferrer, compatiblePlayback)
+        try { attach(nativeMediaSource(source, trace), trace) }
+        catch (error: Exception) { trace.failed(PlaybackProblems.from(error)); advanceNative("This source could not be opened by the native player") }
     }
 
-    private fun attach(ms: MediaSource) {
+    private fun attach(ms: MediaSource, trace: PlaybackDiagnostics.Attempt) {
         releasePlayer()
         stopPreview()
         val profile = NativePlaybackPolicy.profile(television, lowEnd, compatiblePlayback, startCap())
-        capH = profile.height; badSeconds = 0; activeDecoder = "not initialized"
+        capH = profile.height; badSeconds = 0
         val ts = NativePlaybackPolicy.tracks(this, profile, shown.getOrNull(current)?.name?.contains("Hindi", true) == true)
         val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
             .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
         val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
             .setLoadControl(NativePlaybackPolicy.buffers(profile)).setTrackSelector(ts).setBandwidthMeter(bw).build()
         p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
-        trackSel = ts; p.addAnalyticsListener(dropWatcher)
-        p.addAnalyticsListener(object : AnalyticsListener {
-            override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String,
-                                                   initializedTimestampMs: Long, initializationDurationMs: Long) {
-                if (player === p) activeDecoder = decoderName.take(80)
-            }
-        })
+        trackSel = ts; activeAttempt = trace
+        p.addAnalyticsListener(dropWatcher)
+        p.addAnalyticsListener(NativePlaybackDiagnostics(trace))
         renderedFrame = false
         val health = PlaybackHealth(SystemClock.elapsedRealtime(), expectsVideo())
         playbackHealth = health
         p.setVideoFrameMetadataListener { _, _, _, _ -> health.videoProgress(SystemClock.elapsedRealtime()) }
-        p.setMediaSource(ms); p.playWhenReady = true; p.addListener(listenerFor(p))
+        p.setMediaSource(ms); p.playWhenReady = true; p.addListener(listenerFor(p, trace))
         pv.player = p; player = p
         prepareOnSurface(p)
         showInfo()
@@ -968,7 +983,7 @@ class MainActivity : AppCompatActivity() {
     /** Avoid configuring an older TV codec against a placeholder before its real SurfaceView exists. */
     private fun prepareOnSurface(owner: ExoPlayer) {
         val view = pv.videoSurfaceView as? SurfaceView
-        if (view == null || view.holder.surface.isValid) { owner.prepare(); return }
+        if (view == null || view.holder.surface.isValid) { activeAttempt?.surfaceReady(); owner.prepare(); return }
         playMsg("Waiting for the TV video surface…")
         val holder = view.holder
         val callback = object : SurfaceHolder.Callback {
@@ -978,7 +993,9 @@ class MainActivity : AppCompatActivity() {
                 prepare = {
                     holder.removeCallback(this)
                     if (surfaceWait?.second === this) surfaceWait = null
-                    try { owner.prepare() } catch (_: Exception) {
+                    activeAttempt?.surfaceReady()
+                    try { owner.prepare() } catch (error: Exception) {
+                        activeAttempt?.failed(PlaybackProblems.from(error))
                         if (player === owner && !retryCompatibleDecoder("The TV could not start its video decoder"))
                             advanceNative("The native video decoder could not be started")
                     }
@@ -994,9 +1011,10 @@ class MainActivity : AppCompatActivity() {
         if (holder.surface.isValid) callback.surfaceCreated(holder)
     }
 
-    private fun listenerFor(owner: ExoPlayer) = object : Player.Listener {
+    private fun listenerFor(owner: ExoPlayer, trace: PlaybackDiagnostics.Attempt) = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             if (player !== owner) return
+            trace.state(when (state) { Player.STATE_READY -> "READY"; Player.STATE_BUFFERING -> "BUFFERING"; Player.STATE_ENDED -> "ENDED"; else -> "IDLE" })
             when (state) {
                 Player.STATE_READY -> {
                     if (renderedFrame || !expectsVideo()) {
@@ -1008,12 +1026,13 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 Player.STATE_BUFFERING -> spinner.visibility = View.VISIBLE
-                Player.STATE_ENDED -> advanceNative("The live stream ended")
+                Player.STATE_ENDED -> { trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded")); advanceNative("The live stream ended") }
             }
         }
         override fun onRenderedFirstFrame() {
             if (player !== owner) return
             renderedFrame = true
+            trace.frameRendered()
             playbackHealth?.firstFrame(SystemClock.elapsedRealtime())
             startupBudget.rendered()
             if (owner.playbackState == Player.STATE_READY) { spinner.visibility = View.GONE; playMsg(null) }
@@ -1022,6 +1041,7 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
+            trace.failed(PlaybackProblems.from(error, error.errorCode))
             val code = httpCode(error)
             val provider = if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) "JJTV" else "TG TV"
             val message = when {
@@ -1049,7 +1069,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
-        activeDecoder = "not initialized"
+        diagnostics = PlaybackDiagnostics()
         compatiblePlayback = prefs.getBoolean("native_compat_${ch.key}", false)
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -1064,6 +1084,7 @@ class MainActivity : AppCompatActivity() {
             if (!playbackActive || layer.visibility != View.VISIBLE) return
             val now = SystemClock.elapsedRealtime()
             if (startupBudget.expired(now)) {
+                activeAttempt?.timeout()
                 fail("No playable picture within 60 seconds. Hold OK to retry.")
                 return
             }
@@ -1077,6 +1098,7 @@ class MainActivity : AppCompatActivity() {
                     else -> PlaybackHealth.State.IDLE
                 }
                 val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady)
+                if (result.failure != null) activeAttempt?.timeout()
                 when (result.failure) {
                     PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
                         val reason = if (surfaceWait != null) "The TV video surface is not ready" else "The decoder did not produce a picture"
@@ -1092,6 +1114,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+            if (diagnosticsText != null) refreshPlaybackDetails()
             if (playbackActive) ui.postDelayed(this, 500)
         }
     }
@@ -1135,6 +1158,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Left / OK switches native sources, not players; a single-source channel simply reloads. */
     private fun switchServer() {
+        if (drmProbeRunning) return
         if (nativeSources.size < 2) { reloadStream(); return }
         playToken++; resolveJob?.cancel(true); recovery.reset()
         shown.getOrNull(current)?.let { beginNativeSession(it) }
@@ -1146,20 +1170,90 @@ class MainActivity : AppCompatActivity() {
 
     /** Manual reload really bypasses cached signed URLs and re-reads the site's current player configuration. */
     private fun reloadStream() {
+        if (drmProbeRunning) { showPlaybackDetails(); return }
         val ch = shown.getOrNull(current) ?: return
         recovery.reset(); beginNativeSession(ch); TgServers.invalidate(ch.id, ch.v2)
         resolveAndStart(ch, fresh = true)
     }
 
+    private fun playbackDetailsText(): String = buildString {
+        append("AK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n")
+        append("${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown ABI"}\n")
+        append("Device UTC: ${java.time.Instant.ofEpochMilli(System.currentTimeMillis())}\n")
+        append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
+        shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""}\n") }
+        append("\n${diagnostics.report()}\n\n$drmProbeStatus\n")
+        append("\nCheck DRM stops playback and tests only this device's local ClearKey service. It does not test a real channel or prove decoded video.")
+    }
+
+    private fun refreshPlaybackDetails() { diagnosticsText?.text = playbackDetailsText() }
+
+    private fun showPlaybackDetails() {
+        if (diagnosticsDialog?.isShowing == true) { refreshPlaybackDetails(); return }
+        val text = TextView(this).apply {
+            text = playbackDetailsText(); textSize = 14f; setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
+        }
+        val scroll = ScrollView(this).apply { addView(text); isFocusable = true }
+        val holder = FrameLayout(this).apply {
+            addView(scroll, FrameLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.56f).toInt()))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Native playback details")
+            .setView(holder).setNegativeButton("Close", null).setPositiveButton("Retry", null)
+            .setNeutralButton("Check DRM", null).create()
+        diagnosticsText = text; diagnosticsDialog = dialog
+        dialog.setOnDismissListener { if (diagnosticsDialog === dialog) { diagnosticsDialog = null; diagnosticsText = null } }
+        dialog.setOnShowListener {
+            dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.9f).toInt(), -2)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (!drmProbeRunning) { dialog.dismiss(); reloadStream() }
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { runNativeDrmCheck() }
+        }
+        dialog.show()
+    }
+
+    /** Explicit user action. No website requests, no real channel credentials, no extra session during playback. */
+    private fun runNativeDrmCheck() {
+        if (drmProbeRunning) return
+        endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); stopPreview()
+        spinner.visibility = View.GONE
+        val token = playToken
+        drmProbeRunning = true
+        drmProbeStatus = "ClearKey self-test RUNNING: checking the Android DRM service locally…"
+        playMsg("Playback stopped for the local DRM check. MENU / OK shows details.")
+        refreshPlaybackDetails()
+        val timeout = Runnable {
+            if (drmProbeRunning) {
+                drmProbeStatus = "ClearKey self-test has not returned after 10 seconds. A local platform call may be stuck; this is not a network test. Restart the app/TV before retrying if it stays blocked."
+                refreshPlaybackDetails()
+                if (token == playToken && layer.visibility == View.VISIBLE) playMsg(drmProbeStatus)
+            }
+        }
+        ui.postDelayed(timeout, 10_000)
+        drmProbeIo.submit {
+            val result = NativeClearKeyProbe.run()
+            runOnUiThread {
+                ui.removeCallbacks(timeout)
+                if (isDestroyed) return@runOnUiThread
+                drmProbeRunning = false; drmProbeStatus = result.describe()
+                refreshPlaybackDetails()
+                if (token == playToken && layer.visibility == View.VISIBLE)
+                    playMsg("$drmProbeStatus\nPress OK / MENU for details; hold OK to retry.")
+            }
+        }
+    }
+
     private fun fail(message: String) {
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
-        val device = "${Build.MODEL.take(48)} · Android ${Build.VERSION.RELEASE} · ${if (compatiblePlayback) "compatible" else "standard"} · decoder: $activeDecoder"
-        playMsg("$message\n$device"); showInfo()
+        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} · ${Build.MODEL.take(48)}\nPress OK / MENU for playback details; hold OK to retry.")
+        showInfo()
     }
 
     private fun releasePlayer() {
         surfaceWait?.let { (holder, callback) -> holder.removeCallback(callback) }; surfaceWait = null
-        playbackHealth = null
+        playbackHealth = null; activeAttempt = null
         val old = player; player = null; trackSel = null
         pv.player = null
         old?.removeAnalyticsListener(dropWatcher); old?.release()
@@ -1173,6 +1267,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shortOk() {
+        if (!playbackActive) { showPlaybackDetails(); return }
         if (nativeSources.size > 1 && infoCard.alpha > 0.5f) switchServer() else showInfo()
     }
 
@@ -1193,7 +1288,7 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
-            KeyEvent.KEYCODE_MENU -> { reloadStream(); return true }
+            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> { showPlaybackDetails(); return true }
             KeyEvent.KEYCODE_DPAD_LEFT -> { switchServer(); return true }
         }
         // Back from a lower row goes back to the top of the page (the hero row) first; Back again leaves the app.
@@ -1269,7 +1364,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null); resolveJob?.cancel(true); previewJob?.cancel(true)
-        playbackIo.shutdownNow(); io.shutdownNow()
+        diagnosticsDialog?.dismiss(); diagnosticsDialog = null; diagnosticsText = null
+        playbackIo.shutdownNow(); io.shutdownNow(); drmProbeIo.shutdownNow()
         super.onDestroy()
     }
 

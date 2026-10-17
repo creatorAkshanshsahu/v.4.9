@@ -1,4 +1,22 @@
-# Native live TV (4.9.13)
+# Native live TV (4.9.14)
+
+## 4.9.14 — identify the Android 9 TV failure instead of guessing
+
+New device evidence: the same app plays all reported channels on mobile, but only some TG channels on the user's **Android 9 TV**; the failing channels have **neither picture nor audio**. The exact TV model, installed build number and platform error are not yet known. Android 9 by itself does not establish a particular DRM, codec or TLS defect, and the app's live path does not call WebView/Gecko. Changing a browser or lowering video quality cannot repair a native DRM session that never opens.
+
+This is a **diagnostic build, not a claim that TV playback is fixed**. It leaves source resolution, key/token selection, decoder policy and DRM security requirements unchanged. It fixes an observability gap: repeated source attempts used to replace the original failure with a generic timeout.
+
+- A bounded, in-memory report follows actual manifest/init/media downloads, HTTP/TLS errors, device-versus-HTTP-Date clock difference, selected/unsupported tracks, encryption scheme, platform DRM creation/session/key-request/key-response stages, Media3's keys-loaded event, both decoder names, first-frame and audio-position events. A successful key response is not labelled successful playback.
+- `ObservedMediaDrm` delegates the same bytes, sessions, crypto configuration, secure-decoder requirements and reference counting to Media3's framework provider. Its callbacks only observe; recoverable DRM events do not independently trigger retries. Missing or broken platform services are recorded rather than silently reduced to a generic unsupported result.
+- Original error codes from recent source attempts survive later provider errors and the overall startup deadline. The report shows app version, Android/API level, device model and ABI, so results can be tied to the installed build.
+- **MENU / INFO** opens native playback details while loading or playing. **OK after a final error** opens the same report. Hold OK still reloads fresh metadata. This intentionally changes short MENU from reload to diagnostics.
+- **Check DRM** in that dialog explicitly stops playback and runs a local ClearKey API self-test on a worker thread. It checks advertised support, creation, session opening, the same Common PSSH/JWK recipe used by the player, key-response acceptance and MediaCrypto construction. Only public synthetic test bytes are used; it performs no network request and never uses a real channel's keys. Sessions and DRM/crypto objects are released. A call that has not returned after ten seconds is reported, not allowed to block the UI or spawn more probes. Retry is blocked until that call returns; restart the app/TV if the system call remains stuck.
+- A self-test **PASS does not decrypt/render a sample, test codecs, validate a channel licence or prove hardware playback**. Failure identifies which local API stage failed, independent of the website/network; a pass means the actual stream report is needed to investigate downloads, keys, encryption mode and decoding.
+- No URLs, headers, cookies, key IDs, keys, raw exception messages or diagnostic files are persisted/uploaded. Reports contain whitelisted scalar labels, class names and numeric platform error codes. A frame/audio callback is only a player-reported event, not proof of visible/audible output.
+
+Twenty-four new tests cover stage attribution, retained/bounded failures, redaction, exact DRM delegation and probe cleanup/success/failure phases under Robolectric API 28. These simulate contracts; they do not validate the affected TV's plugin.
+
+**Next device test:** install 4.9.14, select a failing JJTV channel, open MENU (or OK after the error), photograph the stream report, then choose Check DRM and photograph its result. The first report separates manifest/network failure, missing keys, unsupported tracks and decoder startup; the second separates platform ClearKey API failure from stream-specific failure. Compare with the same channel on the working phone if needed. Do not infer a WebView cause or restore a live web player from the Android version alone.
 
 ## 4.9.13 — TV-only black/loading report
 
@@ -96,7 +114,8 @@ Both full-screen playback and muted previews use the same Media3/ExoPlayer media
 | Right | Channel guide |
 | OK | Show information; switch resolved native source when information is visible and multiple sources exist |
 | Left | Next resolved source; reload if only one exists |
-| Hold OK / Menu | Fetch fresh player configuration and credentials |
+| Hold OK | Fetch fresh player configuration and credentials |
+| Menu / Info; OK after a final error | Open native playback diagnostics and the optional local ClearKey self-test |
 | Back | Close native playback |
 
 ## Verification and limits
@@ -122,7 +141,7 @@ This uses the **production** resolvers, protocol parsers and stream transport. T
 
 ### Device acceptance checklist — still required
 
-For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.13** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
+For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.14** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
 
 - Confirm video, the expected audio language and sustained playback for Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada; Sony YAY Hindi; and Cartoon Network Hindi 816.
 - Test a normal TG DASH channel, an HLS channel, a JJTV native source and a V2 channel. Verify that V2 never uses the Jio/JJTV namespace.
