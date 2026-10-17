@@ -305,7 +305,7 @@ async function inspectSourceApi(server, sample, details = false) {
       quality: /^(?:[0-9]{3,4}p?|4k|auto)$/i.test(String(source.quality)) ? String(source.quality) : 'other',
       mirrorCount: Array.isArray(source.mirrors) ? source.mirrors.length : 0,
       trackCount: Array.isArray(source.tracks) ? source.tracks.length : 0,
-      hevc: source.hevc === true,
+      hevc: typeof source.hevc === 'boolean' ? source.hevc : null,
       url: typeof source.url === 'string' ? safeUrl(new URL(source.url, SITE).href) : 'missing'
     }));
     const candidates = sources.filter(value => typeof value.url === 'string' && publicHttps(new URL(value.url, SITE).href));
