@@ -112,10 +112,11 @@ function probeBytes(raw, originalHeaders, redirects = 0, format = '') {
         finalUrl: safeUrl(raw), partialContent: status === 206 || !!response.headers['content-range'], bytesRead, maxBytes,
         mp4Header: sample.length >= 12 && sample.toString('ascii', 4, 8) === 'ftyp',
         hlsHeader: sample.toString('utf8').trimStart().startsWith('#EXTM3U'),
+        subtitleSignature: format === 'subtitle' ? (sample.toString('utf8').trimStart().startsWith('WEBVTT') ? 'vtt' : /\d{2}:\d{2}:\d{2},\d{3}/.test(sample.toString('utf8')) ? 'srt' : 'other') : undefined,
         manifest: manifestSummary(sample.toString('utf8'), format) });
       response.on('data', data => {
         const part = data.subarray(0, Math.max(0, maxBytes - bytesRead));
-        const sampleLimit = format === 'dash' || format === 'hls' ? maxBytes : 32;
+        const sampleLimit = format === 'dash' || format === 'hls' || format === 'subtitle' ? maxBytes : 32;
         if (sample.length < sampleLimit) sample = Buffer.concat([sample, part.subarray(0, sampleLimit - sample.length)]);
         bytesRead += part.length;
         if (bytesRead >= maxBytes) { finish(result()); response.destroy(); request.destroy(); }
@@ -318,6 +319,17 @@ async function inspectSourceApi(server, sample, details = false) {
       const probe = await probeBytes(new URL(source.url, SITE).href, headers, 0, details ? source.type : '');
       report.sourceProbes.push({ ...probe, sourceType: /^(?:dash|hls|mp4)$/.test(source.type) ? source.type : 'other',
         headerNames: Object.keys(headers), scope: 'first URL per selected format; bounded body read, not decoded playback' });
+    }
+    if (details && sources[0]?.tracks?.length) {
+      report.trackSchema = sources[0].tracks.slice(0, 3).map(track => ({
+        fields: Object.keys(track).filter(name => /^(?:url|src|file|kind|label|name|lang|language|srclang|format|type|default)$/.test(name)),
+        kind: /^(?:captions|subtitles|thumbnails|audio)$/.test(track.kind) ? track.kind : 'other',
+        format: /^(?:vtt|srt|webvtt|ass|ssa|text\/vtt|application\/x-subrip)$/.test(track.format || track.type) ? (track.format || track.type) : 'unknown'
+      }));
+      const track = sources[0].tracks[0];
+      const raw = track.url || track.file || track.src;
+      if (typeof raw === 'string' && publicHttps(new URL(raw, SITE).href))
+        report.subtitleProbe = await probeBytes(new URL(raw, SITE).href, {}, 0, 'subtitle');
     }
     report.errorPresent = !!body.error;
     return report;

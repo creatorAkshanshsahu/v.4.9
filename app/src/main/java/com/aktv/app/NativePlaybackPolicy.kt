@@ -18,6 +18,7 @@ internal object NativePlaybackPolicy {
         val synchronous: Boolean,
         val softwareFirst: Boolean,
         val preferAvc: Boolean,
+        val allowReportedCapabilityExceedance: Boolean,
         val maxBitrate: Int,
         val maxFrameRate: Int,
         val bufferBytes: Int,
@@ -32,6 +33,9 @@ internal object NativePlaybackPolicy {
             synchronous = tv || compatible,
             softwareFirst = compatible,
             preferAvc = conservative,
+            // v4.7.2 permitted this. Some generic TV firmware understates profile/level limits.
+            // Media3 still rejects unsupported DRM and unsupported codec types/subtypes.
+            allowReportedCapabilityExceedance = tv,
             maxBitrate = if (compatible) 1_500_000 else if (conservative) 3_000_000 else Int.MAX_VALUE,
             maxFrameRate = if (conservative) 30 else Int.MAX_VALUE,
             bufferBytes = (if (compatible || lowMemory) 24 else if (tv) 32 else 96) * 1024 * 1024,
@@ -72,9 +76,11 @@ internal object NativePlaybackPolicy {
                 .setPreferredAudioLanguages(*if (hindi) arrayOf("hi", "hin") else emptyArray())
                 .setViewportSizeToPhysicalDisplaySize(context, true)
                 // A higher-resolution *supported* track is preferable to audio-only when it is the
-                // only variant. A track outside the renderer's actual capabilities is not.
+                // only variant. On TVs also retain 4.7.2's attempt for an existing codec whose
+                // reported profile/level limit is exceeded. This does NOT admit UNSUPPORTED_DRM
+                // or UNSUPPORTED_TYPE/SUBTYPE and does not relax secure-decoder requirements.
                 .setExceedVideoConstraintsIfNecessary(true)
-                .setExceedRendererCapabilitiesIfNecessary(false))
+                .setExceedRendererCapabilitiesIfNecessary(profile.allowReportedCapabilityExceedance))
         }
 
     fun buffers(profile: Profile) = DefaultLoadControl.Builder()

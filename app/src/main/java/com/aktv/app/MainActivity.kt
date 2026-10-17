@@ -1290,6 +1290,7 @@ class MainActivity : AppCompatActivity() {
         append("${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown ABI"}\n")
         append("Device UTC: ${java.time.Instant.ofEpochMilli(System.currentTimeMillis())}\n")
         append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
+        append("TV reported codec-limit fallback: $television (unsupported DRM remains rejected)\n")
         shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""}\n") }
         append("\n${diagnostics.report()}\n\n$drmProbeStatus\n")
         append("\nCheck DRM stops playback and tests only this device's local ClearKey service. It does not test a real channel or prove decoded video.")
@@ -1356,7 +1357,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun fail(message: String) {
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
-        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
         ui.removeCallbacks(hideInfo); hideInfo.run()
     }
 
