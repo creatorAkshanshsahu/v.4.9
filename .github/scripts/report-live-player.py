@@ -25,3 +25,15 @@ for start in range(0, len(text), 3000):
     print(f'::notice title=Native live check {start // 3000 + 1}::{escaped}')
 if failed:
     print('::warning title=Native live check::The live resolver contract check failed. Review the redacted results; build success alone is not playback proof.')
+
+expired = {}
+for line in reports:
+    try:
+        data = json.loads(line[len('TG_NATIVE '):])
+        if any(source.get('tokenSecondsLeft', 1) <= 0 for source in data.get('sources', [])):
+            expired.setdefault(data.get('provider', 'unknown'), set()).add(data.get('channel', 'unknown'))
+    except (ValueError, TypeError):
+        pass
+if expired:
+    summary = '; '.join(provider + ': ' + ', '.join(sorted(ids)) for provider, ids in expired.items())
+    print('::warning title=Upstream expired credentials::Some advertised tokens were expired: ' + summary + '. Metadata checks do not establish playback; a current token must be supplied by the provider.')

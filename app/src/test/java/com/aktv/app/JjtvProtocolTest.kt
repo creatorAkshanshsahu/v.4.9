@@ -105,4 +105,20 @@ class JjtvProtocolTest {
         assertEquals("__hdnea__=success", JjtvProtocol.starCookie("""{"successful_results":[{"channel_id":1106,"final_url":"https://cdn.example/a?__hdnea__=success"}]}""", "1106"))
         assertEquals("__hdnea__=raw", JjtvProtocol.starCookie("""{"failed_results":[{"channel_id":"1106","final_url":"__hdnea__=raw"}]}""", "1106"))
     }
+
+    @Test fun `a fresh matching Star probe is preferred to an expired first record`() {
+        val body = """{"successful_results":[
+            {"channel_id":"1108","final_url":"https://cdn.example/a?__hdnea__=exp=9999~hmac=wrong-channel"},
+            {"channel_id":"1106","final_url":"https://cdn.example/a?__hdnea__=exp=50~hmac=old"}],
+            "failed_results":[{"channel_id":"1106","error_details":{"final_url":"https://cdn.example/a?__hdnea__=exp=500~hmac=current"}}]}"""
+        assertEquals("__hdnea__=exp=500~hmac=current", JjtvProtocol.starCookie(body, "1106", now = 100_000))
+    }
+
+    @Test fun `all-expired Star data stays explicit and never turns into another channel's token`() {
+        val body = """{"failed_results":[
+            {"channel_id":"1106","final_url":"__hdnea__=exp=50~hmac=old"},
+            {"channel_id":"1108","final_url":"__hdnea__=exp=9999~hmac=wrong-channel"}]}"""
+        assertEquals("__hdnea__=exp=50~hmac=old", JjtvProtocol.starCookie(body, "1106", now = 100_000))
+    }
+
 }

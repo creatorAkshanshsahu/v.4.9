@@ -79,10 +79,11 @@ internal object JjtvProtocol {
     }
 
     /** Failed probes can still contain a valid signed redirect. Never use another channel's token. */
-    fun starCookie(body: String?, id: String): String {
+    fun starCookie(body: String?, id: String, now: Long = System.currentTimeMillis()): String {
         if (body.isNullOrBlank()) return ""
         return try {
             val root = JSONObject(body)
+            var first = ""
             for (name in listOf("successful_results", "failed_results")) {
                 val entries = root.optJSONArray(name) ?: continue
                 for (i in 0 until entries.length()) {
@@ -90,10 +91,15 @@ internal object JjtvProtocol {
                     if (item.opt("channel_id")?.toString() != id) continue
                     val finalUrl = (item.optJSONObject("error_details")?.opt("final_url") as? String).orEmpty()
                         .ifBlank { (item.opt("final_url") as? String).orEmpty() }
-                    token.find(finalUrl)?.let { return it.value }
+                    val value = token.find(finalUrl)?.value ?: continue
+                    if (first.isEmpty()) first = value
+                    val expiry = StreamRequestPolicy.expiry("", value)
+                    // The document can contain multiple probes for the SAME channel, including old
+                    // failures. Prefer an advertised current credential, never a different channel.
+                    if (expiry == null || expiry > now + 10_000) return value
                 }
             }
-            ""
+            first
         } catch (_: Exception) { "" }
     }
 

@@ -37,7 +37,7 @@ internal class JjtvResolver(
         val urls = JjtvProtocol.urls(channel)
         val hasStar = urls.any(JjtvProtocol::isStarUrl)
         val hasRegular = urls.any { !JjtvProtocol.isStarUrl(it) }
-        val star = if (hasStar) cookie(config.starCookies, page) { JjtvProtocol.starCookie(it, id) } else ""
+        val star = if (hasStar) cookie(config.starCookies, page) { JjtvProtocol.starCookie(it, id, now()) } else ""
         val regular = if (hasRegular) cookie(config.primaryCookie, page) { JjtvProtocol.regularCookie(it) } else ""
         val fallback = if (hasRegular) cookie(config.fallbackCookie, page) { JjtvProtocol.regularCookie(it, fallback = true) } else ""
         val result = JjtvProtocol.streams(channel, config, regular, fallback, star, page, site)
