@@ -39,11 +39,11 @@ class StreamRequestPolicy(private val stream: TgStream) {
         return Request(resolved, headers)
     }
 
-    /** Only a successful primary manifest/redirect can renew session auth. An independently signed
-     * audio/video segment must not replace the token used by every other track on this CDN.
+    /** Successful manifests/playlists can renew auth. HLS child playlists may introduce a signed
+     * CDN of their own. An independently signed audio/video segment must never overwrite session auth.
      */
-    fun observed(requestedUrl: String, finalUrl: String) {
-        if (resource(requestedUrl) !in manifests) return
+    fun observed(requestedUrl: String, finalUrl: String, childPlaylist: Boolean = false) {
+        if (resource(requestedUrl) !in manifests && !(stream.type == "hls" && childPlaylist)) return
         manifests.add(resource(finalUrl))
         tokenOf(finalUrl)?.let { tokens[originOf(finalUrl)] = it }
     }

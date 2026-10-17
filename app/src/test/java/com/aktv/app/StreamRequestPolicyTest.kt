@@ -155,4 +155,23 @@ class StreamRequestPolicyTest {
         assertEquals("fresh", StreamRequestPolicy.tokenOf(policy.request(source.url.substringBefore('#')).url))
     }
 
+    @Test fun `HLS child playlists retain their own explicitly supplied CDN authentication`() {
+        val master = "https://master.example/live.m3u8?__hdnea__=master"
+        val policy = StreamRequestPolicy(TgStream("TG", master, "hls"))
+        val variant = "https://video.example/variant.m3u8?__hdnea__=video-playlist"
+        policy.observed(variant, variant, childPlaylist = true)
+        assertEquals("video-playlist", StreamRequestPolicy.tokenOf(policy.request("https://video.example/segment.ts").url))
+        val segment = "https://video.example/one.ts?__hdnea__=one-segment"
+        policy.observed(segment, segment)
+        assertEquals("video-playlist", StreamRequestPolicy.tokenOf(policy.request("https://video.example/two.ts").url))
+        assertEquals("master", StreamRequestPolicy.tokenOf(policy.request("https://master.example/other.ts").url))
+    }
+
+    @Test fun `a DASH session cannot learn credentials from an unrelated playlist response`() {
+        val policy = StreamRequestPolicy(TgStream("JJTV", url, "dash", requestOrigin = JjtvResolver.SITE))
+        val other = "https://other.example/list.m3u8?__hdnea__=other"
+        policy.observed(other, other, childPlaylist = true)
+        assertEquals("https://other.example/segment", policy.request("https://other.example/segment").url)
+    }
+
 }

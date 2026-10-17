@@ -28,7 +28,12 @@ internal object StreamHttp {
             // Call.request identifies the original resource across redirects; response.request
             // here identifies the actual authenticated wire URL. Independent media calls cannot
             // overwrite primary-manifest auth in StreamRequestPolicy.observed.
-            if (response.isSuccessful) policy.observed(chain.call().request().url.toString(), response.request.url.toString())
+            if (response.isSuccessful) {
+                val type = response.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
+                val playlist = response.request.url.encodedPath.endsWith(".m3u8", true) ||
+                    type in setOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl")
+                policy.observed(chain.call().request().url.toString(), response.request.url.toString(), playlist)
+            }
             response
         }.build()
     }

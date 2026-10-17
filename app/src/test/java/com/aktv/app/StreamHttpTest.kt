@@ -125,4 +125,18 @@ class StreamHttpTest {
         }
     }
 
+    @Test fun `HLS variant manifests are recognized on the actual transport without learning segment tokens`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse().setHeader("Content-Type", "application/vnd.apple.mpegurl").setBody("#EXTM3U"))
+            server.enqueue(MockResponse().setBody("segment"))
+            val source = TgStream("TG", "https://master.example/master.m3u8", "hls")
+            val client = StreamHttp.client(source)
+            client.newCall(Request.Builder().url(server.url("/variant?__hdnea__=variant-token")).build()).execute().close()
+            client.newCall(Request.Builder().url(server.url("/segment.ts")).build()).execute().close()
+            server.takeRequest(2, TimeUnit.SECONDS)
+            assertEquals("variant-token", server.takeRequest(2, TimeUnit.SECONDS)!!.requestUrl!!.queryParameter("__hdnea__"))
+        }
+    }
+
 }
