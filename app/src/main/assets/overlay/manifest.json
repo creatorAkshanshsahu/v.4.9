@@ -1,0 +1,9 @@
+{
+  "manifest_version": 2,
+  "name": "AK TV player clean-up",
+  "version": "1.0",
+  "browser_specific_settings": { "gecko": { "id": "overlay@aktv.local" } },
+  "content_scripts": [
+    { "matches": ["*://*/*"], "js": ["content.js"], "run_at": "document_start", "all_frames": true }
+  ]
+}
