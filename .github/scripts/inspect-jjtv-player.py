@@ -1,5 +1,6 @@
 """Inspect the user-provided JJTV player contract without executing or publishing its credentials."""
 import concurrent.futures
+import base64
 import json
 from html.parser import HTMLParser
 from pathlib import Path
@@ -136,6 +137,30 @@ def inspect_data():
                     {key: len(str(value)) for key, value in pair.items()}
                     for pair in entry.get('keys', [])[:4] if isinstance(pair, dict)
                 ] for entry in selected}
+                def canonical(value):
+                    if not isinstance(value, str):
+                        return None
+                    raw = value.strip().removeprefix('0x').removeprefix('0X').replace('-', '').replace(' ', '')
+                    if re.fullmatch(r'[0-9a-fA-F]{32}', raw):
+                        return bytes.fromhex(raw)
+                    try:
+                        decoded = base64.urlsafe_b64decode(value + '=' * (-len(value) % 4))
+                        return decoded if len(decoded) == 16 else None
+                    except (ValueError, TypeError):
+                        return None
+                analyses = {}
+                for entry in selected:
+                    pairs = entry.get('keys') or [{'keyId': entry.get('keyId'), 'key': entry.get('key')}]
+                    groups, invalid = {}, 0
+                    for pair in pairs:
+                        kid, key = canonical(pair.get('keyId')), canonical(pair.get('key'))
+                        if kid is None or key is None:
+                            invalid += 1
+                        else:
+                            groups.setdefault(kid, set()).add(key)
+                    analyses[str(entry.get('id'))] = {'entries': len(pairs), 'distinctValidIds': len(groups),
+                        'invalidPairs': invalid, 'idsWithConflictingValues': sum(len(values) > 1 for values in groups.values())}
+                report['keyAnalysis'] = analyses
             elif name == 'COOKIE_STAR_SPORTS':
                 entries = (data.get('successful_results') or []) + (data.get('failed_results') or [])
                 report['resultCount'] = len(entries)

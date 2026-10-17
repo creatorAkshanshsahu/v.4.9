@@ -898,6 +898,9 @@ class MainActivity : AppCompatActivity() {
         source.drm?.let { drm ->
             val license = ClearKey.license(drm)
             if (license != null) {
+                // The website overrides manifest DRM with its supplied ClearKeys. Supplying a local
+                // licence alone is insufficient for Widevine-only MPDs or missing default_KID tags.
+                (factory as? DashMediaSource.Factory)?.setManifestParser(ClearKeyDashManifestParser(drm))
                 val manager = DefaultDrmSessionManager.Builder()
                     .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
                     .setMultiSession(true).setPlayClearSamplesWithoutKeys(true)
