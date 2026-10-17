@@ -235,9 +235,10 @@ class MainActivity : AppCompatActivity() {
             }
             val ni = segs.indexOfFirst { it === new }
             if (ni >= 0) {
+                // tabs open only on OK now: moving across the bar no longer switches tab, so walking right from
+                // Movies past Series to the search button still searches Movies (each section keeps its own search)
                 val fromSeg = segs.any { it === old } || old === searchBtn
-                if (fromSeg) switchTab(ni)
-                else if (ni != tab) segs[tab].post { if (segs[ni].isFocused) segs[tab].requestFocus() }   // focus fell onto the bar by accident
+                if (!fromSeg && ni != tab) segs[tab].post { if (segs[ni].isFocused) segs[tab].requestFocus() }   // focus fell onto the bar by accident
             }
         }
         channelSearch.addTextChangedListener(object : TextWatcher {
@@ -1026,8 +1027,8 @@ class MainActivity : AppCompatActivity() {
         val webOrder = listOf(5, 1, 3, 2)
         val out = ArrayList<Pair<Int, Int>>()
         for ((i, u) in urls.withIndex()) {
-            if (u in jjUrls) { listOf(Streams.JJWEB, 8).forEach { out.add(i to it) }; continue }
-            val base = if (TgServers.isJioPl(u)) listOf(8, 7, 6, 5) else if (Streams.isJio(u)) jioOrder else webOrder
+            if (u in jjUrls) { listOf(Streams.WEBREAL, Streams.JJWEB, 8).forEach { out.add(i to it) }; continue }
+            val base = if (TgServers.isJioPl(u)) listOf(Streams.WEBREAL, 8, 9, 7, 6, 5) else if (Streams.isJio(u)) jioOrder else webOrder
             val order = (if (first in 0 until n) listOf(first) else emptyList()) + base.filter { it != first }
             order.forEach { out.add(i to it) }
         }
@@ -1771,7 +1772,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val data: androidx.media3.datasource.DataSource.Factory = if (v2)
                 DefaultHttpDataSource.Factory().setUserAgent(Streams.CHROME).setAllowCrossProtocolRedirects(true)
-            else { val pi = if (TgServers.isJioPl(url)) 8 else if (Streams.isJio(url)) 6 else 1; Streams.jarFor(pi); Streams.factory(Streams.PROFILES[pi], url) }
+            else { val pi = if (TgServers.isJioPl(url)) Streams.WEBREAL else if (Streams.isJio(url)) 6 else 1; Streams.jarFor(pi); Streams.factory(Streams.PROFILES[pi], url) }
             val dash = type.equals("dash", true) || url.substringBefore('?').lowercase().endsWith(".mpd") ||
                 (!v2 && !url.substringBefore('?').lowercase().endsWith(".m3u8"))
             val f: MediaSource.Factory = if (dash) DashMediaSource.Factory(data) else HlsMediaSource.Factory(data)

@@ -243,9 +243,10 @@ object TgServers {
             val body = get(starCookieUrl, timeout = 8000)
             if (body != null) try {
                 val o = JSONObject(body); val m = HashMap<String, String>()
-                for (name in listOf("failed_results", "successful_results")) o.optJSONArray(name)?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { r ->
+                // same as the web player: successful results first, and the FIRST entry for a channel wins
+                for (name in listOf("successful_results", "failed_results")) o.optJSONArray(name)?.let { a -> for (i in 0 until a.length()) a.optJSONObject(i)?.let { r ->
                     val u = r.optJSONObject("error_details")?.optString("final_url", "").orEmpty().ifEmpty { r.optString("final_url", "") }
-                    Regex("__hdnea__=([^&\"]+)").find(u)?.let { mm -> m[r.optString("channel_id")] = "__hdnea__=" + mm.groupValues[1] } } }
+                    Regex("__hdnea__=([^&\"]+)").find(u)?.let { mm -> m.putIfAbsent(r.optString("channel_id"), "__hdnea__=" + mm.groupValues[1]) } } }
                 if (m.isNotEmpty()) starCookies = now to m
             } catch (_: Exception) {}
         }

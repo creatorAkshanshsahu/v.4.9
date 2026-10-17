@@ -18,7 +18,8 @@ class StreamProfile(
     val cookie: Boolean,            // send the __hdnea__ token from the manifest URL as a Cookie
     val tokenOnSegments: Boolean,   // also append the token to every request on the manifest's host
     val referer: String?,           // send Referer (+ Origin unless origin = false)
-    val origin: Boolean = true
+    val origin: Boolean = true,
+    val allHosts: Boolean = false   // token as the whole query on EVERY manifest/segment request, any host (browser player)
 )
 
 object Streams {
@@ -46,9 +47,14 @@ object Streams {
         StreamProfile("jioweb", "plaYtv/7.1.5", true, true, "https://www.jiotv.com/"),
         // 9: jjtvxweb.pages.dev request filter, byte for byte: UA plaYtv/7.1.5, Referer jiotv.com, no Cookie header,
         //    fresh token as the whole query of the manifest and every segment
-        StreamProfile("jjweb", "plaYtv/7.1.5", false, true, "https://www.jiotv.com/", origin = false)
+        StreamProfile("jjweb", "plaYtv/7.1.5", false, true, "https://www.jiotv.com/", origin = false),
+        // 10: what a real browser actually sends from the jjtvxweb / TG TV web player. Browsers silently drop the
+        //     player's own User-Agent / Referer, so the CDN really sees Chrome + the player page as Referer/Origin,
+        //     with the token as the whole query of every manifest and segment request.
+        StreamProfile("webreal", CHROME, false, true, "https://jjtvxweb.pages.dev/", allHosts = true)
     )
     const val JJWEB = 9
+    const val WEBREAL = 10
 
     fun isJio(url: String) = url.contains("jio.com", ignoreCase = true)
 
@@ -77,7 +83,7 @@ object Streams {
         return ResolvingDataSource.Factory(http, ResolvingDataSource.Resolver { spec ->
             val u = spec.uri
             val h = u.host ?: ""
-            if (h == host || h.endsWith("cdn.jio.com") || (p.name == "jjweb" && (h.endsWith("akamaized.net") || h.endsWith("jio.com"))))
+            if (p.allHosts || h == host || h.endsWith("cdn.jio.com") || (p.name == "jjweb" && (h.endsWith("akamaized.net") || h.endsWith("jio.com"))))
                 spec.withUri(Uri.parse(u.toString().substringBefore("?").replace(Regex("(?<!:)//+"), "/") + "?__hdnea__=" + token))
             else spec
         })
