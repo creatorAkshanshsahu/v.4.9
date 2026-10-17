@@ -18,7 +18,7 @@ Concrete client defects corrected:
 
 Tests cover wrong/corrected clocks, HTTP Date/Age, cache lifetime, near-expiry re-reads, exact-channel token choice, independently signed track isolation through the real OkHttp transport, actual Media3 authentication-error policy, bounded renewal and source reindexing. An end-to-end MockWebServer case rejects an old token, forces the production resolver to fetch fresh metadata and verifies the new token on both manifest and segment requests. It is a synthetic HTTP/metadata test, **not decrypted live playback**.
 
-**Still required:** install 4.9.16 and compare one exact channel in the phone browser, APK on the phone, and APK on the box. The above defects are real and regression-tested; without the device's detailed failure report, it is not established which one caused the latest mobile failure or whether the box has an additional native DRM/decoder fault. MENU → Playback details retains the original HTTP/DRM/error stages if it still fails. Do not claim that all channels or the particular box have been verified.
+**Still required:** install 4.9.16 and compare one exact channel in the phone browser, APK on the phone, and APK on the box. The above defects are real and regression-tested; without the device's detailed failure report, it is not established which one caused the latest mobile failure or whether the box has an additional native DRM/decoder fault. MENU → Playback details retains the original HTTP/DRM/error stages if it still fails. On a phone, tap the visible loading/error message for details, or tap the visible source line to choose the native provider. Do not claim that all channels or the particular box have been verified.
 
 ## 4.9.15 — give JJTV a real startup opportunity on the box
 

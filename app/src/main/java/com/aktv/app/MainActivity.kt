@@ -207,6 +207,9 @@ class MainActivity : AppCompatActivity() {
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
         infoMono = findViewById(R.id.infoMono); infoNow = findViewById(R.id.infoNow); infoProgress = findViewById(R.id.infoProgress)
         infoDesc = findViewById(R.id.infoDesc); infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus)
+        // Phones have no MENU/OK remote keys: make the visible source/status lines actionable.
+        infoNext.setOnClickListener { if (!guideShown) showNativeSourceMenu() }
+        playStatus.setOnClickListener { showPlaybackDetails() }
         searchLayer = findViewById(R.id.searchLayer); searchQuery = findViewById(R.id.searchQuery); searchKeys = findViewById(R.id.searchKeys)
         searchResults = findViewById(R.id.searchResults); searchCount = findViewById(R.id.searchCount); searchEmpty = findViewById(R.id.searchEmpty)
         intro = findViewById(R.id.splash)
