@@ -1,4 +1,16 @@
-# Native live TV (4.9.10)
+# Native live TV (4.9.11)
+
+## 4.9.11 — Star Sports / Sony YAY follow-up
+
+The user confirmed that other channels now play, but Star Sports and Sony YAY still fail. The current TG response's upstream entry labelled **Server 3** is the allinonereborn relay already included in the native source list; TG's UI renumbers it Server 2. Inspection also confirmed that Sony YAY's two advertised key entries are identical duplicates (one distinct key ID), while Star Sports 1 HD has two distinct valid key IDs. These are not evidence of a missing third playback engine.
+
+A concrete player compatibility difference was identified: Shaka's explicit `drm.clearKeys` configuration **overrides each audio/video variant's manifest DRM information** and supplies initialization key IDs. Media3's ClearKey manager, on the other hand, cannot acquire a session from Widevine-only scheme data just because a local licence callback is present. A missing `default_KID` can leave the default DASH parser with no Common/ClearKey initialization data.
+
+`ClearKeyDashManifestParser` now supplies a Common PSSH containing the configured source's validated key IDs to audio/video representations, matching that explicit ClearKey mode. The licence still comes only from that source's supplied keys. Other DRM modes and sources without configured keys are unchanged; the manifest's encryption scheme, media metadata and segment locations are retained. Both full-screen playback and previews use this path.
+
+Six Robolectric tests use the actual Media3 DASH parser to reproduce the incompatible baseline and check Widevine-only, missing-DRM, audio/video key initialization and preservation of the encryption scheme and track metadata. They do **not** decrypt a real channel. Real manifests still returned HTTP 451 from the CI runner, so this is a tested compatibility fix, not a confirmed diagnosis of the TV's error or a claim that these channels have been seen playing.
+
+Reference implementations inspected: [Shaka 4.7.11 `configureClearKey_` / `init_`](https://github.com/shaka-project/shaka-player/blob/v4.7.11/lib/media/drm_engine.js) and [Media3 ClearKey scheme-data selection](https://github.com/androidx/media/blob/1.3.1/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/drm/DefaultDrmSessionManager.java).
 
 ## What changed after the reported playback failure
 
