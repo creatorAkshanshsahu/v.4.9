@@ -146,4 +146,15 @@ class PlaybackDiagnosticsTest {
         assertFalse(log.summary().contains("lookup"))
     }
 
+    @Test fun `reported codec limit is distinct from missing codecs or unsupported DRM`() {
+        val attempt = begin(drm = PlaybackDiagnostics.Drm.NONE)
+        attempt.loaded(PlaybackDiagnostics.Load.MANIFEST, 2048)
+        attempt.tracks(0, 1, 0, 0, 3)
+        assertEquals("No video selected: codec exceeds reported device limits", attempt.summary())
+        assertTrue(attempt.report().contains("unsupported DRM 0, codec 0; above reported limits 3"))
+        attempt.tracks(1, 1, 0, 0, 3)
+        attempt.surfaceReady(); attempt.frameRendered()
+        assertTrue(attempt.summary().contains("Media3 reported a video frame"))
+    }
+
 }

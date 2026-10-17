@@ -30,4 +30,13 @@ class FrostMediaTest {
         assertEquals("text/vtt", subtitle.mimeType)
         assertEquals(C.SELECTION_FLAG_DEFAULT, subtitle.selectionFlags)
     }
+    @Test fun `VOD retains a seek back buffer and accepts cinematic aspect ratios within the height limit`() {
+        val profile = NativePlaybackPolicy.profile(true, false, false, 1080)
+        val selector = FrostMedia.tracks(org.robolectric.RuntimeEnvironment.getApplication(), profile, false)
+        assertEquals(Int.MAX_VALUE, selector.parameters.maxVideoWidth)
+        assertEquals(720, selector.parameters.maxVideoHeight)
+        assertEquals(10_000_000L, FrostMedia.buffers(profile).backBufferDurationUs)
+        selector.release()
+    }
+
 }

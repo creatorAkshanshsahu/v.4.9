@@ -105,7 +105,7 @@ internal object FrostProtocol {
             val lower = key.lowercase(Locale.US)
             val raw = value.opt(key) as? String ?: return@forEach
             if ((lower in setOf("user-agent", "referer", "origin", "authorization", "cookie", "accept") ||
-                    lower.matches(Regex("x-[a-z0-9-]{1,60}"))) && raw.length <= 4096 && raw.none { it == '\r' || it == '\n' })
+                    lower.matches(Regex("x-[a-z0-9-]{1,60}"))) && raw.length <= 4096 && raw.all { it == '\t' || it in ' '..'~' })
                 put(lower, raw)
         }
     }
@@ -260,7 +260,12 @@ internal class VodRecovery {
     private var attempts = 0
     fun reset() { tried.clear(); refreshed.clear(); visited.clear(); attempts = 0 }
     fun visit(provider: FrostProvider) { visited.add(provider) }
-    fun take(source: FrostSource): Boolean = attempts < 16 && tried.add(source.url).also { if (it) attempts++ }
+    fun take(source: FrostSource): Boolean {
+        // A refresh can change request headers without changing the URL. Keep secrets in memory only.
+        val request = source.url + "\n" + source.headers.toSortedMap().entries.joinToString("\n") { "${it.key}:${it.value}" }
+        val fingerprint = MessageDigest.getInstance("SHA-256").digest(request.toByteArray()).joinToString("") { "%02x".format(it) }
+        return attempts < 16 && tried.add(fingerprint).also { if (it) attempts++ }
+    }
     fun refresh(provider: FrostProvider, status: Int?): Boolean = status in listOf(401, 403) && refreshed.add(provider)
     fun alternative(): FrostProvider? = if (attempts >= 16) null else FrostProvider.values().firstOrNull { it !in visited }
     fun exhausted() = attempts >= 16

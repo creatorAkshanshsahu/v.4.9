@@ -1,3 +1,13 @@
+## 4.9.18: recovered TV compatibility behavior
+
+The [4.7.2 comparison](tv-4.7.2-comparison.md) found the same Gecko/Media3 dependencies and manifest, but different native track-capability selection and an old remembered browser fallback. The native TV policy now restores the reported codec-limit fallback, while still rejecting unsupported DRM and absent codecs. Touch-phone defaults are unchanged. Generic no-touch D-pad boxes are recognized, and Menu includes an explicit TV-mode override if firmware still misidentifies the device. Playback Details separates reported-limit exceedance from unsupported codecs and reports API level plus process bitness.
+
+The live browser backup remains removed. The user's box playback and the exact native failure have not been verified by the assistant. Current TG still embeds JJTV as a no-referrer iframe; fresh runner traces again ended in HTTP 451 without frames, not evidence of an outage on the user's network.
+
+Movies/Series are independently migrated to [native Frost VOD](tgfrost-native-movies.md), without importing live offsets, Jio authentication or channel DRM.
+
+---
+
 # Native live TV (4.9.17)
 
 ## 4.9.17 — match TG's observed per-request behavior

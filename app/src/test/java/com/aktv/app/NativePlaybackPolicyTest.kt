@@ -113,4 +113,21 @@ class NativePlaybackPolicyTest {
         selector.release()
     }
 
+    @Test fun `generic no-touch D-pad box uses TV policy without relying on fake release or model`() {
+        assertTrue(NativePlaybackPolicy.televisionDevice(android.content.res.Configuration.UI_MODE_TYPE_NORMAL, false, false,
+            android.content.res.Configuration.TOUCHSCREEN_NOTOUCH, android.content.res.Configuration.NAVIGATION_DPAD))
+        assertFalse(NativePlaybackPolicy.televisionDevice(android.content.res.Configuration.UI_MODE_TYPE_NORMAL, false, false,
+            android.content.res.Configuration.TOUCHSCREEN_FINGER, android.content.res.Configuration.NAVIGATION_DPAD))
+        assertFalse(NativePlaybackPolicy.televisionDevice(android.content.res.Configuration.UI_MODE_TYPE_NORMAL, false, false,
+            android.content.res.Configuration.TOUCHSCREEN_NOTOUCH, android.content.res.Configuration.NAVIGATION_UNDEFINED))
+    }
+    @Test fun `explicit generic box override enables the TV policy`() {
+        val context = RuntimeEnvironment.getApplication<android.app.Application>()
+        val prefs = context.getSharedPreferences("aktv", android.content.Context.MODE_PRIVATE)
+        try {
+            prefs.edit().putBoolean("native_force_tv", true).commit()
+            assertTrue(NativePlaybackPolicy.isTelevision(context))
+        } finally { prefs.edit().remove("native_force_tv").commit() }
+    }
+
 }

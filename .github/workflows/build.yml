@@ -44,7 +44,10 @@ jobs:
         run: |
           set -o pipefail
           gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
-      - name: Check current TG and JJTV native configuration
+      - name: Report deterministic tests for both APK variants
+        if: always()
+        run: python3 .github/scripts/report-unit-tests.py
+      - name: Check current TG, JJTV and Frost native configuration
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true
         timeout-minutes: 5

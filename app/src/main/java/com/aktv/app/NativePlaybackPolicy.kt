@@ -45,12 +45,20 @@ internal object NativePlaybackPolicy {
     }
 
     fun isTelevision(context: Context): Boolean {
-        val mode = (context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType
+        if (context.getSharedPreferences("aktv", Context.MODE_PRIVATE).getBoolean("native_force_tv", false)) return true
+        val mode = (context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType ?: 0
         val packages = context.packageManager
-        return mode == Configuration.UI_MODE_TYPE_TELEVISION ||
-            packages.hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
-            packages.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        val config = context.resources.configuration
+        return televisionDevice(mode, packages.hasSystemFeature(PackageManager.FEATURE_TELEVISION),
+            packages.hasSystemFeature(PackageManager.FEATURE_LEANBACK), config.touchscreen, config.navigation)
     }
+
+    /** Some generic boxes run phone firmware. A no-touch D-pad device is TV-style, without guessing
+     * from a spoofable model/release string. Touch phones with a remote attached retain phone defaults.
+     */
+    fun televisionDevice(mode: Int, tvFeature: Boolean, leanback: Boolean, touchscreen: Int, navigation: Int): Boolean =
+        mode == Configuration.UI_MODE_TYPE_TELEVISION || tvFeature || leanback ||
+            (touchscreen == Configuration.TOUCHSCREEN_NOTOUCH && navigation == Configuration.NAVIGATION_DPAD)
 
     fun softwarePreferred(delegate: MediaCodecSelector = MediaCodecSelector.DEFAULT) = MediaCodecSelector { mime, secure, tunneling ->
         // The delegate filters secure/tunnelling requirements. Never query insecure alternatives

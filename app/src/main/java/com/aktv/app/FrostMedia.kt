@@ -1,6 +1,8 @@
 package com.aktv.app
 
 import android.net.Uri
+import android.content.Context
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -11,6 +13,18 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 
 /** VOD source construction must never inherit the live player's target offset or channel DRM. */
 internal object FrostMedia {
+    fun tracks(context: Context, profile: NativePlaybackPolicy.Profile, hindi: Boolean) =
+        NativePlaybackPolicy.tracks(context, profile, hindi).apply {
+            // Movie aspect ratios are not necessarily 16:9 (the sampled 1080-line film is 2580px wide).
+            // Limit decoded height/bitrate and use the real viewport, not a live-TV width assumption.
+            setParameters(buildUponParameters().setMaxVideoSize(Int.MAX_VALUE, profile.height))
+        }
+
+    fun buffers(profile: NativePlaybackPolicy.Profile): DefaultLoadControl = DefaultLoadControl.Builder()
+        .setBufferDurationsMs(profile.minBufferMs, profile.maxBufferMs, 1000, 2500)
+        .setBackBuffer(10_000, false).setTargetBufferBytes(profile.bufferBytes)
+        .setPrioritizeTimeOverSizeThresholds(true).build()
+
     fun item(source: FrostSource): MediaItem = MediaItem.Builder().setMediaId(source.identity)
         .setUri(source.url).setMimeType(source.format.mime)
         .setSubtitleConfigurations(source.subtitles.map { track ->

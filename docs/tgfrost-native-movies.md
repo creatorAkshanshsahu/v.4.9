@@ -1,113 +1,112 @@
-# TG Frost: native Movies / Series feasibility
+# TG Frost native Movies / Series — 4.9.18
 
-Inspected 2026-10-17. Site: https://tgfrost.lovable.app
+Updated 2026-10-17. Provider: https://tgfrost.lovable.app
 
-## Conclusion
+## Implementation
 
-**A native integration is feasible in principle using Frost's resolved media sources—not by placing its JavaScript player inside Media3.** The current source API returned DASH and MP4 entries for both a movie and a TV episode. Complete DASH manifests were accessible; the direct MP4 checks returned HTTP 403. Media3 supports these container/streaming formats, but the sampled DASH video is HEVC/H.265, so actual device decoding must be tested.
+**Movies and Series now use native Media3 VOD, resolved through TG Frost.** This replaces the movie-only TGVID/GeckoView player. The native TMDB catalogue, detail pages and season/episode selection remain.
 
-This is an investigation, not a movie-player replacement. Android production code, the current TGVID/GeckoView movie player, and version 4.9.17 remain unchanged. No phone or TV-box playback has been verified.
+The feasibility investigation in commits `7616cc5`–`a0893fe` did **not** change production playback. Implementation followed the user's subsequent instruction to use Frost natively. Version 4.9.18 / code 35 contains that implementation. It does not restore the removed live-TV web backup.
 
-## What the app uses now
+### Playback flow
 
-- `Movies.kt` supplies the native TMDB catalogue, title IDs, seasons and episodes.
-- Its playback URLs target `https://tgvid.lovable.app/embed`, **not TG Frost**.
-- `MoviePlayerActivity` in `MovieScreens.kt` opens those URLs in GeckoView and forwards remote keys to the web player.
-- The removed live-TV browser/backup player is separate from this movie implementation.
+```text
+Native TMDB catalogue → title / exact episode identity → Frost source API
+                      → supplied DASH / HLS / MP4 URL → Media3 / Android decoders
+```
 
-## What Frost actually does
+- `MovieScreens.kt`: native title details; launches a structured TMDB identity instead of an embed URL. No Gecko prewarming.
+- `MoviePlayerActivity.kt`: native touch and D-pad controls, seeking, source/quality/language choices, audio/subtitle selection, previous position, episode picker, next episode and optional auto-next.
+- `FrostMovies.kt`: validated identities, bounded source parsing, fresh resolver requests, source-specific transport, resume/episode helpers and bounded recovery.
+- `FrostMedia.kt`: explicit media MIME types, external subtitle configuration, VOD buffering and a ten-second back buffer. No live offset or live channel DRM is attached.
+- The general `BrowserActivity` remains available for its unrelated browser functionality. Neither native movie playback nor native live playback initializes Gecko.
 
-The public `tgflixStreams-Cv-shetv.js` client calls a same-origin GET endpoint with `cache: no-store`:
+## Source contract
+
+The inspected `tgflixStreams-Cv-shetv.js` client uses GET requests with `cache: no-store`:
 
 ```text
 /api/sources?server=tgflix&type=movie&tmdb_id=<TMDB_ID>
 /api/sources?server=tgflix&type=tv&tmdb_id=<TMDB_ID>&season=<SEASON>&episode=<EPISODE>
 ```
 
-For TG OUT it uses `server=tgout`. The response must contain a nonempty `sources` array. The client keeps results and in-flight requests in memory and supports a forced refresh. It explicitly handles resolver errors, including HTTP 400, 403 and 429.
+TG OUT uses `server=tgout`. The response contains `sources[]`. Observed fields include `id`, `scraperId`, `scraperName`, `type`, `url`, `quality`, `language`, `mirrors`, and `tracks`. Expiring media URLs and header values are deliberately not recorded here or persisted in preferences.
 
-Observed source fields include `id`, `scraperId`, `scraperName`, `type`, `url`, `quality`, `language`, `mirrors` and `tracks`. Signed URL values and track URLs are deliberately omitted from this report.
-
-### Server names are not equivalent implementations
-
-| Choice | Current client implementation | Native Android implication |
+| Website choice | Observed implementation | Android handling |
 | --- | --- | --- |
-| TG FROST (`tgflix`) | Resolves `sources` and passes them to its own web video component | Suitable candidate for a Media3 source adapter |
-| TG OUT (`tgout`) | Uses the same source API/component path | Adapter is feasible structurally; sampled lookups returned 404 |
-| TG BOLT (`tgbolt`) | Current **embed component** skips source resolution and opens a `vidbolt.xyz` iframe | Cannot be supplied to Media3 as a video URL; requires a separately verified media-source contract |
-| TGVID | Also appears in the main watch-player choices as a web embed | This is the web-based path the Android app currently uses |
+| TG FROST / `tgflix` | Resolves media sources | Default native resolver |
+| TG OUT / `tgout` | Same source API | Native alternative; available through Sources and bounded automatic failover |
+| TG BOLT / `tgbolt` | `vidbolt.xyz` iframe in the inspected embed component | **Not** a native source; never opened as a fallback |
+| TGVID | Web embed | Previous Android movie player, now replaced |
 
-The [embed documentation](https://tgfrost.lovable.app/docs) labels all three embed servers “Native player,” but the inspected embed implementation treats TG BOLT differently. A website's use of the word “native” does not mean an Android Media3 component.
+The website's [embed documentation](https://tgfrost.lovable.app/docs) calling a web component “Native player” is not evidence that an iframe can be played by Media3.
 
-## Observed API results
+### Formats, headers and subtitles
 
-[Source inspection run 39053220250](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39053220250), job/check 117455861288:
+- DASH: `application/dash+xml`; HLS: `application/x-mpegURL`; MP4: `video/mp4`. Extensionless DASH relay URLs retain their explicit type.
+- Provider-returned relay URLs, encoded queries and byte ranges are preserved. No invented proxy or token/signature rewriting.
+- Supplied authorization/cookie/custom headers are scoped to the original source origin, including when following redirects, accessing child URLs or trying a different-origin mirror. They are not inherited from live TV or another movie session.
+- The source API is anonymous in the inspected samples. The app does not ask for credentials, create a cookie jar or execute site scripts.
+- Explicit unsupported DRM metadata is not replaced with a guessed licence or live-channel keys. Container encryption still requires genuine platform/source support.
+- Observed external subtitles contain only `url`, `label`, and `lang`. The supplied `embed.reelsdownload.online` subtitle service returned `text/vtt` with a `WEBVTT` signature for both samples. This specific verified service is mapped to WebVTT; other untyped endpoints are not blindly guessed.
+- Explicit WebVTT, SRT, SSA/ASS and TTML tracks are supported by their MIME/extension. Thumbnail tracks are excluded. Embedded audio and text tracks are handled by Media3.
+- An absent `hevc` field remains **unknown**, not “AVC.” Actual manifest and renderer support determines whether a source can play.
 
-| Provider | Sample | API result | Returned source types | Bounded first-source check |
-| --- | --- | --- | --- | --- |
-| TG FROST | Tenzing, movie 1288069 | HTTP 200; 12 source entries | DASH and MP4 | HTTP 206; `application/dash+xml`; 4 KiB read |
-| TG FROST | Crystal Lake, TV 213562 / S1 E1 | HTTP 200; 4 source entries | DASH and MP4 | HTTP 206; `application/dash+xml`; 4 KiB read |
-| TG FROST | Everest, movie 253412 | HTTP 404 | Not established | Not attempted |
-| TG OUT | Everest, movie 253412 | HTTP 404 | Not established | Not attempted |
-| TG OUT | Crystal Lake, TV 213562 / S1 E1 | HTTP 404 | Not established | Not attempted |
+## Native behavior and recovery
 
-These GETs used no account cookie or Authorization header. Successful source entries did not supply custom request headers or explicit DRM configuration. The first DASH URLs were provider-supplied CinemaOS relay URLs. They must be treated as returned media URLs, not replaced with a guessed upstream path.
+- Exact TMDB movie or series/season/episode identity is retained across retries. A late response for a previous episode cannot replace the current player.
+- Source selection, seek controls and audio/subtitle/quality dialogs work through native views. Remote Menu opens Sources; Info opens redacted playback details. Media keys and ten-second seek keys are handled natively.
+- Native progress is stored in milliseconds per title **and episode**, never as a resolved URL. Near-start and completed positions resume from the beginning. Existing last-season/episode preferences are retained. Old TGVID website-owned progress is not imported into the new native position store.
+- Auto-next uses only known TMDB episode metadata, including season transitions; it never fabricates an episode number.
+- Adaptive/relay sources precede direct MP4 alternatives. A rejected media URL can trigger one fresh lookup per provider; unchanged URL/header combinations are not looped indefinitely. Changed supplied headers count as a new request even if the URL is unchanged.
+- Automatic attempts are bounded: at most 16 distinct requests, at most one compatible-decoder retry per provider on TVs, a 30-second no-picture deadline per attempt and a two-minute startup cycle. Intentional pause does not consume the picture deadline. HTTP 429 stops automatic retries; source API 401/403 does not trigger an access-control workaround.
+- Native audio/video formats unavailable on the device can move to another supplied source rather than silently accepting a video-only or black-screen stream. This does not add missing decoder implementations.
+- Codec/memory choices share the existing device policy, but VOD has its own buffers, a seek back buffer and aspect-ratio-aware limits. Cinematic movies are not constrained to a 16:9 width assumption.
+- Activity stop/finish cancels the resolver, invalidates callbacks, saves position, detaches the surface and releases Media3. No browser surface remains behind the detail screen.
 
-A 404 is a result for that lookup at that time—not proof that the whole provider is permanently unavailable. Returned quality labels and track counts are metadata, not proof of decoded resolution, language availability or playback.
+## Verified evidence
 
-### Detailed format checks
+### Source inspection
 
-[Manifest/MP4 inspection run 39053415954](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39053415954), job/check 117456432867, inspected one DASH and one MP4 entry for each successful TG FROST lookup:
+Read-only inspection runs `39053647071` and `39054596333`:
 
-| Sample | DASH response | Manifest contents | Direct MP4 response |
-| --- | --- | --- | --- |
-| Movie 1288069 | HTTP 206; complete 61,306-byte MPD | 4 representations; `SegmentTemplate`; HEVC video and AAC audio | HTTP 403 / HTML; no MP4 header confirmed |
-| TV 213562 / S1 E1 | HTTP 206; complete 44,993-byte MPD | 4 representations; `SegmentTemplate`; HEVC video and AAC audio | HTTP 403 / HTML; no MP4 header confirmed |
+| Sample | Source API | Detailed HTTP checks |
+| --- | --- | --- |
+| Movie 1288069, Tenzing | 200; 12 sources | Complete DASH metadata; direct MP4 403 |
+| Series 213562, S1 E1, Crystal Lake | 200; 4 sources | Complete DASH metadata; direct MP4 403 |
+| Movie 253412, Everest, Frost | 404 | No native source established |
+| Same movie / sampled episode, TG OUT | 404 | No native source established for those lookups |
 
-- Video codec strings were `hev1...`; audio was `mp4a.40.2`. Do **not** interpret a missing HEVC flag in source JSON as AVC/H.264. The initial inspection summary normalized an absent flag to `false`; the inspector now preserves it as `null` (unknown). The actual codec evidence is the MPD.
-- Neither inspected complete MPD contained a `ContentProtection` element. This is narrower than claiming that every Frost source is unencrypted or that an Android device has successfully decrypted/decoded it.
-- No media initialization/segment playback, native decoder output, audible audio, subtitle rendering or nonzero seeking was verified. These are still required acceptance tests.
-- The MP4 403 responses were not retried with guessed credentials or bypassed. They do not prove that MP4 fails in the user's normal browser; request requirements or availability may differ.
-- HLS is supported by the app's dependencies, but these successful lookups returned DASH/MP4, not a verified HLS source. TG OUT's sampled 404 responses do not establish its media format.
+Both sampled MPDs have HEVC video, AAC audio and no `ContentProtection` elements. Absent JSON HEVC flags do not change that finding. The subtitle probes returned HTTP 200, `text/vtt`, and the WebVTT signature.
 
-### Browser observation limitation
+### Native backend verification
 
-The separate [browser inspection run 39052898876](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39052898876) navigated to `about:blank` before playback was established. Ads, nonpublic destinations and unknown external script/document loads were restricted by the probe. The cause of the blank navigation was not established. That run is **not** evidence of successful browser playback, nor proof that the real site cannot play. The subsequent source API checks were ordinary independent HTTP requests, not a successful browser-playback trace.
+Build run [39054912949](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39054912949), job `117460801208`, validated the production resolver, its OkHttp transport and **Media3's own DASH parser**:
 
-## Recommended native design
+| Check | Movie 1288069 | Series 213562 / S1 E1 |
+| --- | --- | --- |
+| Native source count | 12 | 4 |
+| Recognized external subtitles | 9 | 1 |
+| MPD response / parser | 200 / parsed | 200 / parsed |
+| MPD bytes | 61,306 | 44,993 |
+| First inspected video format | HEVC, 2580×1080 | HEVC, 1920×1080 |
+| Manifest DRM present | No | No |
+| Initialization byte-range response | 206 | 206 |
+| Media byte-range response | 206 | 206 |
 
-```text
-Existing TMDB movie / season / episode selection
-    → Frost source resolver
-    → Typed sources, mirrors, quality/language and track metadata
-    → Dedicated Media3 VOD player
-```
+Only bounded prefixes were read; no movie file, keys, credentials or signed URLs were saved. **These checks do not decode frames/audio, verify native seeking, or establish playback on a physical phone/TV.** This run validated the backend foundation; complete-app build/artifact verification is recorded in PR #1 with the delivered APK.
 
-1. Keep the existing catalogue and pass structured TMDB/type/season/episode values into the player.
-2. Resolve fresh sources for the selected title/episode. Preserve the returned URL and its encoding; do not bundle expiring URLs or substitute a different title/episode.
-3. **Set Media3's MIME type explicitly from the source type.** A DASH URL behind a worker/proxy need not end in `.mpd`; extension-based guessing can choose the wrong extractor. Map DASH to `application/dash+xml`, HLS to `application/x-mpegURL`, and MP4 to `video/mp4` when those formats are actually returned.
-4. Implement movie-specific play/pause, seeking, duration, resume, quality/language selection, subtitle handling, D-pad navigation and next-episode controls. HTML controls and browser `blob:` URLs are not reusable Android playback components.
-5. Retry only bounded alternatives/mirrors for the same title and refresh expired sources. Respect API access/rate limits. Do not turn an iframe URL into a guessed media URL.
-6. Select using actual manifest/container codecs and device capabilities. Prefer a compatible AVC alternative when genuinely available; do not promise one from a missing HEVC flag. Reuse appropriate general device/surface policies, **not** Jio/JJTV authentication, ClearKey overrides, live-edge offsets or live-channel watchdog settings.
-7. Test picture **and** audio, nonzero seeking, subtitle/audio switching, resume, episode changes and resource cleanup on the phone and the actual TV box. Check real decoder capabilities rather than relying on the box's displayed Android version.
+## Tests and remaining device checks
 
-The public documentation supports iframe embedding; it is not a stability or permission guarantee for a standalone source API. Confirm permitted API use before distributing an integration. Provider availability, URL lifetime and schema can change independently of the app.
+Deterministic tests cover exact API identities, URL/schema guards, MIME selection, mirrors/header scoping, redirects/ranges, subtitle mapping, native navigation, progress, episode boundaries, bounded recovery and native UI inflation. UI inflation tests do not start the resolver or claim decoder playback. Both arm32 and arm64 APK variants run the offline suite. The two opt-in native Frost checks remain separate from the two live-TV metadata checks.
 
-## Reproduction and privacy
+Physical acceptance checks still required:
 
-- Inspector: `.github/scripts/inspect-tgfrost-player.cjs`.
-- `node --test .github/scripts/inspect-tgfrost-player.test.cjs` exercises redaction, request validation and manifest summaries: **12 tests passed** locally and in the detailed inspection workflow.
-- `node .github/scripts/inspect-tgfrost-player.cjs --api` checks the five API cases above.
-- `node .github/scripts/inspect-tgfrost-player.cjs --api --details` limits itself to the two successful TG FROST cases and inspects one source per declared format: at most 128 KiB for manifest metadata or 4 KiB for an MP4 prefix. It does not decode video or save movie files.
-- Browser mode is optional, requires Playwright/Chrome, and is not needed for the direct API check.
-- The separate `Inspect movie player` workflow reports redacted schemas/statuses only. No raw source bodies, signed URL values, cookies, DRM keys, licence bodies or browser storage are committed or printed.
+1. Start a movie and verify **both picture and audio** on the phone and box.
+2. Seek forward/backward, pause/resume and reopen at the stored position.
+3. Select alternate source/quality, embedded audio and external subtitles.
+4. Start the exact selected episode, advance across a known episode/season boundary, and test auto-next Off/On.
+5. Exit while resolving/buffering, return from Home, and check for audio/surface leftovers.
+6. Confirm errors for unavailable titles, HTTP-denied MP4s and unsupported HEVC are bounded and actionable.
 
-## Public source references
-
-- [Embed documentation](https://tgfrost.lovable.app/docs)
-- [Source resolver client](https://tgfrost.lovable.app/assets/tgflixStreams-Cv-shetv.js)
-- [Embed component](https://tgfrost.lovable.app/assets/Embed-7OPRXmwX.js)
-- [Watch component](https://tgfrost.lovable.app/assets/Watch-CD57SPkV.js)
-- [Player bundle](https://tgfrost.lovable.app/assets/TgflixPlayer-OGmWq2vS.js)
-
-Asset hashes describe the inspected deployment and are not stable API endpoints.
+HEVC support, provider availability and HTTP-denied MP4s remain real limitations. Successful API/manifest/range checks are not a promise that every catalogue title or source plays on every device.

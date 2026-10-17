@@ -67,7 +67,7 @@ internal class PlaybackDiagnostics {
         private var video = "not selected"; private var audio = "not selected"
         private var videoDecoder = "not initialized"; private var audioDecoder = "not initialized"
         private var selectedVideo = 0; private var selectedAudio = 0
-        private var unsupportedDrm = 0; private var unsupportedCodec = 0
+        private var unsupportedDrm = 0; private var unsupportedCodec = 0; private var exceedsCapabilities = 0
         private val schemes = linkedSetOf<String>()
 
         @Synchronized fun drmSupport(supported: Boolean) { drmSupported = supported }
@@ -90,8 +90,8 @@ internal class PlaybackDiagnostics {
             val safe = name.takeIf { it.matches(Regex("(?:OMX|c2|C2)\\.[A-Za-z0-9_.-]{1,90}")) } ?: "platform decoder"
             if (isVideo) videoDecoder = safe else audioDecoder = safe
         }
-        @Synchronized fun tracks(videos: Int, audios: Int, drmUnsupported: Int, codecUnsupported: Int) {
-            selectedVideo = videos; selectedAudio = audios; unsupportedDrm = drmUnsupported; unsupportedCodec = codecUnsupported
+        @Synchronized fun tracks(videos: Int, audios: Int, drmUnsupported: Int, codecUnsupported: Int, exceedsReported: Int = 0) {
+            selectedVideo = videos; selectedAudio = audios; unsupportedDrm = drmUnsupported; unsupportedCodec = codecUnsupported; exceedsCapabilities = exceedsReported
         }
         @Synchronized fun format(isVideo: Boolean, mime: String?, width: Int = 0, height: Int = 0, channels: Int = 0, scheme: String? = null) {
             val name = when (mime) {
@@ -120,6 +120,7 @@ internal class PlaybackDiagnostics {
             unsupportedDrm > 0 && selectedVideo == 0 && selectedAudio == 0 -> "No tracks selected: Android reports unsupported DRM"
             drm != Drm.NONE && step != DrmStep.KEYS_LOADED -> "Waiting for Android $drm keys (stage ${step.name})"
             unsupportedCodec > 0 && selectedVideo == 0 -> "No video selected: decoder format unsupported"
+            exceedsCapabilities > 0 && selectedVideo == 0 -> "No video selected: codec exceeds reported device limits"
             !surface -> "The video surface is not ready"
             videoDecoder == "not initialized" -> "Keys/download stage passed; video decoder has not initialized"
             else -> "Video decoder initialized, but no first frame was reported"
@@ -135,7 +136,7 @@ internal class PlaybackDiagnostics {
             clockSkewSeconds?.let { append("Device clock minus HTTP Date: ${it}s (cached Date may differ)\n") }
             append("DRM support: ${drmSupported?.toString() ?: "not queried"}; stage: ${step.name}\n")
             drmProblem?.let { append("DRM event (not necessarily terminal): ${it.describe()}\n") }
-            append("Selected tracks: video $selectedVideo, audio $selectedAudio; unsupported DRM $unsupportedDrm, codec $unsupportedCodec\n")
+            append("Selected tracks: video $selectedVideo, audio $selectedAudio; unsupported DRM $unsupportedDrm, codec $unsupportedCodec; above reported limits $exceedsCapabilities\n")
             append("Encryption scheme: ${schemes.joinToString().ifEmpty { "not reported" }}\n")
             append("Video: $video; decoder $videoDecoder\nAudio: $audio; decoder $audioDecoder\n")
             append("Surface ready: $surface; first video frame: $firstFrame; audio position advanced: $audioAdvancing")

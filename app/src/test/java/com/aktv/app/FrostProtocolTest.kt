@@ -155,4 +155,12 @@ class FrostProtocolTest {
         assertEquals("en", subs.single().language)
     }
 
+    @Test fun `a fresh provider header on an unchanged URL permits one genuinely new request`() {
+        val first = parse(source().put("headers", JSONObject().put("Authorization", "Bearer first"))).single()
+        val second = parse(source().put("headers", JSONObject().put("Authorization", "Bearer renewed"))).single()
+        val recovery = VodRecovery()
+        assertTrue(recovery.take(first)); assertFalse(recovery.take(first))
+        assertTrue(recovery.take(second)); assertFalse(recovery.take(second))
+    }
+
 }

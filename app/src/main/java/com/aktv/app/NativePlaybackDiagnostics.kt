@@ -76,7 +76,7 @@ internal class NativePlaybackDiagnostics(private val trace: PlaybackDiagnostics.
         if (!wasCanceled) trace.loadError(PlaybackProblems.from(error))
     }
     override fun onTracksChanged(eventTime: AnalyticsListener.EventTime, tracks: Tracks) {
-        var video = 0; var audio = 0; var drm = 0; var codec = 0
+        var video = 0; var audio = 0; var drm = 0; var codec = 0; var exceeds = 0
         for (group in tracks.groups) {
             if (group.type != C.TRACK_TYPE_AUDIO && group.type != C.TRACK_TYPE_VIDEO) continue
             for (i in 0 until group.length) {
@@ -87,11 +87,12 @@ internal class NativePlaybackDiagnostics(private val trace: PlaybackDiagnostics.
                 }
                 when (group.getTrackSupport(i)) {
                     C.FORMAT_UNSUPPORTED_DRM -> drm++
-                    C.FORMAT_UNSUPPORTED_TYPE, C.FORMAT_UNSUPPORTED_SUBTYPE, C.FORMAT_EXCEEDS_CAPABILITIES -> codec++
+                    C.FORMAT_UNSUPPORTED_TYPE, C.FORMAT_UNSUPPORTED_SUBTYPE -> codec++
+                    C.FORMAT_EXCEEDS_CAPABILITIES -> exceeds++
                 }
             }
         }
-        trace.tracks(video, audio, drm, codec)
+        trace.tracks(video, audio, drm, codec, exceeds)
     }
     private fun recordFormat(video: Boolean, value: Format) = trace.format(video, value.sampleMimeType,
         value.width, value.height, value.channelCount, value.drmInitData?.schemeType)

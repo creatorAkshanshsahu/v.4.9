@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
     private val recovery = PlaybackRecovery()
     private var okLong = false
     private var renderedFrame = false
-    private val television by lazy { NativePlaybackPolicy.isTelevision(this) }
+    private val television get() = NativePlaybackPolicy.isTelevision(this)
     private var compatiblePlayback = false
     private var playbackActive = false
     private val startupBudget = PlaybackStartupBudget()
@@ -1266,6 +1266,10 @@ class MainActivity : AppCompatActivity() {
         choices.add("Automatic native source" to { selectNativeProvider(null) })
         if (!ch.v2) choices.add("Play JJTV now (native)" to { selectNativeProvider(LiveProvider.JJTV) })
         choices.add("Play TG TV now (native)" to { selectNativeProvider(LiveProvider.TG) })
+        choices.add((if (prefs.getBoolean("native_force_tv", false)) "TV compatibility: return to automatic detection" else "TV compatibility: force TV mode (generic boxes)") to {
+            prefs.edit().putBoolean("native_force_tv", !prefs.getBoolean("native_force_tv", false)).apply()
+            selectNativeProvider(requestedNativeProvider?.takeIf { it.first == ch.key }?.second)
+        })
         choices.add("Playback details" to { showPlaybackDetails() })
         val dialog = AlertDialog.Builder(this).setTitle("Native stream source")
             .setItems(choices.map { it.first }.toTypedArray()) { _, index -> choices[index].second() }
@@ -1288,6 +1292,7 @@ class MainActivity : AppCompatActivity() {
     private fun playbackDetailsText(): String = buildString {
         append("AK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n")
         append("${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown ABI"}\n")
+        append("App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n")
         append("Device UTC: ${java.time.Instant.ofEpochMilli(System.currentTimeMillis())}\n")
         append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
         append("TV reported codec-limit fallback: $television (unsupported DRM remains rejected)\n")

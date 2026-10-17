@@ -266,9 +266,9 @@ class MoviePlayerActivity : Activity() {
         attemptAt = SystemClock.elapsedRealtime(); bufferingAt = 0
         try {
             val profile = NativePlaybackPolicy.profile(television, lowMemory, software, if (television) 720 else 1080)
-            val selector = NativePlaybackPolicy.tracks(this, profile, source.language.contains("Hindi", true))
+            val selector = FrostMedia.tracks(this, profile, source.language.contains("Hindi", true))
             val owner = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
-                .setTrackSelector(selector).setLoadControl(NativePlaybackPolicy.buffers(profile))
+                .setTrackSelector(selector).setLoadControl(FrostMedia.buffers(profile))
                 .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build()
             player = owner; view.player = owner
             owner.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
@@ -277,6 +277,7 @@ class MoviePlayerActivity : Activity() {
             owner.addListener(listener(owner, attempt))
             owner.setMediaSource(FrostMedia.create(source), lastPosition)
             owner.playWhenReady = desiredPlay
+            if (!desiredPlay) { attemptAt = 0; startupAt = 0; bufferingAt = 0 }
             prepareOnSurface(owner, attempt)
         } catch (error: Exception) {
             attempt.failed(PlaybackProblems.from(error))
@@ -335,6 +336,7 @@ class MoviePlayerActivity : Activity() {
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             if (player !== owner) return
             desiredPlay = playWhenReady
+            if (playWhenReady && owner.playbackState == Player.STATE_BUFFERING) bufferingAt = SystemClock.elapsedRealtime()
             if (!frame && playWhenReady) {
                 if (attemptAt == 0L) attemptAt = SystemClock.elapsedRealtime()
                 if (startupAt == 0L) startupAt = attemptAt
@@ -342,14 +344,20 @@ class MoviePlayerActivity : Activity() {
         }
         override fun onTracksChanged(tracks: Tracks) {
             if (player !== owner) return
-            val video = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
-            if (video.isNotEmpty() && video.none { it.isSelected } && video.all { group ->
-                    (0 until group.length).all { group.getTrackSupport(it) < C.FORMAT_EXCEEDS_CAPABILITIES }
-                }) {
-                lastFailure = "This device cannot select this source's video codec or DRM. Trying another native source."
-                ui.post { if (player === owner && foreground) nextSource() }
+            val minimum = if (television) C.FORMAT_EXCEEDS_CAPABILITIES else C.FORMAT_HANDLED
+            for (type in listOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_AUDIO)) {
+                val groups = tracks.groups.filter { it.type == type }
+                if (groups.isNotEmpty() && groups.none { it.isSelected } && groups.all { group ->
+                        (0 until group.length).all { group.getTrackSupport(it) < minimum }
+                    }) {
+                    val kind = if (type == C.TRACK_TYPE_VIDEO) "video" else "audio"
+                    lastFailure = "This device cannot select this source's $kind codec or DRM. Trying another native source."
+                    ui.post { if (player === owner && foreground) nextSource() }
+                    break
+                }
             }
         }
+
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
             val problem = PlaybackProblems.from(error, error.errorCode)
@@ -484,6 +492,7 @@ class MoviePlayerActivity : Activity() {
             setPadding(px(18), px(12), px(18), px(12))
             text = "TG Frost · native Media3 VOD\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n" +
                 "${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull().orEmpty()}\n" +
+                "App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n" +
                 "TMDB ${title.id} · ${title.type} · S${title.season} E${title.episode}\n" +
                 "TV reported codec-limit fallback: $television\n" +
                 "No Gecko, live offsets or Jio authentication is used.\n\n${diagnostics.report()}"
