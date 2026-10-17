@@ -40,7 +40,7 @@ function configShape(value) {
 }
 async function trace(browser, channel, entrypoint = "TG-embedded") {
   const context = await browser.newContext();
-  const records = [], outstanding = new Set();
+  const records = [], metadata = [], outstanding = new Set();
   const startTime = Date.now();
   const record = value => { if (records.length < 90) records.push({ elapsedMs: Date.now() - startTime, ...value }); };
   const requests = new WeakMap();
@@ -103,6 +103,24 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
       const url = request.url();
       const parsed = new URL(url);
       const type = (response.headers()['content-type'] || '').split(';')[0];
+      // Metadata had not been included in the earlier media-only traces. Report request
+      // policy, not cookie/key documents or response text, to diagnose pre-player HTTP 403.
+      let stage = null;
+      if (parsed.origin === JJ && parsed.pathname === '/pind') stage = 'player-page';
+      else if (parsed.origin === JJ && /\.json$/i.test(parsed.pathname)) stage = 'channel-catalogue';
+      else if (/cookie/i.test(parsed.pathname) && allowed.has(parsed.hostname))
+        stage = /jstarcookie/i.test(parsed.pathname) ? 'star-cookie' : 'general-cookie';
+      if (stage && metadata.length < 16) {
+        const headers = await request.allHeaders();
+        metadata.push({ stage, url: safeUrl(url), status: response.status(),
+          type: /^(?:application\/json|text\/plain|text\/html|application\/javascript)$/.test(type) ? type : 'other',
+          origin: headers.origin ? safeUrl(headers.origin) : '',
+          referer: headers.referer ? safeUrl(headers.referer) : '',
+          fetchMode: headers['sec-fetch-mode'] || '', fetchSite: headers['sec-fetch-site'] || '',
+          cookiePresent: !!headers.cookie, authorizationPresent: !!headers.authorization,
+          challenge: response.headers()['cf-mitigated'] === 'challenge',
+          referrerPolicy: ['no-referrer', 'same-origin', 'strict-origin-when-cross-origin', 'origin'].includes(response.headers()['referrer-policy']) ? response.headers()['referrer-policy'] : '' });
+      }
       if (parsed.pathname.includes('/_serverFn/')) {
         try {
           const shape = configShape(await response.json());
@@ -154,7 +172,7 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
   await context.close();
   return { channel, entrypoint, videoObserved: lastFrames.some(f => f.videos.some(v => v.time >= 3 && v.width > 0 && !v.paused)),
     visitedJjtv: records.some(record => record.event === 'frame' && record.url.startsWith(JJ)),
-    lastFrames, blockedHosts, blockedNonPlayerRequests: blocked, records };
+    lastFrames, metadata, blockedHosts, blockedNonPlayerRequests: blocked, records };
 }
 (async () => {
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
@@ -165,7 +183,12 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
     for (const result of results) {
       const channel = result.channel;
       // Keep the final state and actual requests, not thirteen duplicate video-state snapshots.
-      const report = JSON.stringify({ ...result, records: result.records.filter(record => record.event !== 'state' && record.event !== 'media-request') });
+      const metadataReport = JSON.stringify({ channel, entrypoint: result.entrypoint, metadata: result.metadata });
+      for (let start = 0; start < Math.min(metadataReport.length, 6000); start += 3000) {
+        const text = metadataReport.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+        console.log(`::notice title=Browser metadata ${channel} ${start / 3000 + 1}::${text}`);
+      }
+      const report = JSON.stringify({ ...result, metadata: undefined, records: result.records.filter(record => record.event !== 'state' && record.event !== 'media-request') });
       for (let start = 0; start < Math.min(report.length, 6000); start += 3000) {
         const text = report.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
         console.log(`::notice title=Browser trace ${result.entrypoint} ${channel} ${start / 3000 + 1}::${text}`);

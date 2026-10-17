@@ -48,10 +48,16 @@ class Scripts(HTMLParser):
             self.current = None
 
 
-def get(url):
-    request = urllib.request.Request(url, headers={
+def get(url, browser_style=False):
+    headers = {
         'User-Agent': shared['UA'], 'Origin': SITE, 'Referer': PAGE,
-        'Cache-Control': 'no-cache', 'Accept': 'text/html, application/javascript, application/json'})
+        'Cache-Control': 'no-cache, no-store', 'Accept': 'text/html, application/javascript, application/json'}
+    if browser_style:
+        headers.pop('Referer', None)
+        if urllib.parse.urlsplit(url).netloc == urllib.parse.urlsplit(SITE).netloc:
+            headers.pop('Origin', None)
+        headers['Accept'] = '*/*'
+    request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
             try:
@@ -145,7 +151,9 @@ def token_health(text, clock):
 def inspect_data():
     for name, url in endpoints.items():
         status, kind, text = get(url)
+        browser_status, browser_kind, browser_text = get(url, browser_style=True)
         report = {'endpoint': name, 'url': safe_url(url), 'status': status, 'type': kind, 'bytes': len(text),
+                  'canonicalNoReferrer': {'status': browser_status, 'type': browser_kind, 'bytes': len(browser_text)},
                   'httpTime': http_times.get(url, {})}
         if name.startswith('COOKIE_'):
             reference = http_times.get(url, {}).get('serverEpochSeconds', int(time.time()))
