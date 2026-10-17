@@ -4,8 +4,27 @@ on:
     branches: [ main, master ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Build APKs or inspect the live TG player contract
+        type: choice
+        options: [build, inspect]
+        default: build
 jobs:
+  inspect:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'inspect'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect live player metadata without saving credentials
+        run: python3 .github/scripts/inspect-tg-player.py
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'inspect'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
