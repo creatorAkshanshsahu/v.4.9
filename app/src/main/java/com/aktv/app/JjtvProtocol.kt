@@ -67,14 +67,14 @@ internal object JjtvProtocol {
         URI(url.trim()).host.orEmpty().equals("jiotvpllive.cdn.jio.com", ignoreCase = true)
     } catch (_: Exception) { false }
 
-    fun regularCookie(body: String?, fallback: Boolean = false): String {
+    fun regularCookie(body: String?, fallback: Boolean = false, now: Long = System.currentTimeMillis()): String {
         if (body.isNullOrBlank()) return ""
         return try {
-            if (fallback) (JSONObject(body).opt("cookie") as? String).orEmpty()
+            val values = if (fallback) listOf((JSONObject(body).opt("cookie") as? String).orEmpty())
             else JSONArray(body).let { array ->
-                (0 until array.length()).asSequence().mapNotNull { array.optJSONObject(it)?.opt("cookie") as? String }
-                    .firstOrNull { it.isNotBlank() }.orEmpty()
+                (0 until array.length()).mapNotNull { array.optJSONObject(it)?.opt("cookie") as? String }
             }
+            freshest(values, now)
         } catch (_: Exception) { "" }
     }
 
@@ -83,7 +83,7 @@ internal object JjtvProtocol {
         if (body.isNullOrBlank()) return ""
         return try {
             val root = JSONObject(body)
-            var first = ""
+            val values = ArrayList<String>()
             for (name in listOf("successful_results", "failed_results")) {
                 val entries = root.optJSONArray(name) ?: continue
                 for (i in 0 until entries.length()) {
@@ -91,17 +91,22 @@ internal object JjtvProtocol {
                     if (item.opt("channel_id")?.toString() != id) continue
                     val finalUrl = (item.optJSONObject("error_details")?.opt("final_url") as? String).orEmpty()
                         .ifBlank { (item.opt("final_url") as? String).orEmpty() }
-                    val value = token.find(finalUrl)?.value ?: continue
-                    if (first.isEmpty()) first = value
-                    val expiry = StreamRequestPolicy.expiry("", value)
-                    // The document can contain multiple probes for the SAME channel, including old
-                    // failures. Prefer an advertised current credential, never a different channel.
-                    if (expiry == null || expiry > now + 10_000) return value
+                    token.find(finalUrl)?.value?.let(values::add)
                 }
             }
-            first
+            freshest(values, now)
         } catch (_: Exception) { "" }
     }
+
+    /** Avoid picking a record about to expire when a longer-lived token for this exact channel exists.
+     * Unknown-expiry opaque credentials remain usable. When all known tokens are old, retain the
+     * newest supplied one for a bounded refresh/server rejection; never manufacture a replacement.
+     */
+    private fun freshest(values: List<String>, now: Long): String = values.filter { it.isNotBlank() }
+        .maxWithOrNull(compareBy<String> {
+            val expiry = StreamRequestPolicy.expiry("", it)
+            when { expiry == null -> 1; expiry > now + 10_000 -> 2; else -> 0 }
+        }.thenBy { StreamRequestPolicy.expiry("", it) ?: Long.MIN_VALUE }).orEmpty()
 
     fun streams(channel: JSONObject, config: Config, regular: String, fallback: String, star: String,
                 page: String, website: String): List<TgStream> {

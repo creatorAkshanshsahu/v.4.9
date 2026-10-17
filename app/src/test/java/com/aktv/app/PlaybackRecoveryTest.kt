@@ -67,4 +67,15 @@ class PlaybackRecoveryTest {
         assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(1, 2))
     }
 
+    @Test fun `replacing expired provider entries retains other provider failures without resetting refresh budget`() {
+        val recovery = PlaybackRecovery()
+        recovery.skip(listOf(0, 1, 2))
+        recovery.remapSources(mapOf(2 to 0)) // Old TG index 2 retained; renewed JJTV is now 1 and 2.
+        assertEquals(PlaybackRecovery.Action.Source(2), recovery.failed(1, 3))
+        assertEquals(PlaybackRecovery.Action.Refresh, recovery.failed(2, 3))
+        recovery.skip(listOf(0, 1))
+        recovery.remapSources(emptyMap())
+        assertEquals(PlaybackRecovery.Action.Unavailable, recovery.failed(0, 1))
+    }
+
 }

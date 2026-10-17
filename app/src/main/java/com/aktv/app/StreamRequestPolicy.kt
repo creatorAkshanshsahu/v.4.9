@@ -5,10 +5,11 @@ import java.net.URLDecoder
 import java.util.concurrent.ConcurrentHashMap
 
 /** Session-local auth: signed query parameters are never copied to a different origin or over relay queries. */
-class StreamRequestPolicy(private val stream: TgStream, private val now: () -> Long = System::currentTimeMillis) {
+class StreamRequestPolicy(private val stream: TgStream) {
     data class Request(val url: String, val headers: Map<String, String>)
     private val origin = originOf(stream.url)
     private val tokens = ConcurrentHashMap<String, String>()
+    private val manifests = ConcurrentHashMap.newKeySet<String>().apply { add(resource(stream.url)) }
     // TG's player explicitly excludes its allinonereborn relay from the Jio query filter.
     // The relay owns its query/authentication, even when TG repeats the primary cookie on it.
     private val preserveRelayQuery = stream.requestOrigin == TgResolver.SITE
@@ -18,10 +19,12 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
 
     fun request(url: String): Request {
         val target = originOf(url)
-        val token = tokens[target]?.takeUnless { (preserveRelayQuery && ownsQuery(url)) || expired(it, now()) }
+        // The CDN, not a potentially wrong TV clock, decides whether a credential is valid. Never
+        // silently turn an authenticated request into an unsigned one when the local date changes.
+        val token = tokens[target]?.takeUnless { preserveRelayQuery && ownsQuery(url) }
         val resolved = when {
             token == null -> url
-            url == stream.url && suppliedToken != null -> withToken(url, token, replace = true)
+            url.substringBefore('#') == stream.url.substringBefore('#') && suppliedToken != null -> withToken(url, token, replace = true)
             else -> withToken(url, token, replace = false)
         }
         val headers = linkedMapOf("Origin" to stream.requestOrigin.trimEnd('/'))
@@ -36,13 +39,22 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
         return Request(resolved, headers)
     }
 
-    /** Called after a successful response, including redirects. Star streams can acquire their token here. */
-    fun observed(finalUrl: String) {
-        tokenOf(finalUrl)?.takeUnless { expired(it, now()) }?.let { tokens[originOf(finalUrl)] = it }
+    /** Only a successful primary manifest/redirect can renew session auth. An independently signed
+     * audio/video segment must not replace the token used by every other track on this CDN.
+     */
+    fun observed(requestedUrl: String, finalUrl: String) {
+        if (resource(requestedUrl) !in manifests) return
+        manifests.add(resource(finalUrl))
+        tokenOf(finalUrl)?.let { tokens[originOf(finalUrl)] = it }
     }
 
     companion object {
         private const val TOKEN = "__hdnea__"
+        private fun resource(url: String): String = try {
+            val uri = URI(url)
+            val query = uri.rawQuery.orEmpty().split('&').filter { it.isNotBlank() && it.substringBefore('=') != TOKEN }.joinToString("&")
+            originOf(url) + uri.rawPath.orEmpty() + if (query.isEmpty()) "" else "?$query"
+        } catch (_: Exception) { url.substringBefore('#') }
         private fun ownsQuery(url: String): Boolean = try {
             URI(url).host.orEmpty().contains("allinonereborn", ignoreCase = true)
         } catch (_: Exception) { false }
@@ -69,7 +81,6 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
                 if (it > Long.MAX_VALUE / 1000) null else it * 1000
             }
         } catch (_: Exception) { null }
-        private fun expired(token: String, now: Long) = tokenExpiry(token)?.let { it <= now } ?: false
 
         /** Work on the raw query: re-encoding an already signed URL can invalidate its signature. */
         private fun withToken(url: String, token: String, replace: Boolean): String {

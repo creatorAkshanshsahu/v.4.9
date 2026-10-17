@@ -1,4 +1,24 @@
-# Native live TV (4.9.15)
+# Native live TV (4.9.16)
+
+## 4.9.16 — intermittent native authentication, not a presumed JJTV outage
+
+The user now reports intermittent JJTV failure **on mobile as well as the box**, and explicitly confirms that the same failing channel plays on the JJTV website in the phone's browser. The box uses that phone's hotspot. This does not support diagnosing every failure as an old-TV decoder problem or an upstream outage.
+
+Fresh inspection [39044234251](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39044234251) found the catalogue and token endpoints responding, valid supplied key formats for 816/872/1106/1108/362, a live general token, and a mixture of current/expired Star records. A cache-busted read did not change those sampled documents. A second real-browser trace [39048028686](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39048028686) confirmed Chrome/no-Referer for **direct JJTV** as well as the TG embed, so no speculative new request-header profile was added. That trace also observed a Sony request with an expired signature; it did not establish why that run selected it. All sampled media requests from CI returned HTTP 451; it did not show decoded video and is not a playback test of the user's network.
+
+Concrete client defects corrected:
+
+- **Do not strip authentication using the device wall clock.** The old transport stopped attaching supplied/learned tokens to unsigned segments once the local clock considered them expired. That could break an active stream or send unsigned requests on a misdated box. The native transport now forwards the source's supplied credentials to the same authorized origin and lets the CDN accept/reject them. It does not create or extend signatures.
+- **Do not let a separately signed audio/video segment replace the session token.** The old network interceptor learned from every successful response. A track-specific token could then be sent to another track. Learning now happens only for the successful primary manifest/its redirect chain; independent child signatures and unrelated query bytes remain untouched. Initial URLs with fragments are matched correctly after the HTTP layer removes the fragment.
+- **Refresh rejected credentials promptly and once.** HTTP 401/403 from full-screen media triggers one fresh lookup of the current provider before trying another header style with the same rejected token. Media3 does not repeatedly load or blacklist tracks for that authentication failure first. The existing 25-second provider and 60-second overall budgets are not reset. Other network/server/DRM/geographic errors keep their previous handling. The gate resets for a manual/new tune or genuinely stable playback, not merely READY.
+- **Keep the source list bounded during renewal.** Fresh provider entries replace its rejected entries; retained source indices/failure state are remapped without resetting the one-refresh recovery budget.
+- **Select/cache credentials independently of a bad TV date.** The JJTV resolver uses HTTPS HTTP Date plus Age when available and advances that reference with monotonic time. Its short source/cookie/catalogue caches also use monotonic time. Among records for the same channel it prefers a longer-lived current token rather than the first nearly expired record. Unknown-expiry values remain supported.
+- A near-expiry token from a new network response (not only the in-memory cache) gets one bounded re-read. Explicit fresh lookups/cache re-reads bypass public metadata caches with a nonce only when the endpoint has no existing query. Signed media URLs and metadata endpoints that own queries are never cache-busted. If the provider supplies no new credential, the app cannot manufacture one.
+- A required Star-cookie endpoint failure retains its typed HTTP error instead of becoming only “no sources.” Regular streams retain the website's existing unsigned/original-URL attempt when no cookie is provided; no unrelated Star/general credentials are borrowed.
+
+Tests cover wrong/corrected clocks, HTTP Date/Age, cache lifetime, near-expiry re-reads, exact-channel token choice, independently signed track isolation through the real OkHttp transport, actual Media3 authentication-error policy, bounded renewal and source reindexing. An end-to-end MockWebServer case rejects an old token, forces the production resolver to fetch fresh metadata and verifies the new token on both manifest and segment requests. It is a synthetic HTTP/metadata test, **not decrypted live playback**.
+
+**Still required:** install 4.9.16 and compare one exact channel in the phone browser, APK on the phone, and APK on the box. The above defects are real and regression-tested; without the device's detailed failure report, it is not established which one caused the latest mobile failure or whether the box has an additional native DRM/decoder fault. MENU → Playback details retains the original HTTP/DRM/error stages if it still fails. Do not claim that all channels or the particular box have been verified.
 
 ## 4.9.15 — give JJTV a real startup opportunity on the box
 
@@ -88,7 +108,7 @@ These rules are implemented as native metadata resolution, not by opening either
 
 1. Keep exact catalogue IDs. V1/Jio and V2 IDs are different namespaces. **Never pass a V2 channel ID to JJTV.** The supplied JJTV example, 816, is Cartoon Network Hindi; Sony YAY Hindi remains 872.
 2. For a V1 channel with no successful history, start with JJTV. A channel's own successful provider takes precedence; an explicit MENU source choice takes precedence for that tuning session. An unrelated channel's provider no longer changes this order. V2 always uses TG.
-3. Resolve current metadata from that provider. Try its native sources automatically in order, including after HTTP 401/403, a native playback/DRM error, or a startup/buffering watchdog timeout.
+3. Resolve current metadata from that provider. An HTTP 401/403 permits one immediate, bounded fresh lookup for that provider; otherwise try its native sources automatically after native playback/DRM errors or startup/buffering watchdog timeouts.
 4. If that list fails or the provider's 25-second lookup/startup window expires, load the other authorized provider's native configuration for the same V1 channel. Do not mix one provider's keys or credentials into the other provider's stream object.
 5. After all sources fail, perform one forced refresh of the configuration and credentials, then try one more bounded pass. Report an error rather than retrying indefinitely or opening an iframe.
 6. Remember a non-secret source fingerprint and provider only after a rendered frame, not merely `STATE_READY`. Remembering a working provider is channel-specific, not a global preference for unrelated channels. Previews also try subsequent native sources and respect channel/lifecycle generation guards.
@@ -117,7 +137,7 @@ Both full-screen playback and muted previews use the same Media3/ExoPlayer media
 
 ## HTTP, DRM and lifecycle boundaries
 
-- Each playback session has its own token policy. Keep signed URL bytes, unrelated parameters and independently signed child URLs intact. A successful signed redirect can teach that session the final CDN's token.
+- Each playback session has its own token policy. Keep signed URL bytes, unrelated parameters and independently signed child URLs intact. A successful primary-manifest redirect can teach that session the final CDN's token; independently signed child media cannot overwrite it.
 - Keep the selected website's non-secret origin consistent through redirects, while source-specific headers/cookies remain scoped to their exact origin and port. The TG relay exception is not silently applied to JJTV's policy.
 - Keys and signed credentials remain in memory, including while an active DRM/playback session needs them. They are not written to preferences, bundled playlists, logs or diagnostic fixtures. Only public function hints, provider names and non-secret fingerprints are persisted.
 - ClearKey is supplied to Media3 through a local callback with multi-session support. Explicitly advertised Widevine HTTPS licences remain supported. Missing keys are not invented, and a different server's keys are not borrowed.
@@ -160,7 +180,7 @@ This uses the **production** resolvers, protocol parsers and stream transport. T
 
 ### Device acceptance checklist — still required
 
-For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.15** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
+For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.16** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
 
 - Confirm video, the expected audio language and sustained playback for Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada; Sony YAY Hindi; and Cartoon Network Hindi 816.
 - Test a normal TG DASH channel, an HLS channel, a JJTV native source and a V2 channel. Verify that V2 never uses the Jio/JJTV namespace.

@@ -97,4 +97,32 @@ class StreamHttpTest {
         }
     }
 
+    @Test fun `successful independent audio segments cannot replace the token attached to later video loads`() {
+        MockWebServer().use { server ->
+            server.start()
+            repeat(3) { server.enqueue(MockResponse().setBody("fixture")) }
+            val source = TgStream("JJTV", server.url("/index.mpd?__hdnea__=old").toString(), "dash",
+                cookie = "__hdnea__=current", requestOrigin = JjtvResolver.SITE)
+            val client = StreamHttp.client(source)
+            for (url in listOf(source.url, server.url("/audio.m4s?__hdnea__=audio-only").toString(), server.url("/video.m4s").toString()))
+                client.newCall(Request.Builder().url(url).build()).execute().close()
+            val manifest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            val audio = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            val video = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("current", manifest.requestUrl!!.queryParameter("__hdnea__"))
+            assertEquals("audio-only", audio.requestUrl!!.queryParameter("__hdnea__"))
+            assertEquals("current", video.requestUrl!!.queryParameter("__hdnea__"))
+        }
+    }
+
+    @Test fun `production metadata transport preserves HTTP Date plus cache Age for clock independent selection`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse().setHeader("Date", "Sat, 17 Oct 2026 12:00:00 GMT").setHeader("Age", "10").setBody("[]"))
+            val response = TgHttp().get(server.url("/data.json").toString(), emptyMap())
+            assertEquals(HttpReferenceClock.parse("Sat, 17 Oct 2026 12:00:00 GMT", "10"), response.serverTimeMs)
+            assertEquals("[]", String(response.body))
+        }
+    }
+
 }

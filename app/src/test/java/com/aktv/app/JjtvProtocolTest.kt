@@ -121,4 +121,22 @@ class JjtvProtocolTest {
         assertEquals("__hdnea__=exp=50~hmac=old", JjtvProtocol.starCookie(body, "1106", now = 100_000))
     }
 
+    @Test fun `regular cookies prefer a longer lived advertised token over an older first entry`() {
+        val body = """[{"cookie":"__hdnea__=exp=120~hmac=short"},{"cookie":"__hdnea__=exp=900~hmac=long"}]"""
+        assertEquals("__hdnea__=exp=900~hmac=long", JjtvProtocol.regularCookie(body, now = 100_000))
+    }
+
+    @Test fun `Star prefers the longest lived current credential but never borrows another variants token`() {
+        val body = """{"failed_results":[
+            {"channel_id":"1108","final_url":"__hdnea__=exp=9999~hmac=other"},
+            {"channel_id":"1106","final_url":"__hdnea__=exp=120~hmac=short"},
+            {"channel_id":"1106","final_url":"__hdnea__=exp=900~hmac=long"}]}"""
+        assertEquals("__hdnea__=exp=900~hmac=long", JjtvProtocol.starCookie(body, "1106", 100_000))
+    }
+
+    @Test fun `an opaque supplied credential is retained when dated records are already expired`() {
+        val body = """[{"cookie":"__hdnea__=exp=10~hmac=old"},{"cookie":"__hdnea__=opaque"}]"""
+        assertEquals("__hdnea__=opaque", JjtvProtocol.regularCookie(body, now = 100_000))
+    }
+
 }

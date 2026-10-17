@@ -45,7 +45,7 @@ class StreamRequestPolicyTest {
         val policy = StreamRequestPolicy(TgStream("TG", relay, "dash"))
         assertEquals(relay, policy.request(relay).url)
         val signed = "https://cdn.example/bpk-tv/Star/WDVLive/index.mpd?__hdnea__=$token"
-        policy.observed(signed)
+        policy.observed(relay, signed)
         assertEquals("https://cdn.example/bpk-tv/Star/WDVLive/video.m4s?__hdnea__=$token",
             policy.request("https://cdn.example/bpk-tv/Star/WDVLive/video.m4s").url)
         assertEquals(relay, policy.request(relay).url)
@@ -58,10 +58,10 @@ class StreamRequestPolicyTest {
         assertEquals(exact, policy.request(exact).url)
     }
 
-    @Test fun `expired auth is not added to a new segment`() {
+    @Test fun `device wall time cannot silently turn a signed session into unsigned segment requests`() {
         val start = "https://media.example/a.mpd?__hdnea__=st=1~exp=20~hmac=fixture"
-        val policy = StreamRequestPolicy(TgStream("TG", start, "dash")) { 21_000L }
-        assertEquals("https://media.example/seg.m4s", policy.request("https://media.example/seg.m4s").url)
+        val policy = StreamRequestPolicy(TgStream("TG", start, "dash"))
+        assertEquals("https://media.example/seg.m4s?__hdnea__=st=1~exp=20~hmac=fixture", policy.request("https://media.example/seg.m4s").url)
     }
 
     @Test fun `expiry supports percent encoded tokens and explicit cookies`() {
@@ -95,7 +95,7 @@ class StreamRequestPolicyTest {
         assertEquals(url, policy.request(url).url)
         assertEquals("https://allinonereborn2.online/media.m4s?id=keep", policy.request("https://allinonereborn2.online/media.m4s?id=keep").url)
         // A successful redirect can still supply the real CDN's independent credentials.
-        policy.observed("https://cdn.example/live.mpd?__hdnea__=cdn-cookie")
+        policy.observed(url, "https://cdn.example/live.mpd?__hdnea__=cdn-cookie")
         assertEquals("https://cdn.example/segment.m4s?__hdnea__=cdn-cookie", policy.request("https://cdn.example/segment.m4s").url)
     }
 
@@ -130,6 +130,29 @@ class StreamRequestPolicyTest {
         val source = TgStream("JJTV", "https://jiotvpllive.cdn.jio.com/fixture.mpd?__hdnea__=old&keep=a%2Bb", "dash",
             cookie = "__hdnea__=new-channel-token", requestOrigin = JjtvResolver.SITE)
         assertEquals("https://jiotvpllive.cdn.jio.com/fixture.mpd?keep=a%2Bb&__hdnea__=new-channel-token", StreamRequestPolicy(source).request(source.url).url)
+    }
+
+    @Test fun `independent audio authentication cannot poison unsigned video requests`() {
+        val policy = StreamRequestPolicy(TgStream("JJTV", url, "dash", requestOrigin = JjtvResolver.SITE))
+        val audio = "https://media.example/live/audio.m4s?__hdnea__=audio-only"
+        policy.observed(audio, audio)
+        assertEquals(token, StreamRequestPolicy.tokenOf(policy.request("https://media.example/live/video.m4s").url))
+        assertEquals(audio, policy.request(audio).url)
+    }
+
+    @Test fun `the final manifest URI can renew its token after an initial redirect`() {
+        val relay = "https://relay.example/stream?id=1108"
+        val policy = StreamRequestPolicy(TgStream("JJTV", relay, "dash"))
+        val final = "https://media.example/live/index.mpd?__hdnea__=first"
+        policy.observed(relay, final)
+        policy.observed(final, "https://media.example/live/index.mpd?__hdnea__=renewed")
+        assertEquals("renewed", StreamRequestPolicy.tokenOf(policy.request("https://media.example/live/video.m4s").url))
+    }
+
+    @Test fun `a manifest fragment omitted by the HTTP stack does not prevent cookie refresh`() {
+        val source = TgStream("JJTV", "https://media.example/live.mpd?__hdnea__=old#video", "dash", cookie = "__hdnea__=fresh")
+        val policy = StreamRequestPolicy(source)
+        assertEquals("fresh", StreamRequestPolicy.tokenOf(policy.request(source.url.substringBefore('#')).url))
     }
 
 }

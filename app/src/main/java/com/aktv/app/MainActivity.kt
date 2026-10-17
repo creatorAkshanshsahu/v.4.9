@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private var requestedNativeProvider: Pair<String, LiveProvider>? = null
     private val providerWindow = NativeProviderWindow()
     private val decoderRetries = NativeDecoderRetries()
+    private val authRecovery = PlaybackAuthRecovery()
     private val recovery = PlaybackRecovery()
     private var okLong = false
     private var renderedFrame = false
@@ -927,9 +928,9 @@ class MainActivity : AppCompatActivity() {
     private fun nativeMediaSource(source: TgStream, trace: PlaybackDiagnostics.Attempt? = null): MediaSource {
         val data = Streams.factory(source)
         val factory: MediaSource.Factory = when (source.type) {
-            "hls" -> HlsMediaSource.Factory(data)
-            "mp4" -> ProgressiveMediaSource.Factory(data)
-            else -> DashMediaSource.Factory(data)
+            "hls" -> HlsMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+            "mp4" -> ProgressiveMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+            else -> DashMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
         }
         val item = MediaItem.Builder().setUri(source.url).setLiveConfiguration(liveCfg())
             .setMimeType(when (source.type) { "hls" -> MimeTypes.APPLICATION_M3U8; "mp4" -> MimeTypes.VIDEO_MP4; else -> MimeTypes.APPLICATION_MPD })
@@ -1072,6 +1073,7 @@ class MainActivity : AppCompatActivity() {
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
                 else -> "The live stream stopped responding (code ${error.errorCode})"
             }
+            if (refreshNativeCredentials(code)) return
             if (code == null && PlaybackProblems.from(error, error.errorCode).family == PlaybackDiagnostics.Family.DECODER &&
                 retryCompatibleDecoder(message)) return
             advanceNative(message)
@@ -1091,7 +1093,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
-        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); providerWindow.clear()
+        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear()
         compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -1136,7 +1138,7 @@ class MainActivity : AppCompatActivity() {
                     PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
                         advanceNative("The live stream stopped responding")
                     null -> if (result.stable) {
-                        recovery.reset()
+                        recovery.reset(); authRecovery.reset()
                         shown.getOrNull(current)?.let { ch ->
                             prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
@@ -1161,6 +1163,50 @@ class MainActivity : AppCompatActivity() {
         resolveJob?.cancel(true); releasePlayer()
         playMsg("$reason. Trying native TV compatibility mode…")
         ui.post { if (playbackActive && token == playToken && layer.visibility == View.VISIBLE) startNative() }
+        return true
+    }
+
+    /** A rejected token needs fresh configuration, not a second header style carrying the same
+     * credential. Refresh this provider once, inside the existing provider/whole-cycle deadlines.
+     */
+    private fun refreshNativeCredentials(code: Int?): Boolean {
+        val ch = shown.getOrNull(current) ?: return false
+        val provider = currentNativeProvider
+        if (startupBudget.expired(SystemClock.elapsedRealtime()) || providerWindow.expired(SystemClock.elapsedRealtime()) ||
+            !authRecovery.retry(provider, code)) return false
+        startupBudget.recover(SystemClock.elapsedRealtime()); providerWindow.recover(SystemClock.elapsedRealtime())
+        val previousKey = nativeSources.getOrNull(serverIdx)?.let(::sourceKey)
+        recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
+        spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · refreshing rejected credentials…"
+        infoNext.visibility = View.VISIBLE
+        playMsg("${providerName(provider)} returned HTTP $code — fetching fresh stream credentials once…")
+        resolveJob = playbackIo.submit {
+            try {
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2)
+                runOnUiThread {
+                    if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    if (sources.isEmpty()) advanceNative("The provider supplied no refreshed stream")
+                    else {
+                        val retained = nativeSources.withIndex().filter { LiveProviders.provider(it.value) != provider }
+                        recovery.remapSources(retained.mapIndexed { index, item -> item.index to index }.toMap())
+                        val first = retained.size
+                        nativeSources = retained.map { it.value } + sources
+                        serverIdx = first + sources.indexOfFirst { sourceKey(it) == previousKey }.coerceAtLeast(0)
+                        startNative()
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    diagnostics.metadataFailed(PlaybackProblems.from(error))
+                    advanceNative("Could not refresh ${providerName(provider)} credentials")
+                }
+            }
+        }
         return true
     }
 

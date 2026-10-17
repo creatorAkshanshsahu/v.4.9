@@ -19,6 +19,14 @@ internal class PlaybackRecovery {
      */
     fun skip(indices: Iterable<Int>) { failed.addAll(indices.filter { it >= 0 }) }
 
+    /** Replacing a provider's expired configuration must not grow the source list indefinitely or
+     * reset the one-refresh budget. Keep failure state only for retained/reindexed sources.
+     */
+    fun remapSources(oldToNew: Map<Int, Int>) {
+        val retained = failed.mapNotNull { oldToNew[it] }
+        failed.clear(); failed.addAll(retained)
+    }
+
     fun failed(index: Int, count: Int, canLoadMore: Boolean = false): Action {
         if (index in 0 until count) failed.add(index)
         for (step in 1..count) {

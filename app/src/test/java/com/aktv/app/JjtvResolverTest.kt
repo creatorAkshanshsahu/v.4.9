@@ -108,7 +108,7 @@ class JjtvResolverTest {
             "/general.json" -> response(primary("st=1~exp=$exp~hmac=fixture"))
             else -> throw AssertionError("Unexpected metadata endpoint")
         } }
-        val resolver = JjtvResolver(http, now = { clock })
+        val resolver = JjtvResolver(http, now = { clock }, elapsed = { clock })
         resolver.resolve("872")
         clock = 3_000; resolver.resolve("872")
         assertEquals(1, http.count("/general.json"))
@@ -127,7 +127,7 @@ class JjtvResolverTest {
             "/general.json" -> response(primary("generation-$generation"))
             else -> throw AssertionError("Unexpected metadata endpoint")
         } }
-        val resolver = JjtvResolver(http, now = { clock })
+        val resolver = JjtvResolver(http, now = { clock }, elapsed = { clock })
         resolver.resolve("872")
         clock = 20_000; resolver.resolve("873")
         assertEquals(1, http.count("/general.json"))
@@ -161,7 +161,7 @@ class JjtvResolverTest {
             "/general.json" -> response(primary())
             else -> throw AssertionError("Unexpected metadata endpoint")
         } }
-        val resolver = JjtvResolver(http, now = { clock })
+        val resolver = JjtvResolver(http, now = { clock }, elapsed = { clock })
         resolver.resolve("872")
         clock = 290_000; resolver.resolve("873")
         clock = 302_000; version = 2
@@ -211,6 +211,103 @@ class JjtvResolverTest {
         val http = Fake { _, _ -> TgResponse(403, ByteArray(0)) }
         try { JjtvResolver(http).resolve("1108"); fail("Expected the page rejection") }
         catch (error: JjtvHttpException) { assertEquals(403, error.status) }
+    }
+
+    @Test fun `a nearly expired token fetched from the network is refreshed before slow decoder startup`() {
+        var cookieCalls = 0
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page())
+            "/channels.json" -> response("[${channel("872")}]" )
+            "/general.json" -> response(primary(if (++cookieCalls == 1) "exp=105~hmac=old" else "exp=500~hmac=current"))
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        val source = JjtvResolver(http, now = { 100_000 }, elapsed = { 0 }).resolve("872").first()
+        assertTrue(source.cookie.contains("hmac=current"))
+        assertEquals(2, cookieCalls)
+        assertTrue(http.requests.last().first.contains("?_aktv_refresh="))
+    }
+
+    @Test fun `a cookie service that keeps returning stale data is fetched at most twice`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page())
+            "/channels.json" -> response("[${channel("872")}]" )
+            "/general.json" -> response(primary("exp=50~hmac=old"))
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        val source = JjtvResolver(http, now = { 100_000 }, elapsed = { 0 }).resolve("872").first()
+        assertEquals(2, http.count("/general.json"))
+        // The CDN decides validity. The client neither makes up a new token nor strips the supplied one.
+        assertEquals("exp=50~hmac=old", StreamRequestPolicy.tokenOf(StreamRequestPolicy(source).request(source.url).url))
+    }
+
+    @Test fun `HTTP time handles a TV whose wall clock is far ahead and still reuses only a short cache`() {
+        var elapsed = 0L
+        val wall = 4_102_444_800_000L
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page()).copy(serverTimeMs = 100_000 + elapsed)
+            "/channels.json" -> response("[${channel("872")}]" ).copy(serverTimeMs = 100_000 + elapsed)
+            "/general.json" -> response(primary("exp=500~hmac=current")).copy(serverTimeMs = 100_000 + elapsed)
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        val resolver = JjtvResolver(http, now = { wall }, elapsed = { elapsed })
+        val first = resolver.resolve("872")
+        elapsed = 10_000
+        assertSame(first, resolver.resolve("872"))
+        assertEquals(1, http.count("/general.json"))
+        elapsed = 31_000
+        resolver.resolve("872")
+        assertEquals(2, http.count("/general.json"))
+    }
+
+    @Test fun `moving the wall clock backwards cannot keep channel credentials cached indefinitely`() {
+        var wall = 1_000_000L; var elapsed = 0L
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page())
+            "/channels.json" -> response("[${channel("872")}]" )
+            "/general.json" -> response(primary())
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        val resolver = JjtvResolver(http, now = { wall }, elapsed = { elapsed })
+        resolver.resolve("872")
+        wall = 1; elapsed = 31_000
+        resolver.resolve("872")
+        assertEquals(2, http.count("/general.json"))
+    }
+
+    @Test fun `explicit refresh cache-busts public metadata but never the supplied signed stream URL`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page())
+            "/channels.json" -> response("[${channel("872")}]" )
+            "/general.json" -> response(primary())
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        val source = JjtvResolver(http).resolve("872", fresh = true).first()
+        assertTrue(http.requests.filter { URI(it.first).path in setOf("/channels.json", "/general.json") }
+            .all { it.first.contains("?_aktv_refresh=") })
+        assertFalse(source.url.contains("_aktv_refresh"))
+        assertTrue(source.url.endsWith("__hdnea__=old"))
+    }
+
+    @Test fun `an endpoint owning a query is not damaged by metadata cache busting`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page("/channels.json?signature=keep%2Bme"))
+            "/channels.json" -> response("[${channel("872")}]" )
+            "/general.json" -> response(primary())
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        JjtvResolver(http).resolve("872", fresh = true)
+        assertTrue(http.requests.first { URI(it.first).path == "/channels.json" }.first.endsWith("?signature=keep%2Bme"))
+    }
+
+    @Test fun `a refused Star cookie endpoint retains its HTTP error instead of a generic empty-source error`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page())
+            "/channels.json" -> response("[${channel("1108", star = true)}]" )
+            "/star.json" -> TgResponse(503, ByteArray(0))
+            else -> throw AssertionError("Unexpected endpoint")
+        } }
+        try { JjtvResolver(http).resolve("1108"); fail("Expected the token endpoint failure") }
+        catch (error: JjtvHttpException) { assertEquals(503, error.status) }
     }
 
 }

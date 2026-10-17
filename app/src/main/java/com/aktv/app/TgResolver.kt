@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json")
+internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null)
 internal fun interface TgTransport { fun get(url: String, headers: Map<String, String>): TgResponse }
 
 internal class TgHttp : TgTransport {
@@ -22,7 +22,8 @@ internal class TgHttp : TgTransport {
         headers.forEach { (key, value) -> request.header(key, value) }
         // OkHttp sends Origin/Sec-Fetch-* unchanged; some URLConnection implementations silently drop them.
         client.newCall(request.build()).execute().use { response ->
-            if (!response.isSuccessful) return TgResponse(response.code, ByteArray(0))
+            val serverTime = HttpReferenceClock.parse(response.header("Date"), response.header("Age"))
+            if (!response.isSuccessful) return TgResponse(response.code, ByteArray(0), serverTimeMs = serverTime)
             val body = response.body?.byteStream()?.use { input ->
                 val output = java.io.ByteArrayOutputStream()
                 val buffer = ByteArray(8192)
@@ -35,7 +36,7 @@ internal class TgHttp : TgTransport {
                 }
                 output.toByteArray()
             } ?: ByteArray(0)
-            return TgResponse(response.code, body, response.header("Content-Type").orEmpty())
+            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime)
         }
     }
 
