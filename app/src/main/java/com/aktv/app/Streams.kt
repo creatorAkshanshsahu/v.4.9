@@ -17,7 +17,8 @@ class StreamProfile(
     val name: String, val userAgent: String,
     val cookie: Boolean,            // send the __hdnea__ token from the manifest URL as a Cookie
     val tokenOnSegments: Boolean,   // also append the token to every request on the manifest's host
-    val referer: String?            // send Referer + Origin
+    val referer: String?,           // send Referer (+ Origin unless origin = false)
+    val origin: Boolean = true
 )
 
 object Streams {
@@ -42,8 +43,12 @@ object Streams {
         // 7: same, token also on every segment
         StreamProfile("jiotv+token", "@shoebbro", true, true, "https://www.jiotv.com/"),
         // 8: Star Sports (jiotvpllive): exactly what the backup web player sends - plaYtv UA, JioTV Referer, per-channel token on everything
-        StreamProfile("jioweb", "plaYtv/7.1.5", true, true, "https://www.jiotv.com/")
+        StreamProfile("jioweb", "plaYtv/7.1.5", true, true, "https://www.jiotv.com/"),
+        // 9: jjtvxweb.pages.dev request filter, byte for byte: UA plaYtv/7.1.5, Referer jiotv.com, no Cookie header,
+        //    fresh token as the whole query of the manifest and every segment
+        StreamProfile("jjweb", "plaYtv/7.1.5", false, true, "https://www.jiotv.com/", origin = false)
     )
+    const val JJWEB = 9
 
     fun isJio(url: String) = url.contains("jio.com", ignoreCase = true)
 
@@ -61,7 +66,7 @@ object Streams {
         val token = tokenOf(url)
         val hdrs = HashMap<String, String>()
         if (p.cookie && token != null) hdrs["Cookie"] = "__hdnea__=$token"
-        if (p.referer != null) { hdrs["Referer"] = p.referer; hdrs["Origin"] = p.referer.trimEnd('/') }
+        if (p.referer != null) { hdrs["Referer"] = p.referer; if (p.origin) hdrs["Origin"] = p.referer.trimEnd('/') }
         val http = DefaultHttpDataSource.Factory().setUserAgent(p.userAgent)
             .setDefaultRequestProperties(hdrs).setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
@@ -72,7 +77,7 @@ object Streams {
         return ResolvingDataSource.Factory(http, ResolvingDataSource.Resolver { spec ->
             val u = spec.uri
             val h = u.host ?: ""
-            if (h == host || h.endsWith("cdn.jio.com"))
+            if (h == host || h.endsWith("cdn.jio.com") || (p.name == "jjweb" && (h.endsWith("akamaized.net") || h.endsWith("jio.com"))))
                 spec.withUri(Uri.parse(u.toString().substringBefore("?").replace(Regex("(?<!:)//+"), "/") + "?__hdnea__=" + token))
             else spec
         })

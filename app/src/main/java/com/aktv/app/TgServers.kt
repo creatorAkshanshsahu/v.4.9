@@ -205,6 +205,9 @@ object TgServers {
      * is found among the site's scripts, tested in parallel and remembered.
      */
     /** Re-reads the website's scripts in the background so a site change is picked up without an app update. */
+    /** Loads jjtvxweb's channel list and both tokens in the background, so the first channel opens instantly. */
+    fun warmAlt() { pool.execute { try { altChannel(""); primaryCookie(); starCookie("") } catch (_: Exception) {} } }
+
     fun refreshSite() { pool.execute { try {
         val ids = discover("1106"); val good = ids.firstOrNull { c -> tryFn(c, "1106").isNotEmpty() }
         if (good != null && good != fn) { fn = good; prefs?.edit()?.putString("fn", fn)?.apply(); cache.clear() }

@@ -104,6 +104,7 @@ class MainActivity : AppCompatActivity() {
     private var playToken = 0
     private var routes = listOf<Pair<Int, Int>>(); private var routeIdx = 0          // (source, header profile)
     private var v1Sources = listOf<String>(); private var v1Drms = listOf<JSONObject?>()
+    private val jjUrls = java.util.Collections.synchronizedSet(HashSet<String>())   // streams from jjtvxweb.pages.dev
     private var v2Servers = listOf<Pair<String, String>>(); private var serverIdx = 0  // (stream url, type)
     private var v2Extra = listOf<Pair<JSONObject?, Int>>()   // per V2 server: (ClearKey drm, header profile or -1 for the plain relay)
     private var attempts = 0; private var refreshed = false; private var lastCode: Int? = null
@@ -167,7 +168,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        TgServers.init(applicationContext); TgServers.refreshSite()
+        TgServers.init(applicationContext); TgServers.warmAlt(); TgServers.refreshSite()
         setContentView(R.layout.activity_main)
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
@@ -928,7 +929,26 @@ class MainActivity : AppCompatActivity() {
         fun altList(wait: Long = 12): List<TgServers.Server> = try { altF.get(wait, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
         io.execute {
             try {
-                val tg = try { tgF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
+                // jjtvxweb.pages.dev first, exactly like its own player: start the moment its stream is in
+                val jj = altList(6); jj.forEach { jjUrls.add(it.url) }
+                if (!ch.v2 && jj.isNotEmpty()) {
+                    val urls0 = ArrayList<String>(); val drms0 = ArrayList<JSONObject?>()
+                    jj.forEach { if (it.url !in urls0) { urls0.add(it.url); drms0.add(it.drm) } }
+                    runOnUiThread { if (token == playToken) { v1Sources = urls0; v1Drms = drms0; routes = buildRoutes(ch, urls0); routeIdx = 0; startV1() } }
+                    // the other servers are added behind it as fallbacks
+                    val tg2 = try { tgF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
+                    val more = ArrayList<String>(); val moreD = ArrayList<JSONObject?>()
+                    tg2.forEach { if (it.url !in urls0 && it.url !in more) { more.add(it.url); moreD.add(it.drm) } }
+                    Playlist.find(this, ch.name)?.let { pl -> if (pl.url !in urls0 && pl.url !in more) { more.add(pl.url); moreD.add(pl.drm) } }
+                    try { val o = JSONObject(apiF.get(10, java.util.concurrent.TimeUnit.SECONDS)); val src = o.getJSONArray("sources"); val d = o.optJSONObject("drm")
+                        (0 until src.length()).map { src.optString(it, "") }.filter { it.isNotBlank() && it !in urls0 && it !in more }.forEach { more.add(it); moreD.add(d) } } catch (_: Exception) {}
+                    if (more.isNotEmpty()) runOnUiThread { if (token == playToken && v1Sources === urls0) {
+                        val all = urls0 + more; val n0 = urls0.size
+                        routes = routes + buildRoutes(ch, all).filter { it.first >= n0 }
+                        v1Sources = all; v1Drms = drms0 + moreD } }
+                    return@execute
+                }
+                val tg = try { tgF.get(if (jj.isNotEmpty()) 3 else 20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
                 var apiBody: String? = null; var apiErr: Exception? = null
                 try { apiBody = if (tg.isNotEmpty()) apiF.get(400, java.util.concurrent.TimeUnit.MILLISECONDS) else apiF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { apiErr = (e.cause as? Exception) ?: e }
                 if (ch.v2) {
@@ -936,6 +956,7 @@ class MainActivity : AppCompatActivity() {
                     fun addTg(l: List<TgServers.Server>) = l.forEach { sv ->
                         if (list.none { it.first == sv.url }) { list.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); extra.add(sv.drm to (if (Streams.isJio(sv.url)) 8 else 5)) }
                     }
+                    jj.forEach { sv -> if (list.none { it.first == sv.url }) { list.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); extra.add(sv.drm to Streams.JJWEB) } }
                     addTg(tg)   // every server the site's own player gets (fresh tokens + all keys) first...
                     if (apiBody != null) try {   // ...then the relay servers
                         val sv = JSONObject(apiBody).getJSONArray("servers")
@@ -952,7 +973,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     runOnUiThread { if (token == playToken) { v2Servers = list; v2Extra = extra; if (serverIdx >= list.size) serverIdx = 0; startV2() } }
                     // instant start like the website player: play the first server now, add the relay + backup servers once they arrive
-                    if (tg.isNotEmpty()) {
+                    if (tg.isNotEmpty() || jj.isNotEmpty()) {
                         val more = ArrayList<Pair<String, String>>(); val moreX = ArrayList<Pair<JSONObject?, Int>>()
                         val body = apiBody ?: try { apiF.get(15, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { null }
                         if (body != null) try {
@@ -963,7 +984,7 @@ class MainActivity : AppCompatActivity() {
                                 .forEach { more.add(it); moreX.add(null to -1) }
                         } catch (_: Exception) {}
                         altList().forEach { sv -> if (list.none { it.first == sv.url } && more.none { it.first == sv.url }) {
-                            more.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); moreX.add(sv.drm to (if (Streams.isJio(sv.url)) 8 else 5)) } }
+                            more.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); moreX.add(sv.drm to Streams.JJWEB) } }
                         if (more.isNotEmpty()) runOnUiThread { if (token == playToken && v2Servers === list) {
                             v2Servers = list + more; v2Extra = extra + moreX
                             infoNext.text = "Server ${serverIdx + 1} of ${v2Servers.size}   ·   OK switches server" } }
@@ -1005,6 +1026,7 @@ class MainActivity : AppCompatActivity() {
         val webOrder = listOf(5, 1, 3, 2)
         val out = ArrayList<Pair<Int, Int>>()
         for ((i, u) in urls.withIndex()) {
+            if (u in jjUrls) { listOf(Streams.JJWEB, 8).forEach { out.add(i to it) }; continue }
             val base = if (TgServers.isJioPl(u)) listOf(8, 7, 6, 5) else if (Streams.isJio(u)) jioOrder else webOrder
             val order = (if (first in 0 until n) listOf(first) else emptyList()) + base.filter { it != first }
             order.forEach { out.add(i to it) }
