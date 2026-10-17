@@ -1,4 +1,15 @@
-# Native live TV (4.9.16)
+# Native live TV (4.9.17)
+
+## 4.9.17 — match TG's observed per-request behavior
+
+See [How TG handles the affected channels](tg-playback-trace.md) for the exact source chain, source-code links and the distinction between request evidence and decoded playback. TG uses primary Jio → advertised relay → a separate JJTV browser frame, not a hidden third numbered native service. The current trace covers TG entry pages for 1106, 1108, 362 and 872 with request timing; inspection queries their actual deployed server function.
+
+Two concrete differences from that code/trace are corrected:
+
+- **Active cookie on every Jio channel request.** TG/JJTV replace the active authentication token on manifests and segments. The old native policy replaced it only on the initial URL and always preserved an existing child token. An explicit TG/JJTV cookie now authorizes replacement of the known `__hdnea__` parameter within the exact advertised HTTPS Jio CDN/channel path, including a scope established by a successful authorized relay manifest redirect. Other channels/origins/ports, generic independently signed children, and relay-owned queries remain protected. Other query bytes are not thrown away.
+- **Browser redirect Origin.** TG's direct/relay fetch uses the page origin; its cross-origin redirected request uses literal `null`. Native browser-style requests now track that state per HTTP call, including redirects back to the original host. A new direct segment call restores the page origin. Explicit native header profiles keep their existing behavior; no credentials are sent to unrelated origins.
+
+Thirteen regression methods cover stale child authentication, source/channel/origin isolation, exact signed-byte preservation, relay token scope, real OkHttp redirect headers, multi-hop redirects, no-referrer JJTV and declared native-profile compatibility. No decoder, browser engine, provider priority, timer or DRM-security setting was changed for this comparison. The box's actual native playback still requires a device test.
 
 ## 4.9.16 — intermittent native authentication, not a presumed JJTV outage
 
@@ -180,7 +191,7 @@ This uses the **production** resolvers, protocol parsers and stream transport. T
 
 ### Device acceptance checklist — still required
 
-For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.16** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
+For the TV-specific report, first try the same JJTV channel that works on the phone. Confirm the installed version is **4.9.17** and record TV model, Android version, ABI, whether audio is audible, time to the first picture, and (if it fails) a photo of the new error/decoder line. Confirm that no-picture attempts enter compatibility mode and ultimately show an error instead of spinning indefinitely. Check sustained video for at least 30 seconds, rapid channel changes while the surface is being created, background/resume, and an explicitly enabled preview. Keep the known-working phone as a regression check.
 
 - Confirm video, the expected audio language and sustained playback for Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada; Sony YAY Hindi; and Cartoon Network Hindi 816.
 - Test a normal TG DASH channel, an HLS channel, a JJTV native source and a V2 channel. Verify that V2 never uses the Jio/JJTV namespace.

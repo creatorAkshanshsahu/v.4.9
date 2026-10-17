@@ -10,21 +10,31 @@ class StreamRequestPolicy(private val stream: TgStream) {
     private val origin = originOf(stream.url)
     private val tokens = ConcurrentHashMap<String, String>()
     private val manifests = ConcurrentHashMap.newKeySet<String>().apply { add(resource(stream.url)) }
+    private val providerChannelRoots = ConcurrentHashMap<String, String>()
+    private val websiteAuth = stream.requestOrigin in setOf(TgResolver.SITE, JjtvResolver.SITE) && cookieToken(stream.cookie) != null
     // TG's player explicitly excludes its allinonereborn relay from the Jio query filter.
     // The relay owns its query/authentication, even when TG repeats the primary cookie on it.
     private val preserveRelayQuery = stream.requestOrigin == TgResolver.SITE
     private val suppliedToken = cookieToken(stream.cookie)?.takeUnless { preserveRelayQuery && ownsQuery(stream.url) }
 
-    init { (suppliedToken ?: tokenOf(stream.url))?.let { tokens[origin] = it } }
+    init {
+        (suppliedToken ?: tokenOf(stream.url))?.let { tokens[origin] = it }
+        if (websiteAuth && suppliedToken != null) channelRoot(stream.url)?.let { providerChannelRoots[origin] = it }
+    }
 
     fun request(url: String): Request {
         val target = originOf(url)
         // The CDN, not a potentially wrong TV clock, decides whether a credential is valid. Never
         // silently turn an authenticated request into an unsigned one when the local date changes.
-        val token = tokens[target]?.takeUnless { preserveRelayQuery && ownsQuery(url) }
+        val authRoot = providerChannelRoots[target]
+        val requestRoot = channelRoot(url)
+        val token = tokens[target]?.takeUnless {
+            (preserveRelayQuery && ownsQuery(url)) || (authRoot != null && requestRoot != null && authRoot != requestRoot)
+        }
         val resolved = when {
             token == null -> url
-            url.substringBefore('#') == stream.url.substringBefore('#') && suppliedToken != null -> withToken(url, token, replace = true)
+            (url.substringBefore('#') == stream.url.substringBefore('#') && suppliedToken != null) ||
+                (authRoot != null && requestRoot == authRoot) -> withToken(url, token, replace = true)
             else -> withToken(url, token, replace = false)
         }
         val headers = linkedMapOf("Origin" to stream.requestOrigin.trimEnd('/'))
@@ -45,11 +55,25 @@ class StreamRequestPolicy(private val stream: TgStream) {
     fun observed(requestedUrl: String, finalUrl: String, childPlaylist: Boolean = false) {
         if (resource(requestedUrl) !in manifests && !(stream.type == "hls" && childPlaylist)) return
         manifests.add(resource(finalUrl))
-        tokenOf(finalUrl)?.let { tokens[originOf(finalUrl)] = it }
+        tokenOf(finalUrl)?.let {
+            val target = originOf(finalUrl)
+            tokens[target] = it
+            // TG/JJTV actively replace authentication on every request in the advertised Jio
+            // channel. Learn that channel scope only from an authorized successful manifest.
+            if (websiteAuth) channelRoot(finalUrl)?.let { root -> providerChannelRoots[target] = root }
+        }
     }
 
     companion object {
         private const val TOKEN = "__hdnea__"
+        private fun channelRoot(url: String): String? = try {
+            val uri = URI(url)
+            val parts = uri.rawPath.orEmpty().split('/')
+            if (uri.scheme != "https" || uri.host?.lowercase() !in setOf("jiotvmblive.cdn.jio.com", "jiotvpllive.cdn.jio.com") ||
+                uri.port !in setOf(-1, 443) || parts.size < 4 || parts[1] != "bpk-tv" ||
+                !parts[2].matches(Regex("[A-Za-z0-9_-]+")) || parts.any { it == "." || it == ".." }) null
+            else "/bpk-tv/${parts[2]}/"
+        } catch (_: Exception) { null }
         private fun resource(url: String): String = try {
             val uri = URI(url)
             val query = uri.rawQuery.orEmpty().split('&').filter { it.isNotBlank() && it.substringBefore('=') != TOKEN }.joinToString("&")

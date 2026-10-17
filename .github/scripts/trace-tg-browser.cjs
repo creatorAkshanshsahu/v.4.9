@@ -41,6 +41,10 @@ function configShape(value) {
 async function trace(browser, channel, entrypoint = "TG-embedded") {
   const context = await browser.newContext();
   const records = [], outstanding = new Set();
+  const startTime = Date.now();
+  const record = value => { if (records.length < 90) records.push({ elapsedMs: Date.now() - startTime, ...value }); };
+  const requests = new WeakMap();
+  let requestNumber = 0;
   let blocked = 0;
   const blockedHosts = {};
   let lastFrames = [];
@@ -83,6 +87,16 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
     }
   });
   const page = await context.newPage();
+  page.on('request', request => {
+    const url = request.url();
+    if (!permitted(url) || !/\.(mpd|m3u8|m4s|mp4|ts)(?:$|\?)/i.test(url)) return;
+    const id = ++requestNumber;
+    requests.set(request, { id, start: Date.now() });
+    let frame = '';
+    try { frame = new URL(request.frame().url()).origin === JJ ? 'JJTV' : 'TG'; } catch {}
+    record({ event: 'media-request', request: id, frame, url: safeUrl(url),
+      redirectedFrom: requests.get(request.redirectedFrom())?.id || null });
+  });
   page.on('response', response => {
     const work = (async () => {
       const request = response.request();
@@ -92,24 +106,26 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
       if (parsed.pathname.includes('/_serverFn/')) {
         try {
           const shape = configShape(await response.json());
-          if (shape) records.push({ event: 'browser-player-config', status: response.status(), ...shape });
+          if (shape) record({ event: 'browser-player-config', status: response.status(), ...shape });
         } catch {}
       }
       const media = /\.(mpd|m3u8|m4s|mp4|ts)(?:$|\?)/i.test(url) || /dash\+xml|mpegurl|video\/|audio\//i.test(type);
       if (media && records.length < 45) {
         const headers = await request.allHeaders();
-        records.push({ event: 'media-response', url: safeUrl(url), status: response.status(), type,
+        record({ event: 'media-response', request: requests.get(request)?.id || null,
+          durationMs: requests.has(request) ? Date.now() - requests.get(request).start : null,
+          url: safeUrl(url), status: response.status(), type,
           tokenSecondsLeft: tokenAge(url), userAgent: (headers['user-agent'] || '').slice(0, 240),
           origin: headers.origin ? safeUrl(headers.origin) : '', referer: headers.referer ? safeUrl(headers.referer) : '' });
       }
     })().catch(() => {});
     outstanding.add(work); work.finally(() => outstanding.delete(work));
   });
-  page.on('framenavigated', frame => records.push({ event: 'frame', url: safeUrl(frame.url()) }));
+  page.on('framenavigated', frame => record({ event: 'frame', url: safeUrl(frame.url()) }));
   page.on('requestfailed', request => {
     if (permitted(request.url()) && /\.mpd|\.m3u8|_serverFn/.test(request.url()) && records.length < 45) {
       const text = request.failure()?.errorText || '';
-      records.push({ event: 'request-failed', url: safeUrl(request.url()), code: text.match(/net::[A-Z_]+/)?.[0] || 'network failure' });
+      record({ event: 'request-failed', url: safeUrl(request.url()), code: text.match(/net::[A-Z_]+/)?.[0] || 'network failure' });
     }
   });
   try {
@@ -130,25 +146,26 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
         } catch {}
       }
       lastFrames = frames;
-      records.push({ event: 'state', elapsedSeconds: (round + 1) * 5, frames });
+      record({ event: 'state', elapsedSeconds: (round + 1) * 5, frames });
       if (frames.some(f => f.videos.some(v => v.time >= 3 && v.width > 0 && !v.paused))) break;
     }
-  } catch (error) { records.push({ event: 'trace-error', name: error.name }); }
+  } catch (error) { record({ event: 'trace-error', name: error.name }); }
   await Promise.allSettled([...outstanding]);
   await context.close();
   return { channel, entrypoint, videoObserved: lastFrames.some(f => f.videos.some(v => v.time >= 3 && v.width > 0 && !v.paused)),
+    visitedJjtv: records.some(record => record.event === 'frame' && record.url.startsWith(JJ)),
     lastFrames, blockedHosts, blockedNonPlayerRequests: blocked, records };
 }
 (async () => {
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage'] });
   try {
-    const cases = [['1108', 'TG-embedded'], ['1108', 'JJTV-direct'], ['872', 'JJTV-direct'], ['816', 'JJTV-direct']];
+    const cases = ['1106', '1108', '362', '872'].map(channel => [channel, 'TG-embedded']);
     const results = await Promise.all(cases.map(([channel, entrypoint]) => trace(browser, channel, entrypoint)));
     for (const result of results) {
       const channel = result.channel;
       // Keep the final state and actual requests, not thirteen duplicate video-state snapshots.
-      const report = JSON.stringify({ ...result, records: result.records.filter(record => record.event !== 'state') });
+      const report = JSON.stringify({ ...result, records: result.records.filter(record => record.event !== 'state' && record.event !== 'media-request') });
       for (let start = 0; start < Math.min(report.length, 6000); start += 3000) {
         const text = report.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
         console.log(`::notice title=Browser trace ${result.entrypoint} ${channel} ${start / 3000 + 1}::${text}`);

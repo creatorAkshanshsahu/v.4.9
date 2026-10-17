@@ -217,7 +217,7 @@ def inspect():
                     bodies[url] = script
     for url, script in bodies.items():
         parts = []
-        for hit in re.finditer(r'getServers|createServerFn|createClientRpc|registerRequestFilter|clearKeys|\.load\(|iframe|setServer|backup|onError|autoSwitch|\.configure\(', script):
+        for hit in re.finditer(r'getServers|createServerFn|createClientRpc|registerRequestFilter|clearKeys|\.load\(|iframe|setServer|backup|onError|autoSwitch|queryKey:|staleTime:|onFail:|onServerChange:|\.configure\(', script):
             part = script[max(0, hit.start() - 160):hit.end() + 350]
             part = re.sub(r'https?://[^\s"\x27<>`]+', lambda m: safe_url(m.group()), part)
             part = re.sub(r'\b[0-9a-fA-F]{32,}\b', '[hex redacted]', part)
@@ -228,7 +228,7 @@ def inspect():
     if not player_ids:
         emit('TG RPC', {'error': 'No function found in the deployed servers chunk'})
         raise SystemExit(1)
-    for channel in ('872', '1106'):
+    for channel in ('872', '1106', '1108', '362'):
         inner = {'t': 10, 'i': 0, 'p': {'k': ['data'], 'v': [
             {'t': 10, 'i': 1, 'p': {'k': ['id'], 'v': [{'t': 1, 's': channel}]}, 'o': 0}]}, 'o': 0}
         payload = urllib.parse.quote(json.dumps({'t': inner, 'f': 127, 'm': []}, separators=(',', ':')))
