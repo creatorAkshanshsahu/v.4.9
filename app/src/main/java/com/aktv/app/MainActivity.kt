@@ -102,6 +102,7 @@ class MainActivity : AppCompatActivity() {
     private var serverIdx = 0
     private var nativeProviders = listOf(LiveProvider.TG)
     private var nextNativeProvider = 1
+    private var nativePassFresh = false
     private val recovery = PlaybackRecovery()
     private var okLong = false
     private var renderedFrame = false
@@ -817,7 +818,7 @@ class MainActivity : AppCompatActivity() {
         val token = ++playToken
         resolveJob?.cancel(true)
         nativeSources = emptyList(); serverIdx = 0
-        nativeProviders = providerOrder(ch); nextNativeProvider = 1
+        nativeProviders = providerOrder(ch); nextNativeProvider = 1; nativePassFresh = fresh
         val provider = nativeProviders.first()
         disarmStall(); releasePlayer(); spinner.visibility = View.VISIBLE
         playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Finding a working server…")
@@ -842,12 +843,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun providerOrder(ch: Channel) = LiveProviders.order(ch.v2, prefs.getString("source_provider_${ch.key}", null))
+    private fun providerOrder(ch: Channel) = LiveProviders.order(ch.v2, prefs.getString("source_provider_${ch.key}", null),
+        prefs.getString("last_native_v1_provider", null))
     private fun providerName(provider: LiveProvider) = if (provider == LiveProvider.TG) "TG TV" else "JJTV"
     private fun sourceKey(source: TgStream) = LiveProviders.sourceKey(source)
     private fun rememberNativeSource(ch: Channel, source: TgStream) {
         prefs.edit().putString("source_${ch.key}", sourceKey(source))
-            .putString("source_provider_${ch.key}", source.requestOrigin).apply()
+            .putString("source_provider_${ch.key}", source.requestOrigin)
+            .apply { if (!ch.v2) putString("last_native_v1_provider", source.requestOrigin) }.apply()
     }
 
     /** Load another advertised native source only after the current list fails. Keep one player engine. */
@@ -859,11 +862,15 @@ class MainActivity : AppCompatActivity() {
         spinner.visibility = View.VISIBLE
         playMsg("Automatically trying ${providerName(provider)} native streams…")
         resolveJob = playbackIo.submit {
-            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (_: Exception) { emptyList() }
+            var failureReason = reason
+            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (_: Exception) {
+                failureReason = "Couldn't load ${providerName(provider)}'s current native stream configuration"
+                emptyList()
+            }
             runOnUiThread {
                 if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                 nextNativeProvider = providerIndex + 1
-                if (extra.isEmpty()) advanceNative(reason)
+                if (extra.isEmpty()) advanceNative(failureReason)
                 else {
                     val first = nativeSources.size
                     nativeSources = nativeSources + extra
@@ -917,7 +924,7 @@ class MainActivity : AppCompatActivity() {
             if (nativeSources.size > 1) "   ·   OK switches server" else ""
         infoNext.visibility = View.VISIBLE
         try { attach(nativeMediaSource(source)) }
-        catch (_: Exception) { advanceNative("This TG TV source could not be opened by the native player") }
+        catch (_: Exception) { advanceNative("This source could not be opened by the native player") }
     }
 
     private fun attach(ms: MediaSource) {
@@ -974,12 +981,13 @@ class MainActivity : AppCompatActivity() {
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
             val code = httpCode(error)
+            val provider = if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) "JJTV" else "TG TV"
             val message = when {
-                code == 451 -> "TG TV's upstream is unavailable in this region"
-                code != null -> "TG TV's stream returned HTTP $code"
-                error.errorCode in 6000..6999 -> "TG TV did not supply usable DRM for this source"
-                error.errorCode in 4000..4999 -> "This device couldn't decode this source"
-                else -> "The live stream stopped responding"
+                code == 451 -> "$provider's upstream blocked this stream (HTTP 451)"
+                code != null -> "$provider's stream returned HTTP $code"
+                error.errorCode in 6000..6999 -> "$provider DRM could not be opened (code ${error.errorCode})"
+                error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
+                else -> "The live stream stopped responding (code ${error.errorCode})"
             }
             advanceNative(message)
         }
@@ -1019,7 +1027,7 @@ class MainActivity : AppCompatActivity() {
                 val token = playToken
                 ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
             }
-            is PlaybackRecovery.Action.MoreSources -> loadMoreNative(ch, action.fresh, reason)
+            is PlaybackRecovery.Action.MoreSources -> loadMoreNative(ch, action.fresh || nativePassFresh, reason)
             PlaybackRecovery.Action.Refresh -> {
                 TgServers.invalidate(ch.id, ch.v2)
                 resolveAndStart(ch, fresh = true)

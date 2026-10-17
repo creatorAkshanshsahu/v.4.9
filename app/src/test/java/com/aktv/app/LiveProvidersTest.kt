@@ -25,4 +25,14 @@ class LiveProvidersTest {
         assertNotEquals(LiveProviders.sourceKey(original), LiveProviders.sourceKey(otherProvider))
         assertEquals(64, LiveProviders.sourceKey(original).length)
     }
+
+    @Test fun `new channels can start with the last provider that actually rendered video`() {
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, null, JjtvResolver.SITE))
+        assertEquals(listOf(LiveProvider.TG), LiveProviders.order(true, null, JjtvResolver.SITE))
+    }
+
+    @Test fun `a channel specific working provider takes priority over the global hint`() {
+        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, TgResolver.SITE, JjtvResolver.SITE))
+    }
+
 }

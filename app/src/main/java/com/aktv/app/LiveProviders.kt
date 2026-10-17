@@ -9,10 +9,13 @@ internal enum class LiveProvider(val website: String) {
 
 /** Provider order is metadata only. There is still exactly one native playback engine. */
 internal object LiveProviders {
-    fun order(v2: Boolean, rememberedWebsite: String?): List<LiveProvider> = when {
-        v2 -> listOf(LiveProvider.TG) // V2's numeric IDs are not Jio channel IDs.
-        rememberedWebsite == LiveProvider.JJTV.website -> listOf(LiveProvider.JJTV, LiveProvider.TG)
-        else -> listOf(LiveProvider.TG, LiveProvider.JJTV)
+    fun order(v2: Boolean, rememberedWebsite: String?, lastWorkingWebsite: String? = null): List<LiveProvider> {
+        val preferred = rememberedWebsite?.takeIf { value -> LiveProvider.values().any { it.website == value } } ?: lastWorkingWebsite
+        return when {
+            v2 -> listOf(LiveProvider.TG) // V2's numeric IDs are not Jio channel IDs.
+            preferred == LiveProvider.JJTV.website -> listOf(LiveProvider.JJTV, LiveProvider.TG)
+            else -> listOf(LiveProvider.TG, LiveProvider.JJTV)
+        }
     }
 
     fun sourceKey(source: TgStream): String = MessageDigest.getInstance("SHA-256")

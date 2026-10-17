@@ -1,37 +1,55 @@
-# Native live TV (4.9.9)
+# Native live TV (4.9.10)
 
-## Correction after the 4.9.8 playback failure
+## What changed after the reported playback failure
 
-The previous APK compiled but the user reported that channels did not play. Live inspection found a concrete discovery bug: the deployed Rolldown server chunk uses a **backtick-quoted function ID**, which the old single/double-quote-only matcher ignored. That could leave the app using the public API's incomplete single-source metadata instead of the website's complete server configuration.
+The 4.9.8 APK compiled, but the user reported that channels did not play. A successful build was not proof of working streams. Inspection of the current websites found:
 
-This update:
+- **TG discovery:** the deployed Rolldown server chunk uses a backtick-quoted function ID. The old single/double-quote-only matcher missed it, allowing resolution to fall back to the public API's incomplete single-source metadata.
+- **TG server order:** the website tries its primary `urls` before the entries in `backups`, then renumbers the visible servers. An upstream entry labelled “Server 3” can now be the website's “Server 2”.
+- **TG relay requests:** its player explicitly excludes the `allinonereborn` relay from its Jio query-token filter. Injecting the primary token into that relay does not match the website.
+- **Current JJTV configuration:** the user explicitly authorized `https://jjtvxweb.pages.dev/` and `/pind?id=816` as additional native sources. Its player advertises a live channel JSON document, both legacy `keyId`/`key` fields and a newer `keys` array, and separate general and channel-specific PL/Star cookie endpoints. The sampled TG configuration omitted key data that the JJTV channel document supplied.
 
-- Recognizes static backtick strings in function calls, metadata and lazy imports without evaluating JavaScript. Interpolated strings are not treated as endpoints.
-- Stops crawling unrelated UI dependencies once the actual server chunk supplies candidate functions.
-- Tries primary URL alternatives first, followed by TG's advertised servers, with the same server numbering as the website. Credentials remain independent.
-- Preserves the website's `allinonereborn` relay exception: do not inject the primary Jio token into that relay's own query. A successful redirect may still supply independent CDN credentials.
-- Advances to the next native server on failure **before** doing a global refresh, including on HTTP 401/403. This avoids restarting a rejected server while another advertised server has not been tried. The UI identifies automatic selection.
+These rules are implemented as native metadata resolution, not by opening either website in a player. No live web player or separate backup player has been restored. GeckoView remains only for the existing movies/series functionality.
 
-This is not a claim that all channels now play. The live native resolver check discovered the deployed function and returned metadata for Sony YAY Hindi and all 23 listed Star Sports IDs without falling back to the public API. Both the website-style and native manifest requests for channels 872/1106 returned **HTTP 451 from the CI runner**. Those responses did not allow media decoding to be tested. The sampled configuration also supplied no ClearKey keys; the app must not invent keys or borrow them from another server.
+## Native playback and automatic selection
 
-## Playback path
+1. Keep exact catalogue IDs. V1/Jio and V2 IDs are different namespaces. **Never pass a V2 channel ID to JJTV.** The supplied JJTV example, 816, is Cartoon Network Hindi; Sony YAY Hindi remains 872.
+2. For a channel with no history, start with the last native provider that actually rendered video, or TG on a first installation. A channel's own successful provider takes precedence over that general hint. V2 always uses TG.
+3. Resolve current metadata from that provider. Try its native sources automatically in order, including after HTTP 401/403, a native playback/DRM error, or a startup/buffering watchdog timeout.
+4. Only if that list fails, load the other authorized provider's native configuration for the same V1 channel. Do not delay a working TG source while looking up JJTV. Do not mix one provider's keys or credentials into the other provider's stream object.
+5. After all sources fail, perform one forced refresh of the configuration and credentials, then try one more bounded pass. Report an error rather than retrying indefinitely or opening an iframe.
+6. Remember a non-secret source fingerprint and provider only after a rendered frame, not merely `STATE_READY`. New channels can use the last working V1 provider without repeating failures from a known-unavailable provider. Previews also try subsequent native sources and respect channel/lifecycle generation guards.
 
-Both live TV and 24/7 channels now play only in Media3/ExoPlayer. The live-TV web-player switch, automatic web fallback, separate backup service, guessed HTTP profiles, and bundled expiring playlist have been removed. GeckoView remains for the existing movies/series screens; it is not a live-TV fallback.
+Both full-screen playback and muted previews use the same Media3/ExoPlayer media-source builder and HTTP policy. Hindi-named channels prefer Hindi audio during full-screen playback. The initial buffer threshold is 750 ms, but network, server and decoder startup still determine actual time to first picture; “instant” playback is not guaranteed.
 
-1. Use TG's catalogue IDs without fuzzy name matching. V1 and V2 IDs have separate cache namespaces.
-2. For V1, use the last verified TG player function immediately. If it disappears or fails to return sources, inspect the current watch/embed page, module preloads, lazy imports and Vite dependency maps (single, double and static backtick literals). Discover and validate the deployed GET player functions instead of embedding a build-specific hash in the APK.
-3. Prefer the player configuration over an incomplete channel-detail response. Fall back to TG's public channel API for native stream metadata only. V2 uses `/api/public/v2/channels/{id}` exclusively, never the V1 resolver.
-4. Parse JSON, Seroval (including shared references), NDJSON and version-1 binary TanStack frames. Retain source order, type, headers and each source's own ClearKey data. Never borrow a sibling server's keys or token. An explicitly supplied Widevine HTTPS licence is also supported by the native player.
-5. Start native playback with a 750 ms initial buffer threshold. Prefer Hindi audio tracks on channels named Hindi, including Sony YAY Hindi. All channels otherwise use the same resolver; there is no static Star Sports URL list or language remapping.
+## TG metadata
 
-## Requests and refreshes
+- Use the last verified player function immediately when TG is selected. If necessary, inspect current watch/embed HTML, same-origin module preloads, lazy imports and Vite dependency maps. Support single, double and **static backtick** literals; do not evaluate interpolated strings or execute JavaScript.
+- Stop crawling unrelated UI dependencies after the server chunk supplies candidates. Validate the selected function's response and channel ID. Prefer full player configuration over sparse detail metadata.
+- Support JSON, Seroval/shared references, NDJSON and version-1 TanStack frames. Preserve primary URL order and each server's own DRM, headers and cookie.
+- TG's public API remains a last metadata lookup, not a different playback engine. A returned URL with `drm: null` does not prove that encrypted media is playable.
+- V2 uses `/api/public/v2/channels/{id}` only.
 
-- Each source has its own HTTP policy. Cookies/credentials from one relay are not forwarded to a different origin. Previews and full-screen playback do not reset a global cookie jar.
-- Carry `__hdnea__` to child media requests on the same origin, preserving unrelated parameters, signed URL bytes and any independently signed child URL. A fresh signed manifest redirect teaches that playback session the final CDN's token. Never replace a relay's entire query or apply one token to every host.
-- Resolve URLs/keys at playback time. Metadata is held in memory for at most 30 seconds, shortened to ten seconds before a known token expiry. Only the verified function ID and a non-secret server fingerprint are saved to preferences.
-- Recheck player chunks approximately every five minutes while the app is open. Recheck channel lists while browsing, including retrying an initially unavailable list.
-- Playback failures, including HTTP 401/403/410, advance through TG's current native sources first. When the list is exhausted, resolve one fresh configuration and try again. A single-source channel therefore refreshes immediately. After that bounded retry, show an actionable error rather than opening another player or retrying indefinitely.
-- Manual reload bypasses cached metadata and re-discovers the player configuration. Rapid channel changes cancel queued resolution and guard results with a playback generation. Callbacks from released players are ignored.
+## JJTV metadata
+
+`JjtvResolver` reads the current `/pind?id=…` configuration and discovers the advertised `CHANNELS_URL`, `COOKIE_PRIMARY`, `COOKIE_FALLBACK` and `COOKIE_STAR_SPORTS` locations. Filenames, stream URLs, keys and tokens are not bundled into the APK. Static request-header assignments are read from the player configuration instead of trying guessed HTTP profiles.
+
+- Select the **exact** channel ID from the live JSON document. Do not remap to a similarly named channel or another language.
+- Prefer a non-empty `keys` array over legacy single-key fields. Retain every valid distinct key ID; repeated IDs use the last supplied value, as in the website's map. Normalize the provider's hex/UUID/JWK representation for Media3's local ClearKey callback.
+- Try `url`, `url1`, `url2`, `url3` in their advertised order, including the page's `bpk-tv//` path correction.
+- For `jiotvpllive.cdn.jio.com`, use **only that channel's** cookie from the PL/Star document. Both successful records and failed probes can contain a usable signed redirect in `error_details.final_url` or `final_url`. Never replace a missing Star token with the general cookie or a neighbouring channel's token.
+- Other advertised URLs use the general cookie and, if configured, its distinct fallback. An empty fallback endpoint is not fetched as an HTML page. A regular source with no cookie can still use its own URL.
+- Reuse channel/key and cookie responses for at most 30 seconds, shortened before a known token expiry. Cached credentials are not made younger by zapping to another channel. Cache player endpoint configuration for at most five minutes; changed endpoint/header configuration invalidates dependent data. A forced refresh bypasses these caches.
+- Do not execute JJTV scripts, load adverts/trackers, call its country-detection service, use its worldwide-player route, or open an embed.
+
+## HTTP, DRM and lifecycle boundaries
+
+- Each playback session has its own token policy. Keep signed URL bytes, unrelated parameters and independently signed child URLs intact. A successful signed redirect can teach that session the final CDN's token.
+- Keep the selected website's non-secret origin consistent through redirects, while source-specific headers/cookies remain scoped to their exact origin and port. The TG relay exception is not silently applied to JJTV's policy.
+- Keys and signed credentials remain in memory, including while an active DRM/playback session needs them. They are not written to preferences, bundled playlists, logs or diagnostic fixtures. Only public function hints, provider names and non-secret fingerprints are persisted.
+- ClearKey is supplied to Media3 through a local callback with multi-session support. Explicitly advertised Widevine HTTPS licences remain supported. Missing keys are not invented, and a different server's keys are not borrowed.
+- Channel changes, provider lookups, previews, manual reloads and activity teardown cancel or invalidate older jobs and callbacks. Old-channel audio/frames must not take ownership of a new selection.
+- Error messages identify the provider and include HTTP or Media3 error codes where available, without displaying signed URLs or keys.
 
 ### Remote controls
 
@@ -39,44 +57,40 @@ Both live TV and 24/7 channels now play only in Media3/ExoPlayer. The live-TV we
 | --- | --- |
 | Up / Down | Previous / next channel |
 | Right | Channel guide |
-| OK | Show information; switch source when information is visible and multiple sources exist |
-| Left | Next TG source (reload if only one exists) |
-| Hold OK / Menu | Fetch a fresh stream and player configuration |
+| OK | Show information; switch resolved native source when information is visible and multiple sources exist |
+| Left | Next resolved source; reload if only one exists |
+| Hold OK / Menu | Fetch fresh player configuration and credentials |
 | Back | Close native playback |
 
-## Automatic-update boundaries
+## Verification and limits
 
-The app follows supported **configuration, token, source and deployment-ID changes**. It does not download executable app updates or replace Media3 when TG changes its website. A new API argument schema, an incompatible serialization/DRM protocol, login requirements or a new codec can still require an APK update. Only advertised read-only GET functions are probed; arbitrary POST functions and remote scripts are not executed.
+Offline tests cover static-literal discovery, protocol parsing, multi-key and legacy ClearKey formats, exact Hindi/Star IDs, source order, PL-specific cookie selection, cache expiry and redeployment, header/redirect isolation, V1/V2 separation, provider preference, interruption and bounded recovery. Their URLs and key/token values are synthetic.
 
-TG's public documentation states that upstream streams are restricted to India and that tokens expire. A native client cannot repair an unavailable upstream or invent missing DRM data. Returning a manifest URL, especially with `drm: null`, is not proof that a channel plays. Real playback must be checked on a supported Android device and network.
-
-## Verification
-
-Host-side tests cover protocol decoding, independent per-source DRM, redirects, signed query preservation, header isolation, source discovery/redeployment, cache expiry, V1/V2 separation, exact ID resolution for the 23 Star Sports entries and Sony YAY Hindi (872), interruption, and bounded recovery. Fixtures are synthetic and contain no working stream credentials.
-
-With JDK 17, Gradle 8.9 and Android SDK 35 installed:
+With JDK 17, Gradle 8.9 and Android SDK 35:
 
 ```sh
 gradle testArm32DebugUnitTest testArm64DebugUnitTest
 gradle assembleArm32Release assembleArm64Release
 ```
 
-The GitHub build workflow runs the offline unit tests and builds both APKs. It also runs a separate, non-gating live diagnostic because upstream availability and geography are not deterministic:
+The workflow also runs a separate, non-gating live diagnostic because upstream/network availability is not deterministic:
 
 ```sh
 gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' -PliveTg=true
 ```
 
-The live test uses the **production** resolver, protocol decoder and stream HTTP policy. It checks exact IDs and that the public API was not substituted for the player function, then inspects actual manifest responses for 872/1106. It does not launch Android or prove that video/audio decodes. The regular offline test run skips this opt-in check.
+This uses the **production** resolvers, protocol parsers and stream transport. The successful integration check after adding JJTV resolved TG metadata for Sony YAY Hindi plus 23 Star Sports IDs, and JJTV metadata for those 24 IDs plus Cartoon Network Hindi (816). It confirmed supplied key data for the three requested examples. Both sites' manifest requests from the CI runner still returned **HTTP 451**, so these checks did **not** verify decoded video or audio. Earlier live runs also encountered a transient metadata timeout; the live check's own status must be read separately from the APK build status.
 
-`.github/scripts/inspect-tg-player.py` independently inspects current website code and its manifest request rules. Both diagnostics expose only redacted summaries in GitHub check annotations. Keys, cookies and signed query values are not logged or saved as fixtures. A successful build or metadata check must not be advertised as a successful device playback test.
+`.github/scripts/inspect-tg-player.py` and `inspect-jjtv-player.py` inspect current public player contracts; `report-live-player.py` exposes redacted test summaries and individual live-test outcomes in GitHub Checks. Build success, a non-empty source list and available key data are not device-playback proof.
 
-### Device release checklist (still required)
+### Device acceptance checklist — still required
 
-- Test Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada feeds, plus Sony YAY Hindi; confirm both video and the expected audio language.
-- Test an ordinary V1 DASH channel, an HLS channel, TG-provided relay sources, and a V2 24/7 channel.
-- Switch sources, hold OK to reload, zap rapidly, enter/exit the guide, and background/resume the app. No old-channel audio or web player should remain.
-- Check muted previews followed by full-screen playback, low-memory arm32 boxes and arm64 devices.
-- Confirm recovery from expired metadata, network loss, unavailable channels and sustained playback without reload loops.
+- Confirm video, the expected audio language and sustained playback for Star Sports HD/SD, Hindi, Select, Tamil, Telugu and Kannada; Sony YAY Hindi; and Cartoon Network Hindi 816.
+- Test a normal TG DASH channel, an HLS channel, a JJTV native source and a V2 channel. Verify that V2 never uses the Jio/JJTV namespace.
+- Confirm automatic source/provider changes on failure, and that retuning starts with a source/provider that actually rendered a frame. No web player should appear.
+- Exercise previews, rapid zapping, manual reload, guide navigation, background/resume, low-memory arm32 boxes and arm64 devices.
+- Check expiry/network-loss recovery and the final error message without endless loops.
 
-Android compilation and unit tests are run in GitHub Actions. The coding sandbox has no Android SDK/emulator or attached TV, and the CI manifest requests were blocked with HTTP 451. On-device first-frame, audio and sustained playback verification remains required.
+The app follows supported configuration, source, token, header and deployment-ID changes. It does not download executable player code or replace Media3 automatically. A different API schema, authentication mechanism, DRM system or codec can still require an APK update. Upstream outages, geographic restrictions and missing credentials cannot be repaired by the native client.
+
+Release APKs currently use the repository's debug signing configuration. A signing-key mismatch with an older test APK can prevent an in-place install; uninstalling it would clear its saved settings and favourites. Do not treat a build artifact as an automatically installed update.
