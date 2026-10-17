@@ -43,4 +43,21 @@ class TgDiscoveryTest {
         val js = """import "https://livetgtv.lovable.app.evil.test/servers.js"; import "https://user:pass@livetgtv.lovable.app/servers.js";"""
         assertTrue(TgDiscovery.scripts(js, site, site).isEmpty())
     }
+
+    @Test fun `Rolldown static backtick function ids and lazy imports are supported`() {
+        val id = "c".repeat(64)
+        // Shape observed in TG's deployed servers/watch chunks; no deployment hash is pinned.
+        val js = """var r=n({method:`GET`}).handler(t(`$id`)); import(`./servers-latest.js`);"""
+        assertEquals(listOf(id), TgDiscovery.functions(js))
+        assertEquals(listOf("$site/assets/servers-latest.js"), TgDiscovery.scripts(js, "$site/assets/watch.js", site))
+        assertEquals(listOf(id), TgDiscovery.functions("""rpc({id:`$id`})"""))
+    }
+
+    @Test fun `interpolated templates and mismatched quotes are not literal endpoints`() {
+        val id = "c".repeat(64)
+        val js = """import(`./servers-${'$'}{deployment}.js`); rpc(`$id'); rpc(`${'$'}{id}`);"""
+        assertTrue(TgDiscovery.scripts(js, "$site/assets/main.js", site).isEmpty())
+        assertTrue(TgDiscovery.functions(js).isEmpty())
+    }
+
 }

@@ -14,11 +14,23 @@ UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like G
 MAX = 4 * 1024 * 1024
 
 
+REPORTS = []
+
+
 def emit(title, value):
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=True)
-    for start in range(0, min(len(text), 24000), 6000):
+    REPORTS.append((title, text[:24000]))
+
+
+def flush():
+    # GitHub truncates notices per step: combine the report, most useful results first.
+    def order(item):
+        title = item[0]
+        return 0 if title == 'TG RPC' else 1 if title.startswith('TG player code') else 2 if title == 'TG page' else 3
+    text = '\n\n'.join(title + '\n' + body for title, body in sorted(REPORTS, key=order))[:48000]
+    for start in range(0, len(text), 6000):
         data = text[start:start + 6000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-        print(f"::notice title={title}::{data}", flush=True)
+        print(f"::notice title=TG live inspection {start // 6000 + 1}::{data}", flush=True)
 
 
 def get(url, rpc=False):
@@ -46,7 +58,9 @@ def priority(url):
 def scripts(text, base):
     text = text.replace('\\/', '/').replace('\\u002F', '/')
     out = set()
-    for path in re.findall(r'''["']([^"'<>\s]+\.m?js(?:\?[^"'<>\s]*)?)["']''', text):
+    for _, path in re.findall(r'''(["'`])([^"'`<>\s]+\.m?js(?:\?[^"'`<>\s]*)?)\1''', text):
+        if "${" in path:
+            continue
         url = urllib.parse.urljoin(SITE + '/' if path.startswith('assets/') else base, path.replace('&amp;', '&'))
         if urllib.parse.urlsplit(url).netloc == urllib.parse.urlsplit(SITE).netloc:
             out.add(url)
@@ -55,9 +69,9 @@ def scripts(text, base):
 
 def functions(text):
     tagged = re.findall(r'_serverFn/([A-Za-z0-9_-]{8,128})(?=[?"\s\x27`]|$)', text)
-    called = re.findall(r'''[A-Za-z_$][A-Za-z0-9_$.]*\(\s*["']([a-fA-F0-9]{64})["']''', text)
-    meta = re.findall(r'''["']?\bid["']?\s*:\s*["']([a-fA-F0-9]{64})["']''', text)
-    return list(dict.fromkeys(tagged + called + meta))
+    called = re.findall(r'''[A-Za-z_$][A-Za-z0-9_$.]*\(\s*(["'`])([a-fA-F0-9]{64})\1''', text)
+    meta = re.findall(r'''["']?\bid["']?\s*:\s*(["'`])([a-fA-F0-9]{64})\1''', text)
+    return list(dict.fromkeys(tagged + [fn for _, fn in called + meta]))
 
 
 def safe_url(value):
@@ -73,7 +87,7 @@ def safe_url(value):
 def sanitize(value, name='', depth=0):
     if depth > 9:
         return '[depth limit]'
-    if name.lower() in {'cookie', 'key', 'kid', 'keyid', 'k', 'clearkeys', 'keys', 'license', 'licenseurl', 'license_url', 'license_key', 'licensekey', 'authorization', 'token'}:
+    if name.lower() in {'cookie', 'key', 'kid', 'keyid', 'k', 'clearkeys', 'keys', 'license', 'licenseurl', 'license_url', 'license_key', 'licensekey', 'authorization', 'token', 'epg', 'guide', 'schedule'}:
         return {'present': bool(value), 'type': type(value).__name__, 'length': len(value) if isinstance(value, (str, list, dict)) else 0}
     if isinstance(value, dict):
         return {k: sanitize(v, k, depth + 1) for k, v in list(value.items())[:40]}
@@ -116,6 +130,8 @@ def decode(node, refs, depth=0):
         for key, child in zip(props.get('k', []), props.get('v', [])):
             value[key] = decode(child, refs, depth + 1)
         return value
+    if tag == 21 or (tag == 12 and node.get('s') in (True, 1)):
+        return decode(node.get('f'), refs, depth + 1)
     if tag == 23:
         return decode(node.get('a', [None, None])[1], refs, depth + 1)
     return None
@@ -188,4 +204,7 @@ def inspect():
 
 
 if __name__ == '__main__':
-    inspect()
+    try:
+        inspect()
+    finally:
+        flush()

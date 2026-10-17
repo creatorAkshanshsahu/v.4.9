@@ -221,4 +221,30 @@ class TgResolverTest {
             } finally { executor.shutdownNow() }
         }
     }
+
+    @Test fun `cold start follows the deployed backtick server function instead of incomplete public metadata`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/watch/1106" -> response("""<script src='/assets/watch-current.js'></script>""", type = "text/html")
+            "/assets/watch-current.js" -> response("""const load=()=>import(`./servers-current.js`);""")
+            "/assets/servers-current.js" -> response("""var r=n({method:`GET`}).handler(t(`$updated`));""")
+            "/_serverFn/$updated" -> {
+                assertEquals("1106", idFromPayload(url))
+                response("""{"result":{"id":"1106","urls":["https://media.example/star.mpd"],
+                    "keyId":"${"a".repeat(32)}","key":"${"b".repeat(32)}",
+                    "cookie":"__hdnea__=fixture-primary",
+                    "backups":[{"label":"Server 2","urls":["https://relay.example/star.m3u8"],"cookie":null,"keyId":null,"key":null}]}}""")
+            }
+            "/api/public/channels/1106" -> throw AssertionError("Must use TG's full server configuration")
+            else -> response("", 404)
+        } }
+        TgResolver(http).use { resolver ->
+            val sources = resolver.resolve("1106")
+            assertEquals(listOf("https://media.example/star.mpd", "https://relay.example/star.m3u8"), sources.map { it.url })
+            assertNotNull(ClearKey.license(sources[0].drm!!))
+            assertEquals("__hdnea__=fixture-primary", sources[0].cookie)
+            assertNull(sources[1].drm)
+            assertEquals("", sources[1].cookie)
+        }
+    }
+
 }

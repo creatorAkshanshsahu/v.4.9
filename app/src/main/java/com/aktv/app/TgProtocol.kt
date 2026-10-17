@@ -24,7 +24,7 @@ data class TgStream(
 object TgProtocol {
     const val MAX_BODY = 4 * 1024 * 1024
     private val urlKeys = listOf("playable", "url", "src", "stream", "streamUrl", "manifestUrl", "manifest", "mpd", "m3u8", "hls", "dash", "link")
-    private val children = listOf("result", "data", "config", "playback", "primary", "servers", "backups", "sources", "streams", "urls")
+    private val children = listOf("result", "data", "config", "playback", "primary", "urls", "sources", "streams", "servers", "backups")
 
     fun streams(body: ByteArray, contentType: String, page: String, defaultType: String = "dash", expectedId: String? = null): List<TgStream> {
         require(body.size <= MAX_BODY) { "Player response too large" }

@@ -204,6 +204,9 @@ internal class TgResolver(
                     pending.addAll(TgDiscovery.scripts(script, url, site).filter { it !in visited })
                 }
             } finally { jobs.forEach { it.cancel(true) } }
+            // The current server chunk declares the player function. Do not download the whole UI
+            // and Shaka dependency graph before the first channel can start.
+            if (found.values.any { it == 0 }) break
         }
         if (found.isNotEmpty()) {
             val next = found.entries.sortedBy { it.value }.take(12).map { it.key }
