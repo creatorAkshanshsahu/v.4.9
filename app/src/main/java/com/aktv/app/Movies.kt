@@ -8,7 +8,7 @@ import java.net.URLEncoder
 
 /**
  * Movie & series catalogue (TMDB: trending, genres, search, posters, backdrops, episodes) and the
- * TGVID embed player links (https://tgvid.lovable.app/docs).
+ * structured title identities for the native TG Frost VOD player.
  */
 object Movies {
     data class Title(
@@ -23,8 +23,6 @@ object Movies {
     private const val TM = "https://api.themoviedb.org/3"
     private const val TMDB_KEY = "e86d249e1b4fc2dcd7d1f1cb09a004f8"   // TMDB v3 API key (catalogue, posters, search)
     private const val IMG = "https://image.tmdb.org/t/p"
-    private const val PLAYER = "https://tgvid.lovable.app/embed"
-    private const val ACCENT = "e50914"
 
     /**
      * Movies and Series are separate tabs with their own shelves. Order matters: the app shows each title only in the
@@ -43,10 +41,6 @@ object Movies {
         .map { Shelf("$it series", "series", "top", it) }
 
     fun shelves(type: String) = if (type == "series") SERIES_SHELVES else MOVIE_SHELVES
-
-    fun movieUrl(tmdb: Int, t: Long = 0) = "$PLAYER/movie/$tmdb?color=$ACCENT&back=false" + (if (t > 5) "&t=$t" else "")
-    fun tvUrl(tmdb: Int, s: Int, e: Int, t: Long = 0) =
-        "$PLAYER/tv/$tmdb/$s/$e?color=$ACCENT&back=false&autoplayNextEp=true" + (if (t > 5) "&t=$t" else "")
 
     private val MOVIE_GENRES = mapOf(28 to "Action", 12 to "Adventure", 16 to "Animation", 35 to "Comedy", 80 to "Crime", 99 to "Documentary",
         18 to "Drama", 10751 to "Family", 14 to "Fantasy", 9648 to "Mystery", 10749 to "Romance", 878 to "Sci-Fi", 53 to "Thriller", 27 to "Horror")
@@ -104,7 +98,7 @@ object Movies {
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let { o -> parse(o, type) } }
     }
 
-    /** One shelf of titles (two pages, cached for the session and for 12 h on disk). Every title has a TMDB id, so every title can play. */
+    /** One shelf of titles (two pages, cached for the session and for 12 h on disk). Every title has a TMDB id; native source availability is checked separately. */
     fun shelf(sh: Shelf): List<Title> {
         val key = "${sh.type}/${sh.catalog}/${sh.genre}"
         synchronized(cache) { cache[key] }?.let { return it }

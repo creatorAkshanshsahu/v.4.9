@@ -82,4 +82,16 @@ class FrostHttpTest {
             assertNull(server.takeRequest(2, TimeUnit.SECONDS)!!.getHeader("Cookie"))
         }
     }
+    @Test fun `cross-origin mirror keeps primary credential scope even on its initial request`() {
+        MockWebServer().use { primary -> MockWebServer().use { mirror ->
+            mirror.enqueue(MockResponse().setBody("sample"))
+            val source = FrostSource(FrostProvider.FROST, "mirror", mirror.url("/video.mp4").toString(), VodFormat.MP4,
+                "720p", "English", null, mapOf("cookie" to "sid=synthetic", "authorization" to "Bearer synthetic"), emptyList(),
+                primary.url("/video.mp4").toString())
+            FrostHttp.client(source).newCall(Request.Builder().url(source.url).build()).execute().close()
+            val request = mirror.takeRequest(2, TimeUnit.SECONDS)!!
+            assertNull(request.getHeader("Cookie")); assertNull(request.getHeader("Authorization"))
+        } }
+    }
+
 }

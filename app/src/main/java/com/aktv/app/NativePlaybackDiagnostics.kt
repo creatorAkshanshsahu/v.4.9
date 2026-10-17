@@ -34,11 +34,12 @@ internal object PlaybackProblems {
         val http = chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
             ?: chain.filterIsInstance<JjtvHttpException>().firstOrNull()?.status
             ?: chain.filterIsInstance<TgResolveException>().firstOrNull()?.status
+            ?: chain.filterIsInstance<FrostResolveException>().firstOrNull()?.status
         val crypto = chain.filterIsInstance<MediaCodec.CryptoException>().firstOrNull()?.errorCode
         val family = when {
             http != null -> PlaybackDiagnostics.Family.HTTP
-            chain.any { it is SSLException } -> PlaybackDiagnostics.Family.TLS
-            chain.any { it is SocketTimeoutException || it is UnknownHostException } -> PlaybackDiagnostics.Family.NETWORK
+            chain.any { it is SSLException || (it is FrostResolveException && it.kind == "tls") } -> PlaybackDiagnostics.Family.TLS
+            chain.any { it is SocketTimeoutException || it is UnknownHostException || (it is FrostResolveException && it.kind in setOf("dns", "timeout")) } -> PlaybackDiagnostics.Family.NETWORK
             (playerCode != null && playerCode in 6000..6999) || chain.any { it is MediaDrmException || it is MediaDrm.MediaDrmStateException ||
                 it is UnsupportedDrmException || it is MediaCryptoException || it is MediaCodec.CryptoException } -> PlaybackDiagnostics.Family.DRM
             (playerCode != null && playerCode in 4000..4999) || chain.any { it is MediaCodec.CodecException } -> PlaybackDiagnostics.Family.DECODER

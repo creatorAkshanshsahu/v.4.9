@@ -2,7 +2,7 @@ package com.aktv.app
 
 /** In-memory, bounded diagnostics. Never accepts a source URL, header, key, key ID or exception message. */
 internal class PlaybackDiagnostics {
-    enum class Provider { TG, JJTV }
+    enum class Provider { TG, JJTV, FROST, OUT }
     enum class Media { DASH, HLS, FILE }
     enum class Drm { NONE, CLEARKEY, WIDEVINE }
     enum class DrmStep { NOT_REQUESTED, CREATING, CREATED, SESSION_OPEN, KEY_REQUEST, KEY_RESPONSE, KEYS_LOADED }

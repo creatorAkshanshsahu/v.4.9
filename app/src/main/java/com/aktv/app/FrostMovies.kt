@@ -42,7 +42,7 @@ internal class FrostSubtitle(val url: String, val label: String, val language: S
 internal class FrostSource(
     val provider: FrostProvider, val identity: String, val url: String, val format: VodFormat,
     val quality: String, val language: String, val hevc: Boolean?, val headers: Map<String, String>,
-    val subtitles: List<FrostSubtitle>
+    val subtitles: List<FrostSubtitle>, val credentialOrigin: String = url
 ) {
     val label get() = listOf(provider.label, quality, language, format.name).filter { it.isNotBlank() }.joinToString(" · ")
     override fun toString() = "FrostSource(${provider.name}, ${format.name}, $quality)"
@@ -53,6 +53,9 @@ internal class FrostResolveException(val status: Int? = null, val kind: String =
         status == 429 -> "Movie source service is rate limited. Please wait before retrying."
         status == 401 || status == 403 -> "Movie source service denied access (HTTP $status)."
         status == 404 || kind == "empty" -> "No native sources are available for this title or episode."
+        kind == "tls" -> "Secure connection failed. Check the device date and TLS/certificate support."
+        kind == "timeout" -> "The movie source service did not respond in time."
+        kind == "dns" -> "The movie source service could not be reached (DNS)."
         kind == "too-large" -> "Movie source response was too large."
         kind == "schema" -> "Movie source service returned an unsupported response."
         else -> "Movie source service is unavailable${status?.let { " (HTTP $it)" } ?: ""}."
@@ -155,7 +158,7 @@ internal object FrostProtocol {
             for ((mirror, url) in urls.distinct().withIndex()) {
                 val key = "$provider|$identity|${format.name}|$quality|$language|$mirror"
                 val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).take(12).joinToString("") { "%02x".format(it) }
-                result.add(FrostSource(provider, digest, url, format, quality, language, hevc, headers(item.optJSONObject("headers")), tracks))
+                result.add(FrostSource(provider, digest, url, format, quality, language, hevc, headers(item.optJSONObject("headers")), tracks, primary))
             }
             if (result.size >= 64) break
         }
@@ -198,7 +201,15 @@ internal class FrostResolver(
                 return FrostProtocol.parse(FrostProtocol.readBounded(body.byteStream()).toString(Charsets.UTF_8), provider)
             }
         } catch (error: FrostResolveException) { throw error }
-        catch (_: Exception) { throw FrostResolveException() } // Never expose exception text containing a signed URL.
+        catch (error: Exception) { // Never expose exception text containing a signed URL.
+            val kind = when (error) {
+                is javax.net.ssl.SSLException -> "tls"
+                is java.net.UnknownHostException -> "dns"
+                is java.net.SocketTimeoutException, is java.io.InterruptedIOException -> "timeout"
+                else -> "unavailable"
+            }
+            throw FrostResolveException(kind = kind)
+        }
     }
 
     fun cancel() { client.dispatcher.cancelAll() }
@@ -210,7 +221,7 @@ internal object FrostHttp {
         .followRedirects(true).followSslRedirects(false).build()
 
     fun client(source: FrostSource, transport: OkHttpClient = base): OkHttpClient {
-        val origin = source.url.toHttpUrl()
+        val origin = source.credentialOrigin.toHttpUrl()
         return transport.newBuilder().addNetworkInterceptor { chain ->
             val request = chain.request()
             val sameOrigin = origin.scheme == request.url.scheme && origin.host == request.url.host && origin.port == request.url.port
