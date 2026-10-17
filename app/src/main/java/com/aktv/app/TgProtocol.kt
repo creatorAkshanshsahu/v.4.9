@@ -19,7 +19,8 @@ data class TgStream(
     val headers: Map<String, String> = emptyMap(),
     val cookie: String = "",
     // Non-secret browser origin stays consistent across redirects; source credentials do not.
-    val requestOrigin: String = TgResolver.SITE
+    val requestOrigin: String = TgResolver.SITE,
+    val omitReferrer: Boolean = false
 )
 
 /** TG's JSON / TanStack wire formats. Kept Android-free so protocol changes can be regression tested. */

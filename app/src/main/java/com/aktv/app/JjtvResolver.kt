@@ -41,6 +41,7 @@ internal class JjtvResolver(
         val regular = if (hasRegular) cookie(config.primaryCookie, page) { JjtvProtocol.regularCookie(it) } else ""
         val fallback = if (hasRegular) cookie(config.fallbackCookie, page) { JjtvProtocol.regularCookie(it, fallback = true) } else ""
         val result = JjtvProtocol.streams(channel, config, regular, fallback, star, page, site)
+            .flatMap(JjtvRequestProfiles::variants)
         checkInterrupted()
         if (result.isEmpty()) throw IOException("JJTV did not supply a current native source for this channel")
         val expiry = result.mapNotNull { StreamRequestPolicy.expiry(it.url, it.cookie) }.minOrNull()

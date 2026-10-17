@@ -24,9 +24,11 @@ class StreamRequestPolicy(private val stream: TgStream, private val now: () -> L
             url == stream.url && suppliedToken != null -> withToken(url, token, replace = true)
             else -> withToken(url, token, replace = false)
         }
-        val headers = linkedMapOf("Referer" to stream.requestOrigin.trimEnd('/') + "/", "Origin" to stream.requestOrigin.trimEnd('/'))
+        val headers = linkedMapOf("Origin" to stream.requestOrigin.trimEnd('/'))
+        if (!stream.omitReferrer) headers["Referer"] = stream.requestOrigin.trimEnd('/') + "/"
         // Headers supplied for one relay must not become the credentials of its redirect/segment host.
         if (target == origin) stream.headers.forEach { (key, value) ->
+            if (stream.omitReferrer && key.equals("Referer", true)) return@forEach
             headers.keys.firstOrNull { it.equals(key, true) }?.let { headers.remove(it) }
             if (key.lowercase() !in setOf("host", "connection", "content-length", "accept-encoding") &&
                 key.none { it == '\r' || it == '\n' } && value.none { it == '\r' || it == '\n' }) headers[key] = value

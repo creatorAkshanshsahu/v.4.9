@@ -38,12 +38,16 @@ class JjtvResolverTest {
             "/general.json" -> response(primary())
             else -> throw AssertionError("Unexpected metadata endpoint")
         } }
-        val source = JjtvResolver(http).resolve("872").single()
+        val sources = JjtvResolver(http).resolve("872")
+        val source = sources.first()
+        assertEquals(2, sources.size)
+        assertTrue(source.omitReferrer)
         assertTrue(source.url.contains("fixture-872-"))
         assertEquals(2, ClearKey.pairs(requireNotNull(source.drm)).size)
         assertEquals("__hdnea__=general", source.cookie)
         assertEquals(site, source.requestOrigin)
-        assertEquals("plaYtv/7.1.5", source.headers["User-Agent"])
+        assertNull(source.headers["User-Agent"])
+        assertEquals("plaYtv/7.1.5", sources[1].headers["User-Agent"])
         assertEquals(3, http.requests.size)
         assertTrue(http.requests.all { it.second["Origin"] == site && it.second["Referer"] == "$site/pind?id=872" })
         assertTrue(http.requests.all { it.second["Cache-Control"] == "no-cache, no-store" })
@@ -56,7 +60,7 @@ class JjtvResolverTest {
             "/star.json" -> response(stars("1106"))
             else -> throw AssertionError("PL sources must not use a general cookie or an embed")
         } }
-        val source = JjtvResolver(http).resolve("1106").single()
+        val source = JjtvResolver(http).resolve("1106").first()
         assertEquals("__hdnea__=channel-1106", source.cookie)
         assertEquals(2, ClearKey.pairs(requireNotNull(source.drm)).size)
         assertEquals(0, http.count("/general.json"))
@@ -75,7 +79,7 @@ class JjtvResolverTest {
             else -> throw AssertionError("Unexpected metadata endpoint")
         } }
         val resolver = JjtvResolver(http)
-        ids.forEach { id -> assertEquals("__hdnea__=only-$id", resolver.resolve(id).single().cookie) }
+        ids.forEach { id -> assertEquals("__hdnea__=only-$id", resolver.resolve(id).first().cookie) }
         assertEquals(1, http.count("/star.json"))
         assertEquals(1, http.count("/channels.json"))
     }
@@ -91,7 +95,7 @@ class JjtvResolverTest {
         val resolver = JjtvResolver(http)
         try { resolver.resolve("1106"); fail("Expected missing channel-specific credential") } catch (_: IOException) { }
         available = true
-        assertEquals("__hdnea__=channel-1106", resolver.resolve("1106").single().cookie)
+        assertEquals("__hdnea__=channel-1106", resolver.resolve("1106").first().cookie)
         assertEquals(2, http.count("/star.json"))
     }
 
@@ -109,7 +113,7 @@ class JjtvResolverTest {
         clock = 3_000; resolver.resolve("872")
         assertEquals(1, http.count("/general.json"))
         clock = 6_000; exp = 100
-        assertTrue(resolver.resolve("872").single().cookie.contains("exp=100"))
+        assertTrue(resolver.resolve("872").first().cookie.contains("exp=100"))
         assertEquals(2, http.count("/general.json"))
         assertEquals(1, http.count("/channels.json"))
     }
@@ -128,7 +132,7 @@ class JjtvResolverTest {
         clock = 20_000; resolver.resolve("873")
         assertEquals(1, http.count("/general.json"))
         clock = 31_001; generation = 2
-        assertEquals("__hdnea__=generation-2", resolver.resolve("873").single().cookie)
+        assertEquals("__hdnea__=generation-2", resolver.resolve("873").first().cookie)
         assertEquals(2, http.count("/general.json"))
     }
 
@@ -141,9 +145,9 @@ class JjtvResolverTest {
             else -> throw AssertionError("Unexpected metadata endpoint")
         } }
         val resolver = JjtvResolver(http)
-        assertTrue(resolver.resolve("872").single().url.contains("v1.mpd"))
+        assertTrue(resolver.resolve("872").first().url.contains("v1.mpd"))
         version = 2
-        assertTrue(resolver.resolve("872", fresh = true).single().url.contains("v2.mpd"))
+        assertTrue(resolver.resolve("872", fresh = true).first().url.contains("v2.mpd"))
         assertEquals(2, http.count("/pind"))
         assertEquals(1, http.count("/channels-2.json"))
     }
@@ -161,7 +165,7 @@ class JjtvResolverTest {
         resolver.resolve("872")
         clock = 290_000; resolver.resolve("873")
         clock = 302_000; version = 2
-        assertTrue(resolver.resolve("872").single().url.contains("v2.mpd"))
+        assertTrue(resolver.resolve("872").first().url.contains("v2.mpd"))
         assertEquals(1, http.count("/channels-2.json"))
     }
 
@@ -173,7 +177,7 @@ class JjtvResolverTest {
             "/general.json" -> response(primary())
             else -> throw AssertionError("Only current same-site player configuration may be followed")
         } }
-        assertTrue(JjtvResolver(http).resolve("872").single().url.contains("fixture-872"))
+        assertTrue(JjtvResolver(http).resolve("872").first().url.contains("fixture-872"))
         assertEquals(1, http.count("/assets/player-latest.js"))
     }
 

@@ -1,4 +1,14 @@
-# Native live TV (4.9.11)
+# Native live TV (4.9.12)
+
+## 4.9.12 — real browser request comparison
+
+A read-only Chrome trace of TG watch pages 1106 and 872 observed the actual automatic path: direct Jio manifest, the allinonereborn relay (a redirect to Jio), then the JJTV `/pind` frame. No extra unknown third media service was observed. This trace still received HTTP 451 and **did not render video** in the CI environment.
+
+The trace exposed a concrete request mismatch: in TG's embedded JJTV player, Chrome sends its browser user-agent and **no Referer header**. The script's `User-Agent: plaYtv/7.1.5` and JioTV `Referer` assignments do not become those browser headers. The native app previously applied those assignments literally.
+
+JJTV sources now have two explicit native request styles: browser-style Chrome/no-Referer first, and the already-supported declared native headers second. Both use the same source URL, source-owned keys and selected channel cookie. These are not new servers or separate player engines. The legacy style remains available to avoid discarding already-working channels; the successful style is remembered after a rendered frame. `omitReferrer` suppresses the header rather than sending an empty value, while signed queries and byte-range headers remain intact.
+
+The browser trace is `.github/scripts/trace-tg-browser.cjs`. It runs outside the APK, blocks non-player ads/resources and reports only sanitized network/DRM counts. Request-style tests also inspect actual MockWebServer requests. This corrects an observed header difference, but without the device's error report or successful live video it is not proof that the remaining Star/Sony failure has been resolved.
 
 ## 4.9.11 — Star Sports / Sony YAY follow-up
 
@@ -44,7 +54,7 @@ Both full-screen playback and muted previews use the same Media3/ExoPlayer media
 
 ## JJTV metadata
 
-`JjtvResolver` reads the current `/pind?id=…` configuration and discovers the advertised `CHANNELS_URL`, `COOKIE_PRIMARY`, `COOKIE_FALLBACK` and `COOKIE_STAR_SPORTS` locations. Filenames, stream URLs, keys and tokens are not bundled into the APK. Static request-header assignments are read from the player configuration instead of trying guessed HTTP profiles.
+`JjtvResolver` reads the current `/pind?id=…` configuration and discovers the advertised `CHANNELS_URL`, `COOKIE_PRIMARY`, `COOKIE_FALLBACK` and `COOKIE_STAR_SPORTS` locations. Filenames, stream URLs, keys and tokens are not bundled into the APK. Static request-header assignments are read for the retained native request style; the preferred embedded-browser style uses Chrome/no-Referer as observed in the real browser trace.
 
 - Select the **exact** channel ID from the live JSON document. Do not remap to a similarly named channel or another language.
 - Prefer a non-empty `keys` array over legacy single-key fields. Retain every valid distinct key ID; repeated IDs use the last supplied value, as in the website's map. Normalize the provider's hex/UUID/JWK representation for Media3's local ClearKey callback.

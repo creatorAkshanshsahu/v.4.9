@@ -13,6 +13,7 @@ function permitted(raw) {
   } catch { return raw.startsWith('blob:') || raw.startsWith('data:') || raw === 'about:blank'; }
 }
 function safeUrl(raw) {
+  if (raw === 'null') return 'null';
   try {
     const url = new URL(raw);
     if (!['http:', 'https:'].includes(url.protocol)) return url.protocol;

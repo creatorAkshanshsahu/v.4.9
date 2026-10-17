@@ -19,6 +19,7 @@ internal object StreamHttp {
             val request = policy.request(original.url.toString())
             val builder = original.newBuilder().url(request.url)
             stream.headers.keys.forEach { builder.removeHeader(it) }
+            if (stream.omitReferrer) builder.removeHeader("Referer")
             builder.header("User-Agent", TgHttp.USER_AGENT)
             request.headers.forEach { (key, value) -> builder.header(key, value) }
             val response = chain.proceed(builder.build())

@@ -91,6 +91,7 @@ class TgLiveContractTest {
     /** Inspect the Media3 transport, not a second guessed HTTP profile. A manifest is NOT playback proof. */
     private fun probe(source: TgStream): JSONObject {
         val report = JSONObject().put("host", URI(source.url).host)
+            .put("requestStyle", if (source.omitReferrer) "browser-no-referrer" else "declared-native")
         try {
             val client = StreamHttp.client(source).newBuilder().callTimeout(15, TimeUnit.SECONDS).build()
             client.newCall(Request.Builder().url(source.url).build()).execute().use { response ->

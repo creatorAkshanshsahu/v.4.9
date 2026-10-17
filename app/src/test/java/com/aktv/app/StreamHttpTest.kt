@@ -59,4 +59,42 @@ class StreamHttpTest {
             assertNull(requireNotNull(segment.requestUrl).encodedQuery)
         }
     }
+
+    @Test fun `browser style sends Chrome and omits Referer rather than sending an empty header`() {
+        MockWebServer().use { server ->
+            server.start()
+            server.enqueue(MockResponse().setBody("manifest"))
+            server.enqueue(MockResponse().setBody("segment"))
+            val source = TgStream("JJTV", server.url("/manifest.mpd").toString(), "dash",
+                headers = mapOf("User-Agent" to "plaYtv/7.1.5", "Referer" to "https://www.jiotv.com/"),
+                cookie = "__hdnea__=fixture", requestOrigin = JjtvResolver.SITE)
+            val browser = JjtvRequestProfiles.variants(source).first()
+            val client = StreamHttp.client(browser)
+            client.newCall(Request.Builder().url(browser.url).header("Referer", "https://must-not-leak.example/").build()).execute().close()
+            client.newCall(Request.Builder().url(server.url("/segment.m4s?keep=a%2Bb")).header("Range", "bytes=0-9").build()).execute().close()
+            val manifest = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            val segment = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            for (request in listOf(manifest, segment)) {
+                assertNull(request.getHeader("Referer"))
+                assertEquals(TgHttp.USER_AGENT, request.getHeader("User-Agent"))
+                assertEquals(JjtvResolver.SITE, request.getHeader("Origin"))
+            }
+            assertEquals("keep=a%2Bb&__hdnea__=fixture", requireNotNull(segment.requestUrl).encodedQuery)
+            assertEquals("bytes=0-9", segment.getHeader("Range"))
+        }
+    }
+
+    @Test fun `declared native header style remains available for existing working channels`() {
+        MockWebServer().use { server ->
+            server.start(); server.enqueue(MockResponse().setBody("manifest"))
+            val source = TgStream("JJTV", server.url("/manifest.mpd").toString(), "dash",
+                headers = mapOf("User-Agent" to "plaYtv/7.1.5", "Referer" to "https://www.jiotv.com/"), requestOrigin = JjtvResolver.SITE)
+            val native = JjtvRequestProfiles.variants(source)[1]
+            StreamHttp.client(native).newCall(Request.Builder().url(native.url).build()).execute().close()
+            val request = requireNotNull(server.takeRequest(2, TimeUnit.SECONDS))
+            assertEquals("plaYtv/7.1.5", request.getHeader("User-Agent"))
+            assertEquals("https://www.jiotv.com/", request.getHeader("Referer"))
+        }
+    }
+
 }
