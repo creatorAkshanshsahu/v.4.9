@@ -925,12 +925,12 @@ class MainActivity : AppCompatActivity() {
         val apiF = io.submit(java.util.concurrent.Callable<String> { get(if (ch.v2) "$BASE_V2/${ch.id}" else "$BASE/${ch.id}", 2, Streams.CHROME) })
         // backup server (jjtvxweb.pages.dev) streams, played in the native player as extra servers
         val altF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.scrapeAlt(ch.name) } catch (_: Exception) { emptyList() } })
-        fun altList(): List<TgServers.Server> = try { altF.get(12, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
+        fun altList(wait: Long = 12): List<TgServers.Server> = try { altF.get(wait, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
         io.execute {
             try {
                 val tg = try { tgF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
                 var apiBody: String? = null; var apiErr: Exception? = null
-                try { apiBody = apiF.get(if (tg.isNotEmpty()) 2L else 20L, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { apiErr = (e.cause as? Exception) ?: e }
+                try { apiBody = if (tg.isNotEmpty()) apiF.get(400, java.util.concurrent.TimeUnit.MILLISECONDS) else apiF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { apiErr = (e.cause as? Exception) ?: e }
                 if (ch.v2) {
                     val list = ArrayList<Pair<String, String>>(); val extra = ArrayList<Pair<JSONObject?, Int>>()
                     fun addTg(l: List<TgServers.Server>) = l.forEach { sv ->
@@ -945,12 +945,29 @@ class MainActivity : AppCompatActivity() {
                             .forEach { list.add(it); extra.add(null to -1) }
                     } catch (e: Exception) { apiErr = e }
                     if (list.isEmpty()) { try { addTg(TgServers.scrape(ch.id)) } catch (_: Exception) {} }
-                    addTg(altList())   // backup server streams, natively, after the main servers
+                    if (tg.isEmpty()) addTg(altList())   // nothing from the site: wait for the backup server
                     if (list.isEmpty()) {
                         runOnUiThread { if (token == playToken) fallbackAlt(ch, "no live server") }
                         return@execute
                     }
                     runOnUiThread { if (token == playToken) { v2Servers = list; v2Extra = extra; if (serverIdx >= list.size) serverIdx = 0; startV2() } }
+                    // instant start like the website player: play the first server now, add the relay + backup servers once they arrive
+                    if (tg.isNotEmpty()) {
+                        val more = ArrayList<Pair<String, String>>(); val moreX = ArrayList<Pair<JSONObject?, Int>>()
+                        val body = apiBody ?: try { apiF.get(15, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { null }
+                        if (body != null) try {
+                            val sv = JSONObject(body).getJSONArray("servers")
+                            (0 until sv.length()).mapNotNull { sv.optJSONObject(it) }
+                                .map { str(it, "playable") to str(it, "type").ifEmpty { "hls" } }
+                                .filter { it.first.isNotEmpty() && list.none { x -> x.first == it.first } && more.none { x -> x.first == it.first } }
+                                .forEach { more.add(it); moreX.add(null to -1) }
+                        } catch (_: Exception) {}
+                        altList().forEach { sv -> if (list.none { it.first == sv.url } && more.none { it.first == sv.url }) {
+                            more.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); moreX.add(sv.drm to (if (Streams.isJio(sv.url)) 6 else 5)) } }
+                        if (more.isNotEmpty()) runOnUiThread { if (token == playToken && v2Servers === list) {
+                            v2Servers = list + more; v2Extra = extra + moreX
+                            infoNext.text = "Server ${serverIdx + 1} of ${v2Servers.size}   ·   OK switches server" } }
+                    }
                 } else {
                     val urls = ArrayList<String>(); val drms = ArrayList<JSONObject?>()
                     tg.forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } }
@@ -963,7 +980,7 @@ class MainActivity : AppCompatActivity() {
                             .forEach { urls.add(it); drms.add(drm) }
                     } catch (e: Exception) { apiErr = e }
                     if (urls.isEmpty()) { try { TgServers.scrape(ch.id).forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } } } catch (_: Exception) {} }
-                    altList().forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } }   // backup server streams, natively
+                    altList(if (urls.isEmpty()) 12 else 0).forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } }   // backup server streams, natively (no waiting when others are ready)
                     if (urls.isEmpty()) throw apiErr ?: IOException("no stream source")
                     runOnUiThread {
                         if (token == playToken) { v1Sources = urls; v1Drms = drms; routes = buildRoutes(ch, urls); routeIdx = 0; startV1() }
