@@ -1,0 +1,76 @@
+package com.aktv.app
+
+import java.net.URI
+import java.net.URLDecoder
+import java.util.concurrent.ConcurrentHashMap
+
+/** Session-local auth: signed query parameters are never copied to a different origin or over relay queries. */
+class StreamRequestPolicy(private val stream: TgStream, private val now: () -> Long = System::currentTimeMillis) {
+    data class Request(val url: String, val headers: Map<String, String>)
+    private val origin = originOf(stream.url)
+    private val tokens = ConcurrentHashMap<String, String>()
+    private val suppliedToken = cookieToken(stream.cookie)
+
+    init { (suppliedToken ?: tokenOf(stream.url))?.let { tokens[origin] = it } }
+
+    fun request(url: String): Request {
+        val target = originOf(url)
+        val token = tokens[target]?.takeUnless { expired(it, now()) }
+        val resolved = when {
+            token == null -> url
+            url == stream.url && suppliedToken != null -> withToken(url, token, replace = true)
+            else -> withToken(url, token, replace = false)
+        }
+        val headers = linkedMapOf("Referer" to "https://livetgtv.lovable.app/", "Origin" to "https://livetgtv.lovable.app")
+        // Headers supplied for one relay must not become the credentials of its redirect/segment host.
+        if (target == origin) stream.headers.forEach { (key, value) ->
+            headers.keys.firstOrNull { it.equals(key, true) }?.let { headers.remove(it) }
+            if (key.lowercase() !in setOf("host", "connection", "content-length", "accept-encoding") &&
+                key.none { it == '\r' || it == '\n' } && value.none { it == '\r' || it == '\n' }) headers[key] = value
+        }
+        return Request(resolved, headers)
+    }
+
+    /** Called after a successful response, including redirects. Star streams can acquire their token here. */
+    fun observed(finalUrl: String) {
+        tokenOf(finalUrl)?.takeUnless { expired(it, now()) }?.let { tokens[originOf(finalUrl)] = it }
+    }
+
+    companion object {
+        private const val TOKEN = "__hdnea__"
+        fun originOf(url: String): String = try {
+            val u = URI(url)
+            val scheme = u.scheme.orEmpty().lowercase()
+            val port = if (u.port != -1) u.port else if (scheme == "https") 443 else 80
+            "$scheme://${u.host.orEmpty().lowercase()}:$port"
+        } catch (_: Exception) { "" }
+
+        fun tokenOf(url: String): String? = try {
+            URI(url).rawQuery?.split('&')?.firstOrNull { it.substringBefore('=') == TOKEN }?.substringAfter('=')?.takeIf { it.isNotBlank() }
+        } catch (_: Exception) { null }
+
+        private fun cookieToken(cookie: String): String? = Regex("(?:^|[?;&\\s])__hdnea__=([^;\\s&]+)")
+            .find(cookie.trim())?.groupValues?.get(1)
+
+        fun expiry(url: String, cookie: String = ""): Long? {
+            val token = cookieToken(cookie) ?: tokenOf(url) ?: return null
+            return tokenExpiry(token)
+        }
+        private fun tokenExpiry(token: String): Long? = try {
+            Regex("(?:^|~)exp=(\\d+)(?:~|$)").find(URLDecoder.decode(token, "UTF-8"))?.groupValues?.get(1)?.toLongOrNull()?.let {
+                if (it > Long.MAX_VALUE / 1000) null else it * 1000
+            }
+        } catch (_: Exception) { null }
+        private fun expired(token: String, now: Long) = tokenExpiry(token)?.let { it <= now } ?: false
+
+        /** Work on the raw query: re-encoding an already signed URL can invalidate its signature. */
+        private fun withToken(url: String, token: String, replace: Boolean): String {
+            val fragment = if ('#' in url) "#${url.substringAfter('#')}" else ""
+            val base = url.substringBefore('#')
+            val query = base.substringAfter('?', "").split('&').filter { it.isNotBlank() }
+            if (!replace && query.any { it.substringBefore('=') == TOKEN }) return url
+            val parts = query.filterNot { it.substringBefore('=') == TOKEN } + "$TOKEN=$token"
+            return base.substringBefore('?') + "?" + parts.joinToString("&") + fragment
+        }
+    }
+}

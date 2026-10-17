@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 24; versionName = "4.9.7" }
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 25; versionName = "4.9.8" }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
     lint { abortOnError = false; checkReleaseBuilds = false }
     flavorDimensions += "abi"
@@ -18,6 +18,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("androidx.palette:palette:1.0.0")
     "arm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")

@@ -2,6 +2,7 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+  pull_request:
   workflow_dispatch:
 jobs:
   build:
@@ -12,7 +13,8 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.9 }
-      - run: gradle assembleArm32Release assembleArm64Release --stacktrace
+      - name: Test stream resolution and build both APKs
+        run: gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace
       - name: Rename APKs
         run: |
           mkdir -p out
