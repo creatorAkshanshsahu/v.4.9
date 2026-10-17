@@ -14,14 +14,7 @@ internal object StreamHttp {
         val policy = StreamRequestPolicy(stream)
         // A client per playback session shares connections/dispatcher, never its credentials.
         // Network interceptors run on EVERY redirect, unlike application interceptors.
-        return base.newBuilder().addInterceptor { chain ->
-            // This sees the requested resource and the final redirect together. Learning from each
-            // network response would let an independently signed segment poison later track requests.
-            val initial = chain.request()
-            val response = chain.proceed(initial)
-            if (response.isSuccessful) policy.observed(initial.url.toString(), response.request.url.toString())
-            response
-        }.addNetworkInterceptor { chain ->
+        return base.newBuilder().addNetworkInterceptor { chain ->
             val original = chain.request()
             val request = policy.request(original.url.toString())
             val builder = original.newBuilder().url(request.url)
@@ -29,7 +22,14 @@ internal object StreamHttp {
             if (stream.omitReferrer) builder.removeHeader("Referer")
             builder.header("User-Agent", TgHttp.USER_AGENT)
             request.headers.forEach { (key, value) -> builder.header(key, value) }
-            chain.proceed(builder.build())
+            val response = chain.proceed(builder.build())
+            // Observe on the network side: OkHttp's BridgeInterceptor restores the caller's
+            // original Request on the response (which can still contain the old catalogue token).
+            // Call.request identifies the original resource across redirects; response.request
+            // here identifies the actual authenticated wire URL. Independent media calls cannot
+            // overwrite primary-manifest auth in StreamRequestPolicy.observed.
+            if (response.isSuccessful) policy.observed(chain.call().request().url.toString(), response.request.url.toString())
+            response
         }.build()
     }
 }
