@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { safeUrl, redactCode, sourceShape, publicHttps } = require('./inspect-tgfrost-player.cjs');
+const { safeUrl, redactCode, sourceShape, publicHttps, sourceApiUrl } = require('./inspect-tgfrost-player.cjs');
 
 const secret = 'synthetic-secret-not-a-real-token';
 
@@ -84,4 +84,22 @@ test('request guard rejects plaintext, userinfo and local/IP destinations', () =
   }
   assert.equal(publicHttps('https://tgfrost.lovable.app/watch/movie/1288069'), true);
   assert.equal(publicHttps('https://cdn.example.test/video.mp4'), true);
+});
+
+
+test('source requests use the observed TMDB movie and exact episode contract', () => {
+  const movie = new URL(sourceApiUrl('tgflix', { type: 'movie', id: 1288069 }));
+  assert.equal(movie.origin, 'https://tgfrost.lovable.app');
+  assert.equal(movie.pathname, '/api/sources');
+  assert.deepEqual(Object.fromEntries(movie.searchParams), { server: 'tgflix', type: 'movie', tmdb_id: '1288069' });
+  const episode = new URL(sourceApiUrl('tgout', { type: 'tv', id: 213562, season: 2, episode: 3 }));
+  assert.deepEqual(Object.fromEntries(episode.searchParams), { server: 'tgout', type: 'tv', tmdb_id: '213562', season: '2', episode: '3' });
+});
+
+test('source API guard does not invent a native TG BOLT contract or accept invalid IDs', () => {
+  for (const sample of [{ type: 'movie', id: 0 }, { type: 'movie', id: 1.5 }, { type: 'anime', id: 1 },
+    { type: 'tv', id: 1, season: 0, episode: 1 }, { type: 'tv', id: 1, season: 1 }]) {
+    assert.throws(() => sourceApiUrl('tgflix', sample));
+  }
+  assert.throws(() => sourceApiUrl('tgbolt', { type: 'movie', id: 253412 }));
 });

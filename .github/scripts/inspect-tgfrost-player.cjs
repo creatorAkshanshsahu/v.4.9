@@ -18,7 +18,7 @@ function safeUrl(raw) {
       const extension = url.pathname.match(/\.(m3u8|mpd|mp4|m4s|ts|vtt|srt|js)$/i)?.[1]?.toLowerCase();
       path = '/[path redacted]' + (extension ? '.' + extension : '');
     }
-    const knownQueries = /^(?:id|tmdb|tmdbId|type|season|episode|s|e|server|source|provider|url|src|file|quality|lang|language|token|auth|expires|signature|sig|hmac|ts|timestamp|range|start|end|referer|referrer|origin|headers|base|hash|payload|key|apikey|api_key|color|progress|subtitle)$/i;
+    const knownQueries = /^(?:id|tmdb|tmdbId|tmdb_id|type|season|episode|s|e|server|source|provider|url|src|file|quality|lang|language|token|auth|expires|signature|sig|hmac|ts|timestamp|range|start|end|referer|referrer|origin|headers|base|hash|payload|key|apikey|api_key|color|progress|subtitle)$/i;
     const names = [...new Set([...url.searchParams.keys()].map(key => knownQueries.test(key) ? key : '[other]'))];
     return url.origin + path + (names.length ? '?' + names.map(key => key + '=[redacted]').join('&') : '');
   } catch { return '[invalid URL]'; }
@@ -33,7 +33,7 @@ function redactCode(code) {
 function sourceShape(value) {
   const fields = new Set(), urls = new Set(), formats = new Set(), headerNames = new Set();
   let objects = 0, arrays = 0, encrypted = false;
-  const known = /^(?:sources?|streams?|url|src|file|playlist|manifest|headers?|tracks?|subtitles?|captions?|quality|qualities|resolution|format|type|mimeType|provider|server|data|result|success|error|season|episode|tmdbId|id|drm|licenseUrl|license_url|clearKeys)$/i;
+  const known = /^(?:sources?|streams?|url|src|file|playlist|manifest|headers?|tracks?|subtitles?|captions?|quality|qualities|resolution|format|type|mimeType|provider|server|scraperName|scraperId|mirrors|hevc|language|verified|latencyMs|data|result|success|error|season|episode|tmdbId|id|drm|licenseUrl|license_url|clearKeys)$/i;
   const urlField = /^(?:url|src|file|playlist|manifest|streamUrl|sourceUrl|downloadUrl|licenseUrl)$/i;
   function visit(node, key = '', depth = 0) {
     if (depth > 7 || objects > 80) return;
@@ -204,7 +204,7 @@ async function trace(browser, sample) {
         const features = { movieBox: /MovieBox|moviebox/.test(text), hls: /\.loadSource\(|new Hls|hls\.js/.test(text),
           dash: /dashjs|shaka\.Player|application\/dash\+xml/.test(text),
           mediaSource: /MediaSource|HTMLVideoElement|\.src\s*=/.test(text), iframe: /iframe/.test(text) };
-        if (scripts.length < 24) scripts.push({ url: safeUrl(url.href), bytes: text.length, relevant, imports, features });
+        if (relevant && scripts.length < 24) scripts.push({ url: safeUrl(url.href), bytes: text.length, relevant, imports, features });
       }
       if (['fetch', 'xhr'].includes(request.resourceType()) && /json/.test(type) && !/^(?:api|image)\.themoviedb\.org$/.test(url.hostname) && size < 2 * 1024 * 1024 && metadata.length < 16) {
         try {
@@ -245,6 +245,90 @@ async function trace(browser, sample) {
     state, metadata, records, scripts, blocked: [...blocked], declaredResponseBytes: movieBytesDeclared };
 }
 
+// This GET contract was read from the site's public tgflixStreams client module, not guessed.
+function sourceApiUrl(server, sample) {
+  if (!['tgflix', 'tgout'].includes(server) || !['movie', 'tv'].includes(sample.type) ||
+      !Number.isSafeInteger(sample.id) || sample.id <= 0) throw new Error('Invalid source lookup');
+  const query = new URLSearchParams({ server, type: sample.type, tmdb_id: String(sample.id) });
+  if (sample.type === 'tv') {
+    if (![sample.season, sample.episode].every(value => Number.isSafeInteger(value) && value > 0))
+      throw new Error('Invalid episode lookup');
+    query.set('season', String(sample.season)); query.set('episode', String(sample.episode));
+  }
+  return SITE + '/api/sources?' + query;
+}
+async function inspectSourceApi(server, sample) {
+  const url = sourceApiUrl(server, sample), started = Date.now();
+  const report = { server, sample: sample.name, url: safeUrl(url), playbackTested: false,
+    requestCookiePresent: false, requestAuthorizationPresent: false };
+  try {
+    const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30000),
+      headers: { Accept: 'application/json' }, cache: 'no-store' });
+    report.status = response.status;
+    report.type = (response.headers.get('content-type') || '').split(';')[0];
+    if (!response.ok || !/json/.test(report.type)) { await response.body?.cancel(); return report; }
+    const reader = response.body.getReader(), chunks = [];
+    let bytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 2 * 1024 * 1024) { await reader.cancel(); return { ...report, error: 'metadata-too-large' }; }
+      chunks.push(Buffer.from(value));
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    report.metadata = sourceShape(body);
+    const sources = Array.isArray(body.sources) ? body.sources : [];
+    report.sourceCount = sources.length;
+    report.sourceSummaries = sources.slice(0, 8).map(source => ({
+      format: /^(?:hls|dash|mp4)$/i.test(source.type) ? source.type : 'other',
+      quality: /^(?:[0-9]{3,4}p?|4k|auto)$/i.test(String(source.quality)) ? String(source.quality) : 'other',
+      mirrorCount: Array.isArray(source.mirrors) ? source.mirrors.length : 0,
+      trackCount: Array.isArray(source.tracks) ? source.tracks.length : 0,
+      hevc: source.hevc === true,
+      url: typeof source.url === 'string' ? safeUrl(new URL(source.url, SITE).href) : 'missing'
+    }));
+    const source = sources.find(value => typeof value.url === 'string' && publicHttps(new URL(value.url, SITE).href));
+    if (source) {
+      const headers = {};
+      for (const [name, value] of Object.entries(source.headers || {}))
+        if (/^(?:origin|referer|user-agent|authorization|cookie)$/i.test(name) && typeof value === 'string') headers[name.toLowerCase()] = value;
+      report.rawSourceProbe = await probeBytes(new URL(source.url, SITE).href, headers);
+      report.rawSourceProbe.headerNames = Object.keys(headers);
+      report.rawSourceProbe.scope = 'first returned URL, at most 4096 body bytes; not decoded playback';
+    }
+    report.errorPresent = !!body.error;
+    return report;
+  } catch (error) { return { ...report, error: ['TimeoutError', 'AbortError', 'SyntaxError'].includes(error.name) ? error.name : 'request-failed' }; }
+  finally { report.elapsedMs = Date.now() - started; }
+}
+let reportNumber = 0;
+function emitReports(reports) {
+  const text = reports.join('\n').slice(0, 24000);
+  for (let offset = 0; offset < text.length; offset += 3000) {
+    const chunk = text.slice(offset, offset + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+    console.log(`::notice title=TG Frost inspection ${++reportNumber}::${chunk}`);
+  }
+}
+async function inspectApi() {
+  const samples = [
+    { name: 'movie-1288069', type: 'movie', id: 1288069 },
+    { name: 'episode-213562-S1E1', type: 'tv', id: 213562, season: 1, episode: 1 },
+    { name: 'movie-253412', type: 'movie', id: 253412 }
+  ];
+  // One request at a time. No retry, proxy or alternate identity on access/rate-limit responses.
+  for (const sample of samples) {
+    const result = await inspectSourceApi('tgflix', sample);
+    emitReports(['FROST_SOURCE_API ' + JSON.stringify(result) + '\n']);
+    if ([401, 403, 429].includes(result.status)) return;
+  }
+  for (const sample of [samples[2], samples[1]]) {
+    const result = await inspectSourceApi('tgout', sample);
+    emitReports(['FROST_SOURCE_API ' + JSON.stringify(result) + '\n']);
+    if ([401, 403, 429].includes(result.status)) return;
+  }
+}
+
 async function main() {
   const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
@@ -264,15 +348,11 @@ async function main() {
       reports.push('FROST_PLAYBACK ' + JSON.stringify(result));
     }
     reports.push('FROST_ASSETS ' + JSON.stringify([...assets.values()].filter(asset => asset.relevant)));
-    const text = reports.join('\n').slice(0, 24000);
-    for (let offset = 0; offset < text.length; offset += 3000) {
-      const chunk = text.slice(offset, offset + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
-      console.log(`::notice title=TG Frost inspection ${offset / 3000 + 1}::${chunk}`);
-    }
+    emitReports(reports);
   } finally { await browser.close(); }
 }
-module.exports = { safeUrl, redactCode, sourceShape, publicHttps };
-if (require.main === module) main().catch(error => {
+module.exports = { safeUrl, redactCode, sourceShape, publicHttps, sourceApiUrl };
+if (require.main === module) (process.argv.includes('--api') ? inspectApi() : main()).catch(error => {
   console.log(`::warning title=TG Frost inspection unavailable::${error.name || 'ProbeError'}; native playback feasibility was not established.`);
   process.exitCode = 1;
 });
