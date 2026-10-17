@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 19; versionName = "4.8.4" }
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 21; versionName = "4.9.2" }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
     lint { abortOnError = false; checkReleaseBuilds = false }
     flavorDimensions += "abi"

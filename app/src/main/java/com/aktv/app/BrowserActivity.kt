@@ -75,10 +75,7 @@ class BrowserActivity : Activity() {
         fun sharedRuntime(c: Context): GeckoRuntime = runtime ?: GeckoRuntime.create(c.applicationContext).also {
             // ad / tracker / miner scripts are what make embedded players stutter, so they are all blocked
             it.settings.contentBlocking.setAntiTracking(
-                ContentBlocking.AntiTracking.AD or ContentBlocking.AntiTracking.ANALYTIC or
-                ContentBlocking.AntiTracking.SOCIAL or ContentBlocking.AntiTracking.CRYPTOMINING)
-            // built-in extension that removes the "TGFlix" label drawn over the video (assets/overlay)
-            try { it.webExtensionController.ensureBuiltIn("resource://android/assets/overlay/", "overlay@aktv.local") } catch (_: Throwable) {}
+                ContentBlocking.AntiTracking.AD or ContentBlocking.AntiTracking.ANALYTIC)
             runtime = it
         }
     }

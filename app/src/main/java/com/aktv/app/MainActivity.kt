@@ -923,6 +923,9 @@ class MainActivity : AppCompatActivity() {
         // everything is asked at the same time (site servers, channel API, bundled playlist): playback starts as soon as they are in, not one after another
         val tgF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.fetch(ch.id, fresh) } catch (_: Exception) { emptyList() } })
         val apiF = io.submit(java.util.concurrent.Callable<String> { get(if (ch.v2) "$BASE_V2/${ch.id}" else "$BASE/${ch.id}", 2, Streams.CHROME) })
+        // backup server (jjtvxweb.pages.dev) streams, played in the native player as extra servers
+        val altF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.scrapeAlt(ch.name) } catch (_: Exception) { emptyList() } })
+        fun altList(): List<TgServers.Server> = try { altF.get(12, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
         io.execute {
             try {
                 val tg = try { tgF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
@@ -942,7 +945,7 @@ class MainActivity : AppCompatActivity() {
                             .forEach { list.add(it); extra.add(null to -1) }
                     } catch (e: Exception) { apiErr = e }
                     if (list.isEmpty()) { try { addTg(TgServers.scrape(ch.id)) } catch (_: Exception) {} }
-                    if (list.isEmpty()) { try { addTg(TgServers.scrapeAlt(ch.name)) } catch (_: Exception) {} }   // last resort: jjtvxweb.pages.dev
+                    addTg(altList())   // backup server streams, natively, after the main servers
                     if (list.isEmpty()) {
                         runOnUiThread { if (token == playToken) fallbackAlt(ch, "no live server") }
                         return@execute
@@ -960,7 +963,7 @@ class MainActivity : AppCompatActivity() {
                             .forEach { urls.add(it); drms.add(drm) }
                     } catch (e: Exception) { apiErr = e }
                     if (urls.isEmpty()) { try { TgServers.scrape(ch.id).forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } } } catch (_: Exception) {} }
-                    if (urls.isEmpty()) { try { TgServers.scrapeAlt(ch.name).forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } } } catch (_: Exception) {} }
+                    altList().forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } }   // backup server streams, natively
                     if (urls.isEmpty()) throw apiErr ?: IOException("no stream source")
                     runOnUiThread {
                         if (token == playToken) { v1Sources = urls; v1Drms = drms; routes = buildRoutes(ch, urls); routeIdx = 0; startV1() }
@@ -989,7 +992,7 @@ class MainActivity : AppCompatActivity() {
             val order = (if (first in 0 until n) listOf(first) else emptyList()) + base.filter { it != first }
             order.forEach { out.add(i to it) }
         }
-        return out.take(16)     // each source with its likely header profiles, 16 tries at most
+        return out.take(24)     // each source (incl. backup server) with its likely header profiles, 24 tries at most
     }
     private fun rememberRoute() {
         val ch = shown.getOrNull(current) ?: return
@@ -1000,7 +1003,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // smoother live playback: a deeper buffer, a calmer live offset and gentle catch-up speed instead of stalls
-    private fun liveCfg() = MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(9000)
+    private fun liveCfg() = MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(12000)
         .setMinOffsetMs(6000).setMaxOffsetMs(40000).setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build()   // speed nudging made HD sports judder
 
     private fun startV1() {
@@ -1078,7 +1081,7 @@ class MainActivity : AppCompatActivity() {
         else {
             Streams.jarFor(0)
             http = DefaultHttpDataSource.Factory().setUserAgent(Streams.CHROME).setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(8000).setReadTimeoutMs(10000)
+                .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
         }
         val dash = type.equals("dash", true) || url.contains(".mpd")
         val item = MediaItem.Builder().setUri(url).setLiveConfiguration(liveCfg())
@@ -1105,7 +1108,7 @@ class MainActivity : AppCompatActivity() {
         stopPreview()
         val rf = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
             .forceEnableMediaCodecAsynchronousQueueing()   // smoother 1080p / 50fps decoding on TV boxes
-        val lc = DefaultLoadControl.Builder().setBufferDurationsMs(15000, 50000, 1000, 2500).setBackBuffer(0, false)
+        val lc = DefaultLoadControl.Builder().setBufferDurationsMs(20000, 50000, 1500, 4000).setBackBuffer(0, false)
             .setTargetBufferBytes(96 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(true).build()
         capH = startCap(); badSeconds = 0
         // steadier quality: switch up only after 30 s of headroom, so adaptive HD streams stop flip-flopping between sizes
@@ -1116,7 +1119,7 @@ class MainActivity : AppCompatActivity() {
                 .setExceedVideoConstraintsIfNecessary(true)                      // ...but if every track is bigger, still play the smallest
                 .setExceedRendererCapabilitiesIfNecessary(true))                 // (false here left audio playing over a black picture)
         }
-        val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(6_000_000L).build()
+        val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(4_000_000L).build()
         val p = ExoPlayer.Builder(this, rf).setLoadControl(lc).setTrackSelector(ts).setBandwidthMeter(bw).build()
         p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         trackSel = ts; p.addAnalyticsListener(dropWatcher)
