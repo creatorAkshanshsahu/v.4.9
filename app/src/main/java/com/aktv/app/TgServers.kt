@@ -338,7 +338,7 @@ object TgServers {
             for (i in 0 until a.length()) { val c = a.optJSONObject(i)?.optString("cookie", "").orEmpty()
                 if (c.contains("__hdnea__=")) { primaryCookie = now to c.trim(); break } }
         } catch (_: Exception) {
-            Regex("__hdnea__=[^\"&\s]+").find(body)?.let { primaryCookie = now to it.value }
+            Regex("__hdnea__=[^\"&\\s]+").find(body)?.let { primaryCookie = now to it.value }
         }
         return primaryCookie.second
     }
