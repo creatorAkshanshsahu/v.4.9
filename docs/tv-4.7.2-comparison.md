@@ -1,12 +1,23 @@
-# TV playback: 4.7.2 comparison and current TG/JJTV trace
+# TV playback: 4.7.2 source, verified 4.7.3 APK, and TG/JJTV routing
 
-Investigated 2026-10-17 for the report that the phone is working again but the generic TV box is not. This does not erase the earlier intermittent same-phone APK failures.
+Investigated 2026-10-17; extended 2026-10-18 after the user reiterated that Star Sports and other JJTV-backed channels worked on the same box in the 4.7 builds, even without a TG “Server 3.” The user now reports JJTV working again on mobile in unchanged 4.9.18, while the box still retries and ends in HTTP 403. This recovery is not credited to 4.9.19, and it does not erase earlier intermittent mobile failures.
 
 ## What was actually recovered
 
 Repository: [creatorAkshanshsahu/v4.7.2](https://github.com/creatorAkshanshsahu/v4.7.2).
 
-The source upload at [`f6487e535accd119226bb6dd830815a030786778`](https://github.com/creatorAkshanshsahu/v4.7.2/tree/f6487e535accd119226bb6dd830815a030786778) declares **4.7.2 / code 14**. Its later README also links to a 4.7.3 APK, but no separately versioned 4.7.3 source was found and that APK was not inspected. Findings below are specifically about **4.7.2**, not an invented 4.7.3 change log.
+The source upload at [`f6487e535accd119226bb6dd830815a030786778`](https://github.com/creatorAkshanshsahu/v4.7.2/tree/f6487e535accd119226bb6dd830815a030786778) declares **4.7.2 / code 14**. Later main-branch commits change README/build workflow, not the app source. Its GitHub Actions rebuilds therefore cannot by themselves establish 4.7.3 behavior.
+
+The README's public **AK-TV-v4.7.3.apk** was subsequently downloaded and statically inspected in [run 39099750437](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39099750437), job `117593402180`. The APK was **not installed or executed**:
+
+- Package: `com.akshansh.aktv`
+- Manifest version: **4.7.3 / code 15**
+- Native ABI: **armeabi-v7a (32-bit)**
+- APK bytes: 89,963,921
+- SHA-256: `dcb3e0ec1de1b459395c628dc26885addc59112c6a34fe9809acf08564d93f58`
+- [Redacted static routing report](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39099750437/artifacts/12126460596)
+
+This verifies the published binary's identity and routing code, **not which engine/profile the user's box actually selected, whether that binary is the precise installed variant, or whether it still plays against today's upstream services**. The old APK was not committed to this repository; inspection output omits arbitrary string/key/array literals.
 
 ## Missing Gecko / permissions hypothesis
 
@@ -19,7 +30,7 @@ The source upload at [`f6487e535accd119226bb6dd830815a030786778`](https://github
 
 A missing Gecko dependency or manifest permission has **not** been established. Native Media3 does not run Gecko's JavaScript player merely because Gecko is packaged. Neither adding the same dependency again nor pretending the box's Android release string proves its framework/codec capabilities is a diagnosis.
 
-## Two meaningful differences
+## Meaningful differences — including the native request path
 
 ### 1. 4.7.2 could silently switch to a browser engine
 
@@ -32,6 +43,10 @@ In the recovered `MainActivity.kt`:
 - Left/Menu could also cycle the native/TG/JJTV engines.
 
 Consequently an old APK that “worked” might have been playing through a remembered web engine. **The user's actual old engine has not been established.** This remains an explanation to check, not proof that a browser solved the box or that a particular native setting was sufficient.
+
+The 4.7.3 DEX independently confirms this was **not an always-web implementation**: `play()` calls `wantsTg()`; `wantsTg()` reads `eng_<channel key>` with default `native` and selects the embed only for `tg`/`alt`. Otherwise `play()` calls `resolveAndStart()`. `startEmbed()` explicitly detaches/releases ExoPlayer before opening the embedded page. Native error handling retains calls to route/source switching and `fallbackToTg()`.
+
+Therefore it would be wrong to say “4.7.3 must have worked only because of Gecko.” Native playback was also possible, with a request stack that has since changed.
 
 The standing instruction to remove the live web/backup player remains in force. This implementation does **not** restore it.
 
@@ -59,6 +74,33 @@ Media3 1.3.1's `DefaultTrackSelector.isSupported` accepts `FORMAT_HANDLED`, or, 
 
 Tests exercise **Media3's actual support predicate** to verify that this fallback still rejects unsupported DRM and absent codec types. This is a code-grounded compatibility correction, **not proof of the cause or of successful playback on this box**.
 
+### 3. The old native HTTP/cookie path was different too
+
+This was an incomplete part of the earlier comparison; restoring the codec-limit flag alone did **not** reproduce the old native network path.
+
+In the recovered 4.7.2 source:
+
+- `TgServers.fetch()` collects supplied stream URLs, cookies and keys from TG's response. It sorts keyed/tokened sources first and does not require a “Server 3” label.
+- The native source search also included the then-bundled playlist and, if no URLs were found, TG/JJTV page scraping. This is separate from displaying a web player.
+- `buildRoutes()` tries and remembers per-channel HTTP profiles (`p_<channel key>`), up to 16 routes. For Jio sources, its initial order was the two Jio-oriented profiles, then the site-token and player profiles.
+- `Streams.factory()` uses **Media3 `DefaultHttpDataSource` / Android HTTP**, not the current OkHttp data source. Some profiles put the supplied URL token in a Cookie header and on segment requests, with different declared User-Agent/Referer/Origin combinations.
+- `jarFor()` configures a Java `CookieManager`/`CookieHandler` for selected profiles. That is a different session/cookie arrangement from the current isolated native transport.
+- Native HTTP refusals, including 403, can advance through those routes; after exhaustion, the code can hand playback to the TG embed.
+
+The **4.7.3 binary** confirms retained calls to `DefaultHttpDataSource.Factory`, `ResolvingDataSource.Factory`, the `StreamProfile` cookie/Referer/User-Agent/token-on-segments getters, and `CookieHandler.setDefault` / `CookieStore.removeAll`. It also confirms native routing and TG-embed fallback calls. The exact previously successful profile on the box remains unknown.
+
+These are concrete **network-path differences relevant to HTTP 403**, not evidence that the box lacks a decoder. They do not establish which difference caused the current failure. Nor should the whole old implementation be copied blindly: its global cookie state, merged key sets and broad query replacement must not undo current per-source/per-channel credential isolation or damage provider relay queries.
+
+## Why a missing “Server 3” did not prevent old playback
+
+The user's observation is consistent with the recovered code:
+
+1. Old native resolution consumed TG-supplied URLs/keys, independent of a server's display number. A TG response could itself supply a usable downstream route.
+2. Alternatively, after native route failure the app could open TG's embed; TG could then hand off to JJTV inside that page without exposing a numbered third native server.
+3. The old app also had a direct JJTV embedded-page option, distinct from the above routes.
+
+Thus **“fetched from TG” describes the entry point, not necessarily the eventual network stack or playback engine**. The absence of Server 3 neither rules out JJTV nor proves which path succeeded. The user's historical success should be taken seriously; the current failure should not be dismissed as a missing codec or attributed to Gecko without runtime evidence.
+
 ## How TG actually plays JJTV
 
 The current TG server-list code in `servers-kHxJvDPi.js` appends JJTV as an **iframe**:
@@ -80,12 +122,12 @@ Every tested media response from this runner ended in **HTTP 451**; no rendered 
 
 See also [the earlier full TG playback trace](tg-playback-trace.md).
 
-## What to check on the box
+## What remains to isolate on the box
 
 1. Use the same channel variant when comparing versions: **1108 is Hindi HD; 362 is Hindi SD**. They have distinct IDs/configuration.
-2. Try 4.9.18 normally first. If Playback Details says the TV policy is off on this generic box, use the TV-mode override in Menu and retry.
+2. For the reported HTTP 403, first identify whether the failure is a JJTV metadata lookup or the media manifest. The 4.9.19 **Copy redacted report** includes that distinction, plus exact build/run ID and process bitness. A decoder/TV-mode change cannot repair an HTTP refusal.
 3. If there is still neither picture nor audio, open **Playback Details**. It distinguishes source HTTP/TLS, manifest/init/media downloads, Android DRM stages, selected tracks, decoder initialization and first-frame/audio events.
-4. **Check DRM** is an optional local synthetic ClearKey test. It stops current playback. A pass does not prove a real channel's keys, segments or decoded video; a failure can help isolate a platform problem.
+4. **Check DRM** is for a later DRM-stage failure, not a remedy for the displayed 403. It stops playback and tests the local synthetic ClearKey path; a pass does not prove a real channel.
 5. Record the actual API/ABI, source and exact error/stage. A marketed “Android 14” label, or the user's understanding that the firmware is based on Android 9, alone cannot establish those runtime values.
 
-The box's precise native failure and whether 4.7.2 previously succeeded through native or web playback remain unverified. The APK should be evaluated on-device rather than described as already fixed.
+The box's exact failing lookup/manifest stage and the previously successful 4.7 native/web route remain unverified. A controlled comparison must keep channel, network, current service availability and APK ABI in view. Do not uninstall/downgrade a working installation just to perform that comparison without preserving its data. This follow-up changes investigation/reporting only; it does not restore the removed web backup or publish a new playback fix.
