@@ -645,7 +645,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun prefetch(url: String) {
-        if (url.isEmpty()) return
+        if (url.isEmpty() || layer.visibility == View.VISIBLE) return
         imageLoader.enqueue(ImageRequest.Builder(this).data(url).build())
     }
     private fun setHero(t: Tile?, immediate: Boolean = false) {
@@ -1346,8 +1346,17 @@ class MainActivity : AppCompatActivity() {
             setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
         }
         val scroll = ScrollView(this).apply { addView(text); isFocusable = true }
-        val holder = FrameLayout(this).apply {
-            addView(scroll, FrameLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.56f).toInt()))
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.45f).toInt()))
+            addView(Button(this@MainActivity).apply {
+                this.text = "Copy redacted report"
+                setOnClickListener {
+                    (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("AK TV playback details", playbackDetailsText()))
+                    Toast.makeText(this@MainActivity, "Report copied — no URLs or keys", Toast.LENGTH_SHORT).show()
+                }
+            }, LinearLayout.LayoutParams(-1, -2))
         }
         val dialog = AlertDialog.Builder(this).setTitle("Native playback details")
             .setView(holder).setNegativeButton("Close", null).setPositiveButton("Retry", null)
@@ -1415,6 +1424,9 @@ class MainActivity : AppCompatActivity() {
         releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
         layer.animate().cancel(); layer.visibility = View.GONE; home.visibility = View.VISIBLE
+        home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
+            if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
+        } }
         if (tab < 2) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
     }
 

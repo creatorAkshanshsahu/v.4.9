@@ -21,8 +21,10 @@ class HomeChromeTest {
             val root = LayoutInflater.from(activity).inflate(R.layout.home_content, null)
             activity.setContentView(root)
             HomeChrome.apply(root, width, height, 1f, movies)
+            root.findViewById<View>(R.id.status).visibility = View.GONE // loaded catalogue, as in updateStatus()
             root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, width, height)
+            println("UI_GEOMETRY ${width}x$height movies=$movies rows=${root.findViewById<View>(R.id.rows).height} hero=${root.findViewById<View>(R.id.heroArea).height} titleLines=${root.findViewById<TextView>(R.id.heroTitle).maxLines}")
             test(root)
         } finally { controller.destroy() }
     }
@@ -48,7 +50,7 @@ class HomeChromeTest {
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
     fun `movie mode leaves room for poster shelves on compact screens`() = screen(800, 360, movies = true) { root ->
-        assertTrue(root.findViewById<View>(R.id.rows).height >= 165)
+        assertTrue("Poster shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 165)
         assertEquals(1, root.findViewById<TextView>(R.id.heroTitle).maxLines)
     }
 }

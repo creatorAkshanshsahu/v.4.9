@@ -53,9 +53,15 @@ jobs:
       - name: Report deterministic tests for both APK variants
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
-      - name: Publish native UI preview images
+      - name: Publish native TV layout preview
         if: always()
-        run: python3 .github/scripts/report-ui-previews.py
+        run: python3 .github/scripts/report-ui-previews.py home-tv
+      - name: Publish native phone layout preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py home-phone
+      - name: Publish native movies layout preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py home-movies
       - name: Check current TG, JJTV and Frost native configuration
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true

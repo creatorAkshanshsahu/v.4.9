@@ -31,8 +31,9 @@ class AkIntroTest {
         val view = AkIntroView(RuntimeEnvironment.getApplication())
         var done = 0; view.onDone = { done++ }
         view.start()
+        val beforeDetach = done // Reduced-motion environments may legitimately finish immediately.
         view.javaClass.getDeclaredMethod("onDetachedFromWindow").apply { isAccessible = true }.invoke(view)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
-        assertEquals(0, done)
+        assertEquals(beforeDetach, done)
     }
 }

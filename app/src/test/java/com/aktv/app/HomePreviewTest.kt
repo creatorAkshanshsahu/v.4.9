@@ -112,7 +112,7 @@ class HomePreviewTest {
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             root.draw(Canvas(bitmap))
             val folder = File(System.getProperty("aktv.ui.previewDir", "build/reports/ui-preview")).apply { mkdirs() }
-            File(folder, "$name.jpg").outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+            File(folder, "$name.webp").outputStream().use { org.junit.Assert.assertTrue(bitmap.compress(Bitmap.CompressFormat.WEBP, 78, it)) }
             bitmap.recycle()
         } finally { controller.destroy() }
     }
