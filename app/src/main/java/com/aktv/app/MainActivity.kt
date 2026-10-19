@@ -109,10 +109,9 @@ class MainActivity : AppCompatActivity() {
     private val decoderRetries = NativeDecoderRetries()
     private val authRecovery = PlaybackAuthRecovery()
     private val recovery = PlaybackRecovery()
-    // A slow box may start decoding just after a signed credential expires; one pre-flight refetch
-    // per provider/session keeps that from being reported as a plain HTTP 403.
-    @Volatile private var preflightRefreshed: LiveProvider? = null
-    @Volatile private var credentialHeadroom = "not measured"
+    // A transient provider refusal is retried once on the provider that actually plays this
+    // channel, instead of spending the remaining tuning budget on a source with broken DRM.
+    private var refusalRetried = false
     private var okLong = false
     private var renderedFrame = false
     private val television get() = NativePlaybackPolicy.isTelevision(this)
@@ -856,8 +855,7 @@ class MainActivity : AppCompatActivity() {
         playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Connecting to ${providerName(provider)}…")
         resolveJob = playbackIo.submit {
             try {
-                val sources = withFreshHeadroom(provider, ch,
-                    TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2))
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                     nativeSources = sources
@@ -875,30 +873,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    /** One bounded pre-flight refetch when a signed credential would expire during a slow TV
-     * startup. The provider's own configuration is re-read; no credential is created or reused
-     * across providers, and the existing 401/403 recovery keeps its own single refresh.
-     */
-    private fun withFreshHeadroom(provider: LiveProvider, ch: Channel, sources: List<TgStream>): List<TgStream> {
-        if (sources.isEmpty() || preflightRefreshed == provider) return sources
-        val tv = television
-        val now = System.currentTimeMillis()
-        val remaining = PlaybackFreshness.remainingSeconds(sources, now)
-        credentialHeadroom = remaining?.let { "$it s remaining at startup (${if (tv) "TV" else "phone"} margin ${PlaybackFreshness.marginMs(tv) / 1000} s)" }
-            ?: "no readable expiry; provider decides"
-        if (providerWindow.expired(SystemClock.elapsedRealtime()) ||
-            !PlaybackFreshness.needsRefresh(sources, now, PlaybackFreshness.marginMs(tv))) return sources
-        preflightRefreshed = provider
-        val refreshed = try { TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2) }
-            catch (_: InterruptedException) { Thread.currentThread().interrupt(); emptyList() }
-            catch (_: Exception) { emptyList() }
-        if (refreshed.isEmpty()) return sources
-        credentialHeadroom = PlaybackFreshness.remainingSeconds(refreshed, System.currentTimeMillis())
-            ?.let { "$it s remaining after one pre-flight refresh (${if (tv) "TV" else "phone"})" }
-            ?: "pre-flight refresh returned no readable expiry (${if (tv) "TV" else "phone"})"
-        return refreshed
     }
 
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.order(
@@ -937,8 +911,7 @@ class MainActivity : AppCompatActivity() {
         playMsg("Automatically trying ${providerName(provider)} native streams…")
         resolveJob = playbackIo.submit {
             var failureReason = reason
-            val extra = try { withFreshHeadroom(provider, ch,
-                TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)) } catch (error: Exception) {
+            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
                 runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error)) }
                 failureReason = "Couldn't load ${providerName(provider)}'s current native stream configuration"
                 emptyList()
@@ -1120,6 +1093,7 @@ class MainActivity : AppCompatActivity() {
                 else -> "The live stream stopped responding (code ${error.errorCode})"
             }
             if (refreshNativeCredentials(code)) return
+            if (retryRefusedProvider(code)) return
             if (code == null && PlaybackProblems.from(error, error.errorCode).family == PlaybackDiagnostics.Family.DECODER &&
                 retryCompatibleDecoder(message)) return
             advanceNative(message)
@@ -1140,7 +1114,7 @@ class MainActivity : AppCompatActivity() {
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
         diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear()
-        preflightRefreshed = null; credentialHeadroom = "not measured"
+        refusalRetried = false
         compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -1186,7 +1160,7 @@ class MainActivity : AppCompatActivity() {
                     PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
                         advanceNative("The live stream stopped responding")
                     null -> if (result.stable) {
-                        recovery.reset(); authRecovery.reset()
+                        recovery.reset(); authRecovery.reset(); refusalRetried = false
                         shown.getOrNull(current)?.let { ch ->
                             prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
@@ -1252,6 +1226,52 @@ class MainActivity : AppCompatActivity() {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
                     diagnostics.metadataFailed(PlaybackProblems.from(error))
                     advanceNative("Could not refresh ${providerName(provider)} credentials")
+                }
+            }
+        }
+        return true
+    }
+
+    /** The TV is refused on some requests and accepted seconds later. Give the provider that
+     * actually plays this channel one delayed, freshly credentialed retry before moving to a
+     * provider whose advertised DRM cannot be opened. Bounded to once per playback session; every
+     * other HTTP result keeps the existing immediate fallback.
+     */
+    private fun retryRefusedProvider(code: Int?): Boolean {
+        if (code != 403 || refusalRetried || !playbackActive) return false
+        val ch = shown.getOrNull(current) ?: return false
+        if (layer.visibility != View.VISIBLE || startupBudget.expired(SystemClock.elapsedRealtime())) return false
+        refusalRetried = true
+        val provider = currentNativeProvider
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · retrying after a refused request…"
+        infoNext.visibility = View.VISIBLE
+        playMsg("${providerName(provider)} refused this request — retrying once in a moment…")
+        resolveJob = playbackIo.submit {
+            try { Thread.sleep(4_000) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return@submit
+            }
+            try {
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2)
+                runOnUiThread {
+                    if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    if (sources.isEmpty()) advanceNative("Could not refresh ${providerName(provider)} after the refused request")
+                    else {
+                        // A new attempt has its own single credential refresh and provider window.
+                        authRecovery.reset()
+                        providerWindow.enter(SystemClock.elapsedRealtime())
+                        nativeSources = sources; serverIdx = 0
+                        startNative()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (token == playToken && playbackActive) {
+                        diagnostics.metadataFailed(PlaybackProblems.from(e))
+                        advanceNative("Could not refresh ${providerName(provider)} after the refused request")
+                    }
                 }
             }
         }
@@ -1367,7 +1387,6 @@ class MainActivity : AppCompatActivity() {
         append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
         append("TV reported codec-limit fallback: $television (unsupported DRM remains rejected)\n")
         shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""}\n") }
-        append("Signed-credential headroom: $credentialHeadroom\n")
         picture?.let { append("\n${it.details()}\n") }
         append("\n${diagnostics.report()}\n\n$drmProbeStatus\n")
         append("\nCheck DRM stops playback and tests only this device's local ClearKey service. It does not test a real channel or prove decoded video.")
