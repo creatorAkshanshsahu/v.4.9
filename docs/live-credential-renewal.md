@@ -35,6 +35,14 @@ Read-only comparison: [run 39208988485](https://github.com/creatorAkshanshsahu/v
 
 The provider must publish or return a legitimate renewed signature. The app cannot generate that signature, extend its expiry, borrow another channel's token, or guarantee playback while every supplied route is unavailable. Caching yesterday's URL or adding a decoder would not solve that condition.
 
+## Later verification: usable credentials appeared again
+
+In [build 39211522336](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39211522336), native check job `117925775253`, a later native lookup returned future-expiring supplied credentials for Sony/Star (roughly 5h39m remaining) and channel 165 (roughly 34m). This is evidence that the supplied authorization data changed; **it is not evidence that the app generated or extended a signature, nor a claim of phone/TV playback success**.
+
+The separate inspection runner at 06:43:33 UTC also saw a different failure mode: cookie lookups returned HTTP 403, or HTTP 200 with **HTML rather than the expected JSON**. Those responses cannot establish that a credential document is empty. Inspection now distinguishes unavailable/invalid metadata from a valid empty document and prefers the valid canonical request sample. Header/status alone is not proof of usable source data.
+
+Both APK variants passed **331 offline tests each** (335 methods, four opt-in cases skipped offline). The two TG/JJTV and two Frost native metadata/transport checks then passed separately in that build. This does not turn runner HTTP checks into physical playback verification.
+
 ## Changes in 4.9.20 / versionCode 37
 
 ### Recognise unusable supplied authorization

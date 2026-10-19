@@ -25,6 +25,7 @@ reports = []
 endpoints = {}
 http_times = {}
 data_bodies = {}
+data_status = {}
 
 
 class Scripts(HTMLParser):
@@ -149,25 +150,49 @@ def token_health(text, clock):
             'minimumSecondsLeft': min(expiries, default=None), 'maximumSecondsLeft': max(expiries, default=None)}
 
 
+def metadata_valid(name, status, text):
+    if status != 200:
+        return False
+    try:
+        clean = text.lstrip('\ufeff').strip()
+        if name == 'CHANNELS_URL' and not clean.startswith('['):
+            clean = '[' + clean + ']'
+        data = json.loads(clean)
+        if name == 'COOKIE_STAR_SPORTS':
+            return isinstance(data, dict) and any(isinstance(data.get(key), list) for key in ('successful_results', 'failed_results'))
+        if name in ('COOKIE_PRIMARY', 'CHANNELS_URL'):
+            return isinstance(data, list)
+        return isinstance(data, dict)
+    except (ValueError, TypeError):
+        return False
+
+
 def inspect_data():
     for name, url in endpoints.items():
         status, kind, text = get(url)
-        if status == 200:
-            data_bodies[name] = text
         browser_status, browser_kind, browser_text = get(url, browser_style=True)
+        canonical_valid = metadata_valid(name, browser_status, browser_text)
+        legacy_valid = metadata_valid(name, status, text)
+        data_status[name] = {'canonicalStatus': browser_status, 'canonicalType': browser_kind,
+                             'schemaAccepted': canonical_valid, 'legacyStatus': status,
+                             'sampleProfile': 'canonical' if canonical_valid else 'legacy' if legacy_valid else 'unavailable'}
+        if canonical_valid:
+            data_bodies[name] = browser_text
+        elif legacy_valid:
+            data_bodies[name] = text
         report = {'endpoint': name, 'url': safe_url(url), 'status': status, 'type': kind, 'bytes': len(text),
                   'canonicalNoReferrer': {'status': browser_status, 'type': browser_kind, 'bytes': len(browser_text)},
                   'httpTime': http_times.get(url, {})}
         if name.startswith('COOKIE_'):
             reference = http_times.get(url, {}).get('serverEpochSeconds', int(time.time()))
-            report['tokenHealth'] = token_health(text, reference)
+            report['tokenHealth'] = token_health(text, reference) if legacy_valid else None
             # Only public metadata endpoints, never append a cache-buster to a signed media URL.
             if not urllib.parse.urlsplit(url).query:
                 fresh_url = url + '?_aktv_probe=' + str(time.time_ns())
                 fresh_status, _, fresh_text = get(fresh_url)
                 fresh_reference = http_times.get(fresh_url, {}).get('serverEpochSeconds', int(time.time()))
-                report['uncachedMetadata'] = {'status': fresh_status, 'bodyChanged': fresh_text != text,
-                    'httpTime': http_times.get(fresh_url, {}), 'tokenHealth': token_health(fresh_text, fresh_reference)}
+                report['uncachedMetadata'] = {'status': fresh_status, 'bodyChanged': (fresh_text != text) if legacy_valid and metadata_valid(name, fresh_status, fresh_text) else None,
+                    'httpTime': http_times.get(fresh_url, {}), 'tokenHealth': token_health(fresh_text, fresh_reference) if metadata_valid(name, fresh_status, fresh_text) else None}
         try:
             clean = text.lstrip('\ufeff').strip()
             if name == 'CHANNELS_URL' and not clean.startswith('['):
@@ -284,8 +309,11 @@ def inspect_availability():
                       for item in entries if str(item.get('channel_id')) == channel]
             selected = pick_token(values, clock) if is_star else primary_token
             original = credential(url)
+            cookie_endpoint = 'COOKIE_STAR_SPORTS' if is_star else 'COOKIE_PRIMARY'
+            lookup_available = cookie_endpoint in data_bodies
             report = {'channel': channel, 'cataloguePresent': True, 'family': 'PL' if is_star else 'general',
-                      'selected': window(selected, clock), 'advertisedUrl': window(original, clock),
+                      'credentialLookup': data_status.get(cookie_endpoint, {'sampleProfile': 'unavailable'}),
+                      'selected': window(selected, clock) if lookup_available else None, 'advertisedUrl': window(original, clock),
                       'sameCredential': bool(selected) and selected == original,
                       'usesGeneralCookie': bool(selected) and selected == primary_token}
             if channel in ('165', '872', '1108'):

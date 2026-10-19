@@ -22,6 +22,13 @@ class AvailabilityTests(unittest.TestCase):
     def test_original_url_token_is_read_without_reusing_another_record(self):
         self.assertEqual('exp=90~hmac=synthetic', module.credential('https://cdn.example/a?__hdnea__=exp=90~hmac=synthetic&other=1'))
         self.assertEqual('', module.credential(None))
+    def test_failed_lookup_or_200_html_is_not_a_successful_empty_credential_document(self):
+        self.assertFalse(module.metadata_valid('COOKIE_PRIMARY', 403, '[]'))
+        self.assertFalse(module.metadata_valid('COOKIE_PRIMARY', 200, '<html>challenge</html>'))
+        self.assertFalse(module.metadata_valid('COOKIE_STAR_SPORTS', 200, '{"error":"denied"}'))
+        self.assertTrue(module.metadata_valid('COOKIE_PRIMARY', 200, '[]'))
+        self.assertTrue(module.metadata_valid('COOKIE_STAR_SPORTS', 200, '{"failed_results":[]}'))
+
     def test_native_comparison_can_expose_the_current_future_start_selection_gap(self):
         values = ['st=1~exp=100~hmac=current', 'st=70~exp=200~hmac=future']
         self.assertEqual(values[1], module.pick_token(values, 50))
