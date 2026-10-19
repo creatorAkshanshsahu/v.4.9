@@ -55,7 +55,8 @@ class HomePreviewTest {
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF153239.toInt(), 0xFF14253D.toInt(), 0xFF0D1724.toInt()))
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
-            listOf(if (movies) "▶   Explore titles" else "▶   Watch live", "+   My favorites").forEachIndexed { index, label ->
+            val heroActions = if (movies) listOf("▶   Explore title") else listOf("▶   Watch live", "+   My favorites")
+            heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
                     text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)
                     setPadding(16, if (compact) 7 else 10, 18, if (compact) 7 else 10)
