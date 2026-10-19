@@ -36,7 +36,7 @@ Those are code-level weaknesses, not proof of the box's precise bottleneck. A si
 ## Stable picture behavior
 
 - **Star Sports 1 Hindi HD, exact V1 ID 1108, defaults to Stable picture on a detected TV.** It is never silently replaced with Hindi SD/another channel ID.
-- Stable mode uses a real renderer-supported representation. It respects the existing selected codec instead of switching a working AVC track to HEVC merely because its bitrate is smaller.
+- Stable mode lets normal bandwidth selection start the picture, then holds that size or a cheaper real representation rather than forcing an initial quality increase. It uses a renderer-supported representation. It respects the existing selected codec instead of switching a working AVC track to HEVC merely because its bitrate is smaller.
 - Sustained dropped-frame pressure causes a measured downward step, then a cooldown. Startup/paused/buffering periods are not automatically labelled decoder overload.
 - An exact Media3 track override holds the selected rendition, preventing an automatic upward bounce while that track remains available.
 - Long buffering in Stable mode can step down too; a quality lock should not trap playback at a bitrate the connection cannot sustain.

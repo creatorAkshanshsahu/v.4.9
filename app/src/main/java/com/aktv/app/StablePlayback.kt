@@ -29,6 +29,11 @@ internal object StableRenditions {
         return sameSize.minWithOrNull(compareBy<VideoRendition> { if (it.fps > 0) it.fps else 30f }
             .thenBy { if (it.bitrate > 0) it.bitrate else Int.MAX_VALUE }.thenBy { it.pixelRate })
     }
+    /** Let normal bandwidth selection start playback, then hold that size or a cheaper option. */
+    fun started(current: VideoRendition?, tracks: List<VideoRendition>, ceiling: Int): VideoRendition? {
+        if (current == null) return null
+        return initial(tracks.filter { it.mime == current.mime }.ifEmpty { tracks }, minOf(ceiling, current.height))
+    }
     fun lower(current: VideoRendition, tracks: List<VideoRendition>): VideoRendition? {
         val cheaper = tracks.filter { it.key != current.key &&
             !(it.width == current.width && it.height == current.height && it.mime == current.mime && it.bitrate == current.bitrate &&
@@ -134,7 +139,7 @@ internal class NativePictureController(
         val available = tracks()
         val selectedGroup = available.filter { it.group.isTrackSelected(it.index) }.ifEmpty { available }
         val choice = lock?.let { StableRenditions.keep(it, available.map { item -> item.rendition }) }
-            ?: StableRenditions.initial(selectedGroup.map { it.rendition }, ceiling) ?: return
+            ?: StableRenditions.started(owner.videoFormat?.let(::rendition), selectedGroup.map { it.rendition }, ceiling) ?: return
         val target = available.firstOrNull { it.rendition == choice } ?: return
         val prior = lock
         if (prior != null && choice.pixelRate > prior.pixelRate * 1.1)
@@ -146,7 +151,7 @@ internal class NativePictureController(
             .setOverrideForType(TrackSelectionOverride(target.group.mediaTrackGroup, listOf(target.index))))
     }
     override fun onTracksChanged(tracks: Tracks) { if (isCurrent()) applyLock() }
-    override fun onRenderedFirstFrame() { if (isCurrent()) hadFrame = true }
+    override fun onRenderedFirstFrame() { if (isCurrent()) { hadFrame = true; applyLock() } }
     fun checkBuffering(now: Long) {
         if (!isCurrent() || !fixed || !hadFrame || !owner.playWhenReady || bufferedAt == 0L ||
             now - bufferedAt < 5000 || now < nextBufferStep) return

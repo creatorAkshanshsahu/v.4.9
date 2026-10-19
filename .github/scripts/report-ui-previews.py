@@ -11,9 +11,9 @@ if not path.exists():
     print(f'::warning title=Native UI preview::{name} was not produced; no visual assertion is made.')
 else:
     encoded=base64.b64encode(path.read_bytes()).decode('ascii')
-    if len(encoded)>30000:
+    if len(encoded)>38000:
         print(f'::warning title=Native UI preview::{name} exceeds the bounded preview transport size ({len(encoded)} chars).')
     else:
-        count=(len(encoded)+2999)//3000
+        count=(len(encoded)+3799)//3800
         for index in range(count):
-            print(f'::notice title=Native UI preview {name} {index+1} of {count}::{encoded[index*3000:(index+1)*3000]}')
+            print(f'::notice title=Native UI preview {name} {index+1} of {count}::{encoded[index*3800:(index+1)*3800]}')

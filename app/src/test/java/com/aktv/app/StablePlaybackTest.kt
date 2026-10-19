@@ -81,4 +81,10 @@ class StablePlaybackTest {
         assertEquals(avc.copy(key = "new-avc"), StableRenditions.keep(avc, listOf(hevc, avc.copy(key = "new-avc"))))
     }
 
+    @Test fun `stable startup does not push a bandwidth-selected low rendition back up before playback`() {
+        val low = track("360", 360)
+        assertEquals(low, StableRenditions.started(low, listOf(track("720", 720), low), 720))
+        assertNull(StableRenditions.started(null, listOf(track("720", 720), low), 720))
+    }
+
 }
