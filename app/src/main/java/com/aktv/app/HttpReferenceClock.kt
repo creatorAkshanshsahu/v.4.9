@@ -13,12 +13,10 @@ internal class HttpReferenceClock(
 ) {
     private var reference: Long? = null
     private var observedAt = 0L
-    @Synchronized fun observe(serverTimeMs: Long?) {
+    fun observe(serverTimeMs: Long?) {
         if (serverTimeMs != null) { reference = serverTimeMs; observedAt = elapsed() }
     }
-    @Synchronized fun now(): Long = reference?.let { it + (elapsed() - observedAt).coerceAtLeast(0) } ?: wall()
-
-    @Synchronized fun hasReference() = reference != null
+    fun now(): Long = reference?.let { it + (elapsed() - observedAt).coerceAtLeast(0) } ?: wall()
 
     companion object {
         fun parse(date: String?, age: String? = null): Long? {

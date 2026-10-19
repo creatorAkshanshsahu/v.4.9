@@ -173,7 +173,7 @@ class MoviePlayerActivity : Activity() {
         isFocusable = true; isClickable = true; setPadding(px(16), px(11), px(16), px(11))
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) }
         fun style(focused: Boolean) {
-            background = GradientDrawable().apply { cornerRadius = px(8).toFloat(); setColor(if (focused) Color.WHITE else 0x66333333) }
+            background = GradientDrawable().apply { cornerRadius = px(8).toFloat(); setColor(if (focused) Accent.SIGNAL else 0xCC162532.toInt()) }
             setTextColor(if (focused) Color.BLACK else Color.WHITE)
         }
         style(false); setOnFocusChangeListener { _, focused -> style(focused) }; setOnClickListener { click() }

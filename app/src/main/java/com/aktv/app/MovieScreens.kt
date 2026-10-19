@@ -84,15 +84,20 @@ class DetailActivity : Activity() {
                 intArrayOf(Color.argb(255, 5, 6, 13), Color.argb(0, 5, 6, 13)))
         }, FrameLayout.LayoutParams(-1, (300 * dp).toInt(), Gravity.BOTTOM))
 
-        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding((64 * dp).toInt(), (56 * dp).toInt(), (64 * dp).toInt(), (28 * dp).toInt()) }
+        val compact = resources.configuration.screenHeightDp < 420
+        val inset = (if (compact) 28 else 48) * dp
+        val textWidth = (resources.displayMetrics.widthPixels * if (compact) 0.73f else 0.62f).toInt()
+        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(inset.toInt(), ((if (compact) 72 else 94) * dp).toInt(), inset.toInt(), (32 * dp).toInt()) }
+        body.addView(tv(10f, Accent.SIGNAL, fSemi).apply { text = if (title.isSeries) "SERIES  /  ON DEMAND" else "MOVIES  /  ON DEMAND"; letterSpacing = 0.12f },
+            LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (12 * dp).toInt() })
         logo = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_START; adjustViewBounds = true; visibility = View.GONE }
-        body.addView(logo, LinearLayout.LayoutParams((420 * dp).toInt(), (120 * dp).toInt()))
-        nameTv = tv(42f, Accent.TEXT, fBold).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
-        body.addView(nameTv, LinearLayout.LayoutParams((620 * dp).toInt(), -2))
-        facts = tv(15f, Accent.DIM, fSemi)
+        body.addView(logo, LinearLayout.LayoutParams(minOf(textWidth, (420 * dp).toInt()), ((if (compact) 74 else 110) * dp).toInt()))
+        nameTv = tv(if (compact) 30f else 42f, Accent.TEXT, fBold).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
+        body.addView(nameTv, LinearLayout.LayoutParams(textWidth, -2))
+        facts = tv(if (compact) 12f else 14f, Accent.DIM, fSemi)
         body.addView(facts, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (14 * dp).toInt() })
-        desc = tv(15f, Accent.DIM, fReg).apply { maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.25f) }
-        body.addView(desc, LinearLayout.LayoutParams((620 * dp).toInt(), -2).apply { topMargin = (12 * dp).toInt() })
+        desc = tv(if (compact) 12f else 14f, Accent.DIM, fReg).apply { maxLines = if (compact) 3 else 4; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.25f) }
+        body.addView(desc, LinearLayout.LayoutParams(textWidth, -2).apply { topMargin = (12 * dp).toInt() })
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         playBtn = button("▶  Play", primary = true) { playCurrent() }
@@ -112,7 +117,17 @@ class DetailActivity : Activity() {
             setItemViewCacheSize(12)
         }
         body.addView(epList, LinearLayout.LayoutParams(-1, -2))
-        root.addView(body, FrameLayout.LayoutParams(-1, -1))
+        val contentScroll = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false; addView(body) }
+        root.addView(contentScroll, FrameLayout.LayoutParams(-1, -1))
+        val toolbar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(inset.toInt(), (8 * dp).toInt(), inset.toInt(), (8 * dp).toInt())
+            setBackgroundColor(0xE6080D14.toInt())
+        }
+        toolbar.addView(button("‹  Back", false) { finish() })
+        toolbar.addView(ImageView(this).apply { setImageResource(R.drawable.ic_mark); scaleType = ImageView.ScaleType.FIT_CENTER },
+            LinearLayout.LayoutParams((42 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (20 * dp).toInt() })
+        toolbar.addView(tv(12f, Accent.TEXT, fSemi).apply { text = "  AK TV"; letterSpacing = 0.08f })
+        root.addView(toolbar, FrameLayout.LayoutParams(-1, (60 * dp).toInt(), Gravity.TOP))
         setContentView(root)
 
         body.alpha = 0f; body.translationX = -30 * dp
@@ -126,9 +141,9 @@ class DetailActivity : Activity() {
         val bg = GradientDrawable().apply { cornerRadius = 12 * dp }
         background = bg
         val style = { f: Boolean ->
-            bg.setColor(if (f) Color.WHITE else if (primary) Accent.SIGNAL else Color.argb(30, 255, 255, 255))
+            bg.setColor(if (f) Color.WHITE else if (primary) Accent.SIGNAL else 0xFF1A2936.toInt())
             setTextColor(if (f || primary) Accent.ABYSS else Accent.TEXT)
-            animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
+            animate().scaleX(if (f) 1.03f else 1f).scaleY(if (f) 1.03f else 1f).setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
         }
         style(false)
         setOnFocusChangeListener { _, f -> style(f) }

@@ -7,21 +7,16 @@ internal class PlaybackDiagnostics {
     enum class Drm { NONE, CLEARKEY, WIDEVINE }
     enum class DrmStep { NOT_REQUESTED, CREATING, CREATED, SESSION_OPEN, KEY_REQUEST, KEY_RESPONSE, KEYS_LOADED }
     enum class Load { MANIFEST, INITIALIZATION, MEDIA, OTHER }
-    enum class Family { HTTP, TLS, NETWORK, CREDENTIALS, DRM, DECODER, FORMAT, PLAYER }
+    enum class Family { HTTP, TLS, NETWORK, DRM, DECODER, PLAYER }
     data class Problem(val family: Family, val code: Int? = null, val http: Int? = null,
-                       val detail: String = "", val cryptoCode: Int? = null,
-                       val reply: HttpReply? = null, val lookupStage: JjtvLookupStage? = null,
-                       val credentialIssue: CredentialIssue? = null) {
+                       val detail: String = "", val cryptoCode: Int? = null) {
         fun describe(): String = buildString {
-            lookupStage?.let { append("JJTV ${it.label}: ") }
             append(family.name)
-            credentialIssue?.let { append(if (it == CredentialIssue.EXPIRED) " supplied by provider have expired" else " supplied by provider are not valid yet") }
             http?.let { append(" $it") }
             code?.let { append(" / Media3 $it") }
             cryptoCode?.let { append(" / native $it") }
             // Only class names / platform diagnostic codes, never Throwable.message.
             if (detail.matches(Regex("[A-Za-z0-9_.$: >-]{1,180}"))) append(" / $detail")
-            reply?.let { append(" [${it.describe()}]") }
         }
     }
 
@@ -66,7 +61,6 @@ internal class PlaybackDiagnostics {
         private var manifest = 0; private var initialization = 0; private var segments = 0
         private var loadedBytes = 0L
         private var clockSkewSeconds: Long? = null
-        private var manifestReply: HttpReply? = null
         private var surface = false
         private var firstFrame = false; private var audioAdvancing = false
         private var state = "IDLE"
@@ -88,7 +82,6 @@ internal class PlaybackDiagnostics {
             lastLoadProblem = null
             if (type == Load.MANIFEST && skewSeconds != null) clockSkewSeconds = skewSeconds
         }
-        @Synchronized fun httpResponse(reply: HttpReply) { manifestReply = reply }
         @Synchronized fun surfaceReady() { surface = true }
         @Synchronized fun frameRendered() { firstFrame = true }
         @Synchronized fun audioStarted() { audioAdvancing = true }
@@ -141,7 +134,6 @@ internal class PlaybackDiagnostics {
             append("State: $state${if (timedOut) " / deadline reached" else ""}\n")
             append("Loads complete: manifest $manifest, init $initialization, media $segments; $loadedBytes bytes\n")
             clockSkewSeconds?.let { append("Device clock minus HTTP Date: ${it}s (cached Date may differ)\n") }
-            manifestReply?.let { append("Initial manifest response: ${it.describe()}\n") }
             append("DRM support: ${drmSupported?.toString() ?: "not queried"}; stage: ${step.name}\n")
             drmProblem?.let { append("DRM event (not necessarily terminal): ${it.describe()}\n") }
             append("Selected tracks: video $selectedVideo, audio $selectedAudio; unsupported DRM $unsupportedDrm, codec $unsupportedCodec; above reported limits $exceedsCapabilities\n")

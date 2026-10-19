@@ -1,0 +1,92 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
+    <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="230dp"
+        android:layout_gravity="top" android:layout_marginStart="128dp" android:layout_marginEnd="28dp" android:layout_marginTop="84dp">
+        <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent">
+            <ImageView android:id="@+id/heroLogo" android:layout_width="144dp" android:layout_height="144dp"
+                android:layout_gravity="center_vertical|end" android:layout_marginEnd="76dp" android:scaleType="fitCenter"/>
+            <TextView android:id="@+id/heroMono" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical|end" android:layout_marginEnd="84dp" android:textColor="#FFFFFF"
+                android:textSize="68sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false" android:visibility="gone"/>
+        </FrameLayout>
+        <ImageView android:id="@+id/heroBackdrop" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:scaleType="centerCrop" android:alpha="0"/>
+        <FrameLayout android:id="@+id/heroPreview" android:layout_width="match_parent" android:layout_height="match_parent" android:alpha="0">
+            <androidx.media3.ui.PlayerView android:id="@+id/heroPreviewPv" android:layout_width="match_parent"
+                android:layout_height="match_parent" android:focusable="false" app:use_controller="false"
+                app:resize_mode="zoom" app:surface_type="texture_view" app:use_artwork="false"
+                app:shutter_background_color="@android:color/transparent"/>
+        </FrameLayout>
+        <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_left"/>
+        <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_bottom"/>
+    </FrameLayout>
+    <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_marginStart="100dp" android:orientation="vertical">
+        <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="84dp"
+            android:paddingStart="28dp" android:paddingEnd="30dp" android:orientation="horizontal" android:gravity="center_vertical">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                <TextView android:id="@+id/sectionKicker" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:text="YOUR FRONT ROW" android:textSize="9sp" android:letterSpacing="0.18" android:textColor="@color/signal" android:fontFamily="@font/sora_semibold"/>
+                <TextView android:id="@+id/sectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp" android:text="Live TV" android:textSize="27sp" android:textColor="@color/text" android:fontFamily="@font/sora_semibold"/>
+            </LinearLayout>
+            <TextView android:id="@+id/librarySummary" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginEnd="22dp" android:text="LIVE + ON DEMAND" android:textColor="@color/text_faint"
+                android:textSize="10sp" android:fontFamily="@font/sora_semibold" android:letterSpacing="0.05"/>
+            <TextClock android:id="@+id/homeClock" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:format12Hour="h:mm a" android:format24Hour="HH:mm" android:maxLines="1" android:textColor="@color/text_dim"
+                android:textSize="13sp" android:fontFamily="@font/sora_regular"/>
+        </LinearLayout>
+        <FrameLayout android:id="@+id/heroArea" android:layout_width="match_parent" android:layout_height="230dp">
+            <LinearLayout android:id="@+id/heroText" android:layout_width="400dp" android:layout_height="wrap_content"
+                android:layout_marginStart="52dp" android:layout_marginBottom="24dp" android:layout_gravity="start|bottom" android:orientation="vertical">
+                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+                    <TextView android:id="@+id/heroDot" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="●  LIVE" android:textColor="@color/signal" android:textSize="10sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.09"/>
+                    <TextView android:id="@+id/heroBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp" android:textColor="@color/text_dim" android:textSize="10sp" android:fontFamily="@font/sora_regular"/>
+                </LinearLayout>
+                <TextView android:id="@+id/heroTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp" android:maxLines="2" android:ellipsize="end" android:textColor="@color/text"
+                    android:textSize="32sp" android:fontFamily="@font/sora_bold" android:lineSpacingMultiplier="1.03" android:includeFontPadding="false"/>
+                <TextView android:id="@+id/heroProg" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text" android:textSize="12sp" android:visibility="gone"/>
+                <ProgressBar android:id="@+id/heroProgress" style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="210dp" android:layout_height="2dp" android:max="1000" android:layout_marginTop="7dp" android:visibility="gone"/>
+                <TextView android:id="@+id/heroDesc" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:maxLines="2" android:ellipsize="end" android:textColor="@color/text_dim" android:textSize="12sp"/>
+                <TextView android:id="@+id/heroNext" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text_faint" android:textSize="10sp" android:visibility="gone"/>
+                <LinearLayout android:id="@+id/heroChips" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp" android:orientation="horizontal"/>
+            </LinearLayout>
+        </FrameLayout>
+        <TextView android:id="@+id/status" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="28dp" android:textColor="@color/text_dim" android:textSize="12sp"/>
+        <androidx.recyclerview.widget.RecyclerView android:id="@+id/rows" android:layout_width="match_parent" android:layout_height="0dp"
+            android:layout_weight="1" android:paddingTop="16dp" android:paddingBottom="30dp" android:clipToPadding="false" android:clipChildren="false"
+            android:overScrollMode="never" android:requiresFadingEdge="none" android:fadeScrollbars="false"/>
+    </LinearLayout>
+    <LinearLayout android:id="@+id/navRail" android:layout_width="100dp" android:layout_height="match_parent"
+        android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
+        android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
+        <ImageView android:id="@+id/brandMark" android:layout_width="56dp" android:layout_height="34dp" android:src="@drawable/ic_mark"
+            android:scaleType="fitCenter" android:contentDescription="AK TV"/>
+        <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
+            android:layout_marginTop="4dp" android:layout_marginBottom="22dp" android:textSize="11sp" android:letterSpacing="0.11"
+            android:textColor="@color/text" android:fontFamily="@font/sora_bold"/>
+        <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live TV" android:drawableTop="@drawable/ic_nav_live"
+            android:nextFocusDown="@id/segV2" android:nextFocusRight="@id/rows"/>
+        <TextView android:id="@+id/segV2" style="@style/Widget.AKTV.RailItem" android:text="24/7" android:drawableTop="@drawable/ic_nav_v2"
+            android:nextFocusUp="@id/segLive" android:nextFocusDown="@id/segSites" android:nextFocusRight="@id/rows"/>
+        <TextView android:id="@+id/segSites" style="@style/Widget.AKTV.RailItem" android:text="Movies" android:drawableTop="@drawable/ic_nav_movies"
+            android:nextFocusUp="@id/segV2" android:nextFocusDown="@id/segSeries" android:nextFocusRight="@id/rows"/>
+        <TextView android:id="@+id/segSeries" style="@style/Widget.AKTV.RailItem" android:text="Series" android:drawableTop="@drawable/ic_nav_series"
+            android:nextFocusUp="@id/segSites" android:nextFocusDown="@id/searchBtn" android:nextFocusRight="@id/rows"/>
+        <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
+            android:nextFocusUp="@id/segSeries" android:nextFocusRight="@id/rows"/>
+        <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.21"
+            android:layout_marginTop="10dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
+    </LinearLayout>
+</FrameLayout>

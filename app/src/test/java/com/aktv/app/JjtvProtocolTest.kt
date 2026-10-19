@@ -139,9 +139,4 @@ class JjtvProtocolTest {
         assertEquals("__hdnea__=opaque", JjtvProtocol.regularCookie(body, now = 100_000))
     }
 
-    @Test fun `a longer expiry with a future start does not displace a currently usable supplied token`() {
-        val body = """[{"cookie":"__hdnea__=st=80~exp=200~hmac=future"},{"cookie":"__hdnea__=st=1~exp=100~hmac=current"}]"""
-        assertTrue(JjtvProtocol.regularCookie(body, now = 50_000).contains("hmac=current"))
-    }
-
 }

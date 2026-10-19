@@ -7,6 +7,6 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 object Streams {
     const val CHROME = TgHttp.USER_AGENT
 
-    internal fun factory(stream: TgStream, trace: PlaybackDiagnostics.Attempt? = null): DataSource.Factory =
-        OkHttpDataSource.Factory(StreamHttp.client(stream) { trace?.httpResponse(it) }).setUserAgent(CHROME)
+    fun factory(stream: TgStream): DataSource.Factory =
+        OkHttpDataSource.Factory(StreamHttp.client(stream)).setUserAgent(CHROME)
 }

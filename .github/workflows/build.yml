@@ -44,6 +44,8 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.9 }
+      - name: Verify the working playback contracts during UI rebuild
+        run: python3 .github/scripts/check-playback-baseline.py
       - name: Test stream resolution and build both APKs
         run: |
           set -o pipefail
@@ -51,6 +53,9 @@ jobs:
       - name: Report deterministic tests for both APK variants
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
+      - name: Publish native UI preview images
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py
       - name: Check current TG, JJTV and Frost native configuration
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true

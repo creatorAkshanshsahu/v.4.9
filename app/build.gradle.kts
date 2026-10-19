@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 37; versionName = "4.9.20"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 38; versionName = "4.9.21"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
     }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
@@ -10,6 +10,7 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {
+            it.systemProperty("aktv.ui.previewDir", project.layout.buildDirectory.dir("reports/ui-preview").get().asFile.absolutePath)
             it.systemProperty("aktv.live.tg", project.findProperty("liveTg")?.toString() ?: "false")
             it.systemProperty("aktv.live.frost", project.findProperty("liveFrost")?.toString() ?: "false")
         }

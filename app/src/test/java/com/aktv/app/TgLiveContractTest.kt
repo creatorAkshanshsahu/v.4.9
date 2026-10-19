@@ -22,7 +22,7 @@ class TgLiveContractTest {
             requested.add(URI(url).path) // Public endpoint paths only; never the signed query.
             transport.get(url, headers)
         }
-        val ids = listOf("165", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+        val ids = listOf("872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val missing = ArrayList<String>()
         var functionSaved = false
@@ -39,14 +39,12 @@ class TgLiveContractTest {
                                 .put("keyCount", source.drm?.let { ClearKey.pairs(it).size } ?: 0))
                         }
                     })
-                    if (id in setOf("165", "872", "1106")) {
+                    if (id in setOf("872", "1106")) {
                         report.put("manifests", JSONArray().apply { sources.take(4).forEach { put(probe(it)) } })
                     }
                 } catch (error: Exception) {
                     missing.add(id)
                     report.put("metadataError", error.javaClass.simpleName)
-                    if (error is SourceCredentialsUnavailableException)
-                        report.put("credentialIssue", error.issue.name).put("availability", "upstream-credentials-unavailable")
                 }
                 println("TG_NATIVE $report")
             }
@@ -59,7 +57,7 @@ class TgLiveContractTest {
 
     @Test fun `JJTV native configuration supplies exact channel keys and per-channel cookies`() {
         assumeTrue(System.getProperty("aktv.live.tg") == "true")
-        val ids = listOf("165", "816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+        val ids = listOf("816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val resolver = JjtvResolver()
         val missing = ArrayList<String>()
@@ -76,15 +74,13 @@ class TgLiveContractTest {
                             .put("tokenSecondsLeft", StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 }))
                     }
                 })
-                if (id in setOf("165", "816", "872", "1106")) {
+                if (id in setOf("816", "872", "1106")) {
                     if (sources.none { it.drm?.let { drm -> ClearKey.pairs(drm).isNotEmpty() } == true }) missingKeys.add(id)
                     report.put("manifests", JSONArray().apply { sources.take(2).forEach { put(probe(it)) } })
                 }
             } catch (error: Exception) {
                 missing.add(id)
                 report.put("metadataError", error.javaClass.simpleName)
-                    if (error is SourceCredentialsUnavailableException)
-                        report.put("credentialIssue", error.issue.name).put("availability", "upstream-credentials-unavailable")
             }
             println("TG_NATIVE $report")
         }

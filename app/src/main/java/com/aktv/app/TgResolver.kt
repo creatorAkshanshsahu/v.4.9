@@ -12,34 +12,18 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null, val reply: HttpReply? = null)
-internal fun interface TgTransport {
-    fun get(url: String, headers: Map<String, String>): TgResponse
-    fun get(request: MetadataFetch): TgResponse = get(request.url, request.headers)
-}
+internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null)
+internal fun interface TgTransport { fun get(url: String, headers: Map<String, String>): TgResponse }
 
 internal class TgHttp : TgTransport {
-    override fun get(url: String, headers: Map<String, String>): TgResponse = execute(url, headers)
-    override fun get(request: MetadataFetch): TgResponse = execute(request.url, request.headers, request)
-
-    private fun execute(url: String, headers: Map<String, String>, fetch: MetadataFetch? = null): TgResponse {
+    override fun get(url: String, headers: Map<String, String>): TgResponse {
         checkInterrupted()
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT)
         headers.forEach { (key, value) -> request.header(key, value) }
         // OkHttp sends Origin/Sec-Fetch-* unchanged; some URLConnection implementations silently drop them.
-        val transport = if (fetch == null) client else {
-            val origin = FetchOrigin(fetch.documentOrigin, url, fetch.cors)
-            client.newBuilder().followSslRedirects(false).addNetworkInterceptor { chain ->
-                val original = chain.request()
-                val builder = original.newBuilder().removeHeader("Referer").removeHeader("Origin")
-                origin.visit(original.url.toString())?.let { builder.header("Origin", it) }
-                chain.proceed(builder.build())
-            }.build()
-        }
-        transport.newCall(request.build()).execute().use { response ->
-            val reply = HttpReply.inspect(response)
+        client.newCall(request.build()).execute().use { response ->
             val serverTime = HttpReferenceClock.parse(response.header("Date"), response.header("Age"))
-            if (!response.isSuccessful) return TgResponse(response.code, ByteArray(0), response.header("Content-Type").orEmpty(), serverTime, reply)
+            if (!response.isSuccessful) return TgResponse(response.code, ByteArray(0), serverTimeMs = serverTime)
             val body = response.body?.byteStream()?.use { input ->
                 val output = java.io.ByteArrayOutputStream()
                 val buffer = ByteArray(8192)
@@ -52,7 +36,7 @@ internal class TgHttp : TgTransport {
                 }
                 output.toByteArray()
             } ?: ByteArray(0)
-            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime, reply)
+            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime)
         }
     }
 
@@ -65,7 +49,7 @@ internal class TgHttp : TgTransport {
 
 internal fun checkInterrupted() { if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Cancelled") }
 
-internal class TgResolveException(val status: Int? = null, val reply: HttpReply? = null) : IOException(when (status) {
+class TgResolveException(val status: Int? = null) : IOException(when (status) {
     401, 403 -> "TG TV refused the player request"
     404 -> "TG TV has no live source for this channel right now"
     451 -> "The stream is not available in this region"
@@ -87,7 +71,6 @@ internal class TgResolver(
 ) : AutoCloseable {
     companion object { const val SITE = "https://livetgtv.lovable.app" }
     private data class Cached(val until: Long, val streams: List<TgStream>)
-    private val tokenClock = HttpReferenceClock(now)
     private val cache = ConcurrentHashMap<String, Cached>()
     private val network = Executors.newFixedThreadPool(4) { r -> Thread(r, "tg-metadata").apply { isDaemon = true } }
     private val discoveryLock = Any()
@@ -103,10 +86,7 @@ internal class TgResolver(
         checkInterrupted()
         val cacheKey = key(id, v2)
         if (fresh) cache.remove(cacheKey)
-        else cache[cacheKey]?.takeIf { it.until > now() }?.let { cached ->
-            try { return CredentialFreshness.usable(LiveProvider.TG, cached.streams, tokenClock) }
-            catch (_: SourceCredentialsUnavailableException) { cache.remove(cacheKey) }
-        }
+        else cache[cacheKey]?.takeIf { it.until > now() }?.let { return it.streams }
 
         val streams = if (v2) publicStreams(id, true, fresh) else {
             if (fresh) {
@@ -128,20 +108,15 @@ internal class TgResolver(
         }
         checkInterrupted()
         if (streams.isEmpty()) throw TgResolveException()
-        val usable = CredentialFreshness.usable(LiveProvider.TG, streams, tokenClock)
         // Signed media and DRM stay in memory for at most 30s, less if a token is about to expire.
-        val expiry = usable.mapNotNull { StreamRequestPolicy.expiry(it.url, it.cookie) }.minOrNull()
+        val expiry = streams.mapNotNull { StreamRequestPolicy.expiry(it.url, it.cookie) }.minOrNull()
         val until = minOf(now() + 30_000L, expiry?.minus(10_000L) ?: Long.MAX_VALUE)
         if (until > now()) {
             if (cache.size >= 128) cache.entries.removeAll { it.value.until <= now() }
             if (cache.size >= 128) cache.clear()
-            cache[cacheKey] = Cached(until, usable)
+            cache[cacheKey] = Cached(until, streams)
         }
-        return usable
-    }
-
-    private fun receive(url: String, headers: Map<String, String>): TgResponse = http.get(url, headers).also {
-        tokenClock.observe(it.serverTimeMs)
+        return streams
     }
 
     private fun headers(id: String, fresh: Boolean = false) = linkedMapOf(
@@ -154,8 +129,8 @@ internal class TgResolver(
         val path = if (v2) "v2/" else ""
         val url = "$site/api/public/${path}channels/$id" + if (fresh) "?_aktv=${now()}" else ""
         val requestHeaders = headers(id, fresh).apply { put("Referer", "$site/${path}watch/$id") }
-        val response = receive(url, requestHeaders)
-        if (response.code !in 200..299) throw TgResolveException(response.code, response.reply)
+        val response = http.get(url, requestHeaders)
+        if (response.code !in 200..299) throw TgResolveException(response.code)
         return TgProtocol.streams(response.body, response.contentType, "$site/${path}watch/$id", if (v2) "hls" else "dash", expectedId = id)
     }
 
@@ -167,7 +142,7 @@ internal class TgResolver(
 
     private fun call(function: String, id: String, fresh: Boolean): List<TgStream> = optional {
         val url = "$site/_serverFn/$function?payload=${payload(id)}" + if (fresh) "&_aktv=${now()}" else ""
-        val response = receive(url, headers(id, fresh).apply { put("x-tsr-serverfn", "true") })
+        val response = http.get(url, headers(id, fresh).apply { put("x-tsr-serverfn", "true") })
         if (response.code !in 200..299) emptyList() else TgProtocol.streams(response.body, response.contentType, "$site/watch/$id", expectedId = id)
     }.orEmpty()
 
@@ -247,7 +222,7 @@ internal class TgResolver(
     }
 
     private fun text(url: String, id: String): String? = optional {
-        val response = receive(url, headers(id, true).apply { put("Accept", "text/html, application/javascript") })
+        val response = http.get(url, headers(id, true).apply { put("Accept", "text/html, application/javascript") })
         if (response.code in 200..299) response.body.toString(Charsets.UTF_8) else null
     }
     private fun <T> optional(block: () -> T): T? = try { block() } catch (e: Exception) {
