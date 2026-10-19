@@ -59,3 +59,15 @@ No software-video decoder is added, no FPS is invented/resampled, and no impossi
 Offline coverage includes available-rendition selection, no fake 540p track, sticky choices, same-codec preference, dropped-frame hysteresis/cooldown, entrance skip/detach behavior, and TV/phone layout bounds. Native Android layout previews are rendered without network access or playback. The established TG/JJTV/Frost tests remain on the 4.9.18 contracts.
 
 Final CI results and APK artifact are recorded in PR #1. **Physical TV testing of the sustained Star Sports smoothness change remains required.** If stutter persists, Playback Details now includes the actual rendition, observed dropped-frame count and buffering count, so a decoder/load issue can be separated from a connection stall. A lower representation cannot be supplied if the upstream source does not offer one.
+
+
+## Delivered build evidence
+
+- Verified runtime/preview commit: `e945dda5fb4d6de9c2e2c7c08078677d7201f6c4`.
+- [Successful build 39230231216](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39230231216), build job `117986144801`.
+- [APK ZIP, arm32 + arm64](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39230231216/artifacts/12176304370).
+- **292 offline tests passed per ABI**, no failures/errors; four opt-in cases skipped offline and all four passed separately.
+- Sixteen working-4.9.18 contract hashes verified before building.
+- Native Android layout previews checked at 960×540 (TV/live + movies) and 800×360 (phone). Navigation-label clipping was corrected; the movie hero leaves the complete first poster row and captions visible.
+- `design/previews/` contains native-layout renders using labelled sample content; `design/entrance-preview.gif` is a motion illustration, not a physical-device recording.
+- No physical TV smoothness success is claimed. Test the exact Hindi HD channel, then use **MENU → Picture quality** if a manual stable rendition is preferred.

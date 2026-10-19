@@ -2,6 +2,10 @@
 
 Investigated 2026-10-17; extended 2026-10-18 after the user reiterated that Star Sports and other JJTV-backed channels worked on the same box in the 4.7 builds, even without a TG “Server 3.” The user now reports JJTV working again on mobile in unchanged 4.9.18, while the box still retries and ends in HTTP 403. This recovery is not credited to 4.9.19, and it does not erase earlier intermittent mobile failures.
 
+## Latest user update — supersedes the earlier active box-failure hypothesis
+
+The user now confirms **4.9.18 plays all channels on the TV box**, with only recurring Star Sports 1 Hindi HD stutter. They also clarify that the JJTV website could work during APK failures. Earlier blocked-box observations below are retained as history, not a claim that this TV cannot decode. [4.9.21](ui-refresh-4.9.21.md) rebuilds the UI/branding on the working 4.9.18 playback contracts and addresses actual-rendition stability.
+
 ## What was actually recovered
 
 Repository: [creatorAkshanshsahu/v4.7.2](https://github.com/creatorAkshanshsahu/v4.7.2).
