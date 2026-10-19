@@ -209,7 +209,8 @@ class MainActivity : AppCompatActivity() {
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 16f)
+        infoCard.background = Ui.pill(dp, 0xEB0D1925.toInt(), 18f)
+        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f)
         findViewById<TextView>(R.id.infoHint).text = SpannableStringBuilder().apply {
             key(this, "▲ ▼", "Channel"); append("     "); key(this, "▶", "All channels"); append("     ")
             key(this, "Hold OK", "Reload"); append("     "); key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
@@ -719,7 +720,7 @@ class MainActivity : AppCompatActivity() {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)
                 } })
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
-                heroDesc.text = t.m.description; heroDesc.visibility = if (t.m.description.isEmpty()) View.GONE else View.VISIBLE
+                heroDesc.text = t.m.description; heroDesc.visibility = if (compact || t.m.description.isEmpty()) View.GONE else View.VISIBLE
                 ui.removeCallbacks(heroGuideRunnable)
                 glowHero(red, 0xFF0E5362.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
             }
@@ -775,7 +776,7 @@ class MainActivity : AppCompatActivity() {
         heroProgress.visibility = heroProg.visibility
         if (n != null) { heroProg.text = progLine("NOW", n); heroProgress.progress = (Epg.progress(n) * 1000).toInt() }
         val d = n?.desc.orEmpty()
-        heroDesc.text = d; heroDesc.visibility = if (d.isEmpty()) View.GONE else View.VISIBLE
+        heroDesc.text = d; heroDesc.visibility = if (compact || d.isEmpty()) View.GONE else View.VISIBLE
         heroNext.visibility = if (nx != null && !compact) View.VISIBLE else View.GONE
         if (nx != null) heroNext.text = progLine("NEXT", nx, range = false)
     }

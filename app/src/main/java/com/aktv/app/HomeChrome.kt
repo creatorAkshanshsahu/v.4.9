@@ -30,12 +30,17 @@ internal object HomeChrome {
         (root.findViewById<TextView>(R.id.akText).layoutParams as LinearLayout.LayoutParams).bottomMargin = px(if (m.compact) 10 else 22)
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             root.findViewById<TextView>(id).apply {
-                layoutParams.height = px(if (m.compact) 46 else 56)
-                setPadding(0, px(if (m.compact) 5 else 8), 0, px(5))
-                textSize = if (m.compact) 9f else 10f
+                val shortScreen = screenHeight / dp < 350
+                layoutParams.height = px(if (shortScreen) 44 else if (m.compact) 48 else 58)
+                includeFontPadding = false
+                setPadding(0, px(if (shortScreen) 3 else 5), 0, px(if (shortScreen) 3 else 5))
+                compoundDrawablePadding = px(3)
+                val icon = px(if (shortScreen) 16 else if (m.compact) 18 else 20)
+                compoundDrawables.filterNotNull().forEach { it.setBounds(0, 0, icon, icon) }
+                textSize = if (shortScreen) 9f else if (m.compact) 10f else 11f
             }
         }
-        root.findViewById<TextView>(R.id.navVersion).visibility = if (screenHeight / dp < 340) View.GONE else View.VISIBLE
+        root.findViewById<TextView>(R.id.navVersion).visibility = if (screenHeight / dp < 380) View.GONE else View.VISIBLE
         (root.findViewById<View>(R.id.content).layoutParams as FrameLayout.LayoutParams).marginStart = m.rail
         root.findViewById<View>(R.id.topBar).apply {
             layoutParams.height = m.header; setPadding(m.margin, 0, m.margin, 0)

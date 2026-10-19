@@ -1,3 +1,11 @@
+## 4.9.21: user-confirmed TV baseline, UI rebuild and stable sports quality
+
+The user clarifies that the website could play channels while the APK failed, and now confirms **4.9.18 works on the TV for all channels**. The remaining complaint is recurring stutter on **Star Sports 1 Hindi HD**. Returned expired metadata was not a complete explanation of the website/APK mismatch, and missing TV decoding capability is not established.
+
+This rebuild uses the working **4.9.18 request/source/DRM/VOD contracts**, checked by hashes in CI. The later 4.9.19–4.9.20 experimental network/expiry/recovery changes are not the default in this build. New native UI/branding and actual-rendition quality locking are described in [the 4.9.21 notes](ui-refresh-4.9.21.md). No web backup or substituted channel is introduced.
+
+---
+
 ## 4.9.20: expired provider credentials and bounded automatic renewal
 
 October 19 device reports show channel 165 playing HEVC/ClearKey while Sony YAY 872 returns HTTP 403; October 18 reports show Sony playing H.264/ClearKey on the same phone. A fresh comparison found still-valid authorization for 165 but expired supplied Sony/Star credentials, unchanged by fresh/cache-busted metadata requests. [Evidence and recovery changes](live-credential-renewal.md) distinguish that provider-side condition from a decoder failure.

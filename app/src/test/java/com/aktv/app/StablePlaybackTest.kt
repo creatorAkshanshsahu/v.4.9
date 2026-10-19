@@ -74,4 +74,11 @@ class StablePlaybackTest {
         assertEquals("720p · 50 fps · 3.0 Mbps · AVC", track("id", 720).label)
         assertEquals("480p · AVC", track("id", 480, -1f, -1).label)
     }
+    @Test fun `smoothing cannot replace working AVC with HEVC just because its bitrate is smaller`() {
+        val avc = track("avc", 720, bitrate = 4_000_000)
+        val hevc = track("hevc", 720, bitrate = 1_000_000).copy(mime = "video/hevc")
+        assertNull(StableRenditions.lower(avc, listOf(avc, hevc)))
+        assertEquals(avc.copy(key = "new-avc"), StableRenditions.keep(avc, listOf(hevc, avc.copy(key = "new-avc"))))
+    }
+
 }

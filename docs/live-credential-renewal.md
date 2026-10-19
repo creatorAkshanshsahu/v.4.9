@@ -2,6 +2,10 @@
 
 Investigated 2026-10-19. The goal is better native recovery, **not a claim of uninterrupted availability from third-party providers**.
 
+## Subsequent user correction
+
+The user clarified that the JJTV website was playing during the APK failures and confirmed that **4.9.18 now plays all channels on the TV**, with a remaining Star Sports 1 Hindi HD smoothness issue. The metadata expiry observations below remain observations of those requests/times, not a complete explanation of the browser/APK discrepancy. **4.9.21 returns to the user-confirmed 4.9.18 network contracts** rather than carrying these experimental rejection/retry changes into the UI rebuild; see [current release notes](ui-refresh-4.9.21.md).
+
 ## New device evidence
 
 The user supplied working and failing **4.9.18 phone** reports:

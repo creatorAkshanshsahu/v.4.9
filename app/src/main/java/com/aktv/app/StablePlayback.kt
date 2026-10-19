@@ -29,21 +29,26 @@ internal object StableRenditions {
         return sameSize.minWithOrNull(compareBy<VideoRendition> { if (it.fps > 0) it.fps else 30f }
             .thenBy { if (it.bitrate > 0) it.bitrate else Int.MAX_VALUE }.thenBy { it.pixelRate })
     }
-    fun lower(current: VideoRendition, tracks: List<VideoRendition>): VideoRendition? = tracks
-        .filter { it.key != current.key &&
+    fun lower(current: VideoRendition, tracks: List<VideoRendition>): VideoRendition? {
+        val cheaper = tracks.filter { it.key != current.key &&
             !(it.width == current.width && it.height == current.height && it.mime == current.mime && it.bitrate == current.bitrate &&
                 (it.fps <= 0 || current.fps <= 0 || kotlin.math.abs(it.fps - current.fps) < 1f)) &&
             it.height <= current.height && (it.pixelRate < current.pixelRate * 0.92 ||
             (it.pixelRate <= current.pixelRate && it.bitrate > 0 && current.bitrate > 0 && it.bitrate < current.bitrate * 0.8)) }
-        .maxWithOrNull(compareBy<VideoRendition> { it.pixelRate }.thenBy { it.bitrate })
+        val sameCodec = cheaper.filter { it.mime == current.mime }
+        // A lower HEVC bitrate does not prove lower decode load than an already-working AVC track.
+        val candidates = sameCodec.ifEmpty { cheaper.filter { current.mime == "video/hevc" && it.mime == "video/avc" && it.pixelRate < current.pixelRate } }
+        return candidates.maxWithOrNull(compareBy<VideoRendition> { it.pixelRate }.thenBy { it.bitrate })
+    }
 
-    /** A refreshed track group must never silently send a locked session back to a larger rendition. */
+    /** Keep the chosen ceiling on refresh; if the provider removes it, return its actual minimum. */
     fun keep(lock: VideoRendition, tracks: List<VideoRendition>): VideoRendition? {
         tracks.firstOrNull { it.key == lock.key }?.let { return it }
-        val eligible = tracks.filter { it.height <= lock.height && it.pixelRate <= lock.pixelRate * 1.05 &&
+        val sameCodec = tracks.filter { it.mime == lock.mime }.ifEmpty { tracks }
+        val eligible = sameCodec.filter { it.height <= lock.height && it.pixelRate <= lock.pixelRate * 1.05 &&
             (lock.bitrate <= 0 || it.bitrate <= 0 || it.bitrate <= lock.bitrate * 1.15) }
         return eligible.maxWithOrNull(compareBy<VideoRendition> { it.height }.thenBy { it.pixelRate })
-            ?: tracks.minByOrNull { it.pixelRate }
+            ?: sameCodec.minByOrNull { it.pixelRate }
     }
 }
 
@@ -116,7 +121,7 @@ internal class NativePictureController(
     }
     fun stable() {
         if (!isCurrent()) return
-        fixed = true; lock = null
+        fixed = true; lock = owner.videoFormat?.let(::rendition)
         applyLock()
     }
     fun select(choice: VideoRendition) {
@@ -127,9 +132,13 @@ internal class NativePictureController(
     private fun applyLock() {
         if (!isCurrent() || !fixed) return
         val available = tracks()
+        val selectedGroup = available.filter { it.group.isTrackSelected(it.index) }.ifEmpty { available }
         val choice = lock?.let { StableRenditions.keep(it, available.map { item -> item.rendition }) }
-            ?: StableRenditions.initial(available.map { it.rendition }, ceiling) ?: return
+            ?: StableRenditions.initial(selectedGroup.map { it.rendition }, ceiling) ?: return
         val target = available.firstOrNull { it.rendition == choice } ?: return
+        val prior = lock
+        if (prior != null && choice.pixelRate > prior.pixelRate * 1.1)
+            notice("The source changed its offered tracks. Using its lowest available rendition: ${choice.label}.")
         lock = choice
         val current = selector.parameters.overrides[target.group.mediaTrackGroup]
         if (current?.trackIndices?.toList() == listOf(target.index)) return
@@ -157,6 +166,7 @@ internal class NativePictureController(
     }
     private fun stepDown(reason: String) {
         if (!isCurrent()) return
+        drops.settledChange(SystemClock.elapsedRealtime())
         val available = tracks().map { it.rendition }
         val current = owner.videoFormat?.let(::rendition) ?: return
         val lower = StableRenditions.lower(current, available)
@@ -167,7 +177,7 @@ internal class NativePictureController(
             nextBufferStep = SystemClock.elapsedRealtime() + 15_000
             notice("Stable picture · ${lower.label} after $reason. Quality will stay here instead of climbing back up.")
         } else {
-            lock = available.minByOrNull { it.pixelRate } ?: return
+            lock = available.filter { it.mime == current.mime }.ifEmpty { available }.minByOrNull { it.pixelRate } ?: return
             applyLock(); lock?.let(remember)
             if (!exhaustedNotice) {
                 exhaustedNotice = true

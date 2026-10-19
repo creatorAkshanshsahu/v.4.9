@@ -16,3 +16,11 @@ for flavor in ('Arm32', 'Arm64'):
     else:
         message = json.dumps(result).replace('%', '%25')
         print(f'::notice title=Offline tests {flavor}::{message}')
+
+# Only static native-layout fixture metrics, never player logs or source responses.
+for path in Path('app/build/test-results/testArm32DebugUnitTest').glob('TEST-com.aktv.app.HomeChromeTest.xml'):
+    root = ET.parse(path).getroot()
+    lines = [line for node in root.findall('system-out') for line in (node.text or '').splitlines() if line.startswith('UI_GEOMETRY ')]
+    if lines:
+        value = '\n'.join(lines).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+        print('::notice title=Native layout metrics::' + value)

@@ -44,6 +44,7 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.sectionTitle).text = if (movies) "Movies" else "Live TV"
             root.findViewById<TextView>(R.id.sectionKicker).text = if (movies) "FIND YOUR NEXT FAVORITE" else "YOUR FRONT ROW"
             root.findViewById<TextView>(R.id.librarySummary).text = "SAMPLE CONTENT · UI PREVIEW"
+            root.findViewById<TextView>(R.id.homeClock).text = "8:45 PM"
             root.findViewById<TextView>(R.id.heroTitle).text = if (movies) "Make it a movie night." else "Star Sports 1 Hindi HD"
             root.findViewById<TextView>(R.id.heroBadge).text = if (movies) "MOVIES  /  SERIES" else "SPORTS  /  HINDI"
             root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "Explore the stories you love. All in one place." else "Your front-row seat to the channels you love."
