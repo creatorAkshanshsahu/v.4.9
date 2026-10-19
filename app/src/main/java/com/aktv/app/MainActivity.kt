@@ -851,6 +851,7 @@ class MainActivity : AppCompatActivity() {
         infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
         infoNext.visibility = View.VISIBLE
         playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Connecting to ${providerName(provider)}…")
+        if (skipRecentLookup(provider, token)) return
         resolveJob = playbackIo.submit {
             try {
                 val sources = TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)
@@ -864,9 +865,9 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     if (token == playToken && layer.visibility == View.VISIBLE) {
-                        diagnostics.metadataFailed(PlaybackProblems.from(e))
+                        recordLookupFailure(provider, e)
                         nativeSources = emptyList()
-                        advanceNative(if (e is TgResolveException) e.message.orEmpty() else "Couldn't load ${providerName(provider)}'s current streams")
+                        advanceNative(if (e is TgResolveException || e is SourceCredentialsUnavailableException) e.message.orEmpty() else "Couldn't load ${providerName(provider)}'s current streams")
                     }
                 }
             }
@@ -884,6 +885,22 @@ class MainActivity : AppCompatActivity() {
         compatiblePlayback = savedCompatibility(ch, provider) || decoderRetries.used(provider)
         providerWindow.enter(SystemClock.elapsedRealtime())
     }
+    private fun recordLookupFailure(provider: LiveProvider, error: Throwable) {
+        val problem = PlaybackProblems.from(error)
+        diagnostics.metadataFailed(problem)
+        availability.failed(null, provider, problem, SystemClock.elapsedRealtime(), metadata = true)
+    }
+
+    private fun skipRecentLookup(provider: LiveProvider, token: Int): Boolean {
+        val failure = availability.lookupRefusal(provider, SystemClock.elapsedRealtime()) ?: return false
+        diagnostics.metadataFailed(failure)
+        ui.post { if (token == playToken && playbackActive && layer.visibility == View.VISIBLE)
+            advanceNative(if (failure.family == PlaybackDiagnostics.Family.CREDENTIALS)
+                "${providerName(provider)} has not supplied current stream credentials yet"
+                else "${providerName(provider)} recently refused its lookup; avoiding an immediate identical request") }
+        return true
+    }
+
     private fun providerName(provider: LiveProvider) = if (provider == LiveProvider.TG) "TG TV" else "JJTV"
     private fun sourceKey(source: TgStream) = LiveProviders.sourceKey(source)
     private fun rememberNativeSource(ch: Channel, source: TgStream) {
@@ -903,11 +920,13 @@ class MainActivity : AppCompatActivity() {
         infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
         infoNext.visibility = View.VISIBLE
         playMsg("Automatically trying ${providerName(provider)} native streams…")
+        if (skipRecentLookup(provider, token)) return
         resolveJob = playbackIo.submit {
             var failureReason = reason
             val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
-                runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error)) }
-                failureReason = "Couldn't load ${providerName(provider)}'s current native stream configuration"
+                runOnUiThread { if (token == playToken && playbackActive) recordLookupFailure(provider, error) }
+                failureReason = if (error is SourceCredentialsUnavailableException) error.message.orEmpty()
+                    else "Couldn't load ${providerName(provider)}'s current native stream configuration"
                 emptyList()
             }
             runOnUiThread {
@@ -964,9 +983,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val manifestTypes = ManifestTypeRecovery()
+    private val availability = NativeAvailability()
+    private var availabilityWait: Runnable? = null
 
     private fun startNative() {
         val source = nativeSources.getOrNull(serverIdx) ?: return
+        if (availability.requestRefused(source, SystemClock.elapsedRealtime())) {
+            val token = playToken
+            ui.post { if (token == playToken && playbackActive && layer.visibility == View.VISIBLE)
+                advanceNative("The provider returned an unchanged recently refused request") }
+            return
+        }
         spinner.visibility = View.VISIBLE
         val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG) "TG TV · ${source.label}" else source.label
         infoNext.text = "Auto · $sourceLabel · ${serverIdx + 1} of ${nativeSources.size}" +
@@ -980,7 +1007,11 @@ class MainActivity : AppCompatActivity() {
                 else -> PlaybackDiagnostics.Drm.WIDEVINE },
             source.omitReferrer, compatiblePlayback)
         try { attach(nativeMediaSource(source, trace), trace) }
-        catch (error: Exception) { trace.failed(PlaybackProblems.from(error)); advanceNative("This source could not be opened by the native player") }
+        catch (error: Exception) {
+            val problem = PlaybackProblems.from(error)
+            trace.failed(problem); availability.failed(source, currentNativeProvider, problem, SystemClock.elapsedRealtime())
+            advanceNative("This source could not be opened by the native player")
+        }
     }
 
     private fun attach(ms: MediaSource, trace: PlaybackDiagnostics.Attempt) {
@@ -1068,7 +1099,9 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
-            trace.failed(PlaybackProblems.from(error, error.errorCode))
+            val problem = PlaybackProblems.from(error, error.errorCode)
+            trace.failed(problem)
+            availability.failed(nativeSources.getOrNull(serverIdx), currentNativeProvider, problem, SystemClock.elapsedRealtime())
             refreshPlaybackDetails()
             val manifestError = ManifestReplies.error(error)
             if (manifestError != null && retryManifestFormat(manifestError)) return
@@ -1114,15 +1147,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun expectsVideo() = shown.getOrNull(current)?.category?.equals("Radio", true) != true
 
-    private fun beginNativeSession(ch: Channel) {
+    private fun beginNativeSession(ch: Channel, automatic: Boolean = false) {
+        cancelAvailabilityWait()
         playbackActive = true
-        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear(); manifestTypes.reset()
+        if (!automatic) { diagnostics = PlaybackDiagnostics(); availability.reset() }
+        decoderRetries.clear(); authRecovery.reset(); providerWindow.clear(); manifestTypes.reset()
         compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
     }
 
     private fun endNativeSession() {
+        cancelAvailabilityWait()
         playbackActive = false; startupBudget.clear(); providerWindow.clear(); ui.removeCallbacks(nativeHealthCheck)
     }
 
@@ -1152,7 +1188,11 @@ class MainActivity : AppCompatActivity() {
                     else -> PlaybackHealth.State.IDLE
                 }
                 val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady)
-                if (result.failure != null) activeAttempt?.timeout()
+                if (result.failure != null) {
+                    activeAttempt?.timeout()
+                    availability.failed(nativeSources.getOrNull(serverIdx), currentNativeProvider,
+                        PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "PlaybackTimeout"), now)
+                }
                 when (result.failure) {
                     PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
                         val reason = if (surfaceWait != null) "The TV video surface is not ready" else "No picture from ${providerName(currentNativeProvider)}"
@@ -1161,7 +1201,7 @@ class MainActivity : AppCompatActivity() {
                     PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
                         advanceNative("The live stream stopped responding")
                     null -> if (result.stable) {
-                        recovery.reset(); authRecovery.reset()
+                        recovery.reset(); authRecovery.reset(); availability.reset()
                         shown.getOrNull(current)?.let { ch ->
                             prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
@@ -1199,7 +1239,9 @@ class MainActivity : AppCompatActivity() {
             !authRecovery.retry(provider, code)) return false
         startupBudget.recover(SystemClock.elapsedRealtime()); providerWindow.recover(SystemClock.elapsedRealtime())
         val previousKey = nativeSources.getOrNull(serverIdx)?.let(::sourceKey)
-        recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
+        // One refused request does not invalidate another advertised URL/header/token combination.
+        // Keep untried alternatives available if the metadata renewal itself fails.
+        recovery.skip(listOf(serverIdx))
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
         diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
@@ -1225,7 +1267,7 @@ class MainActivity : AppCompatActivity() {
             } catch (error: Exception) {
                 runOnUiThread {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
-                    diagnostics.metadataFailed(PlaybackProblems.from(error))
+                    recordLookupFailure(provider, error)
                     advanceNative("Could not refresh ${providerName(provider)} credentials")
                 }
             }
@@ -1316,6 +1358,7 @@ class MainActivity : AppCompatActivity() {
         append("Device UTC: ${java.time.Instant.ofEpochMilli(System.currentTimeMillis())}\n")
         append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
         append("TV reported codec-limit fallback: $television (unsupported DRM remains rejected)\n")
+        append("${availability.report()}\n")
         shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""} · ${it.name.take(80)}\n") }
         append("\n${diagnostics.report()}\n\n$drmProbeStatus\n")
         append("\nHTTP refusals and invalid manifests occur before decoding; a DRM self-test cannot repair those server responses.\n")
@@ -1394,8 +1437,43 @@ class MainActivity : AppCompatActivity() {
     private fun fail(message: String) {
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
         playMsg("$message\n${diagnostics.summary()}\n${AppBuildInfo.label(this)} · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        shown.getOrNull(current)?.let { scheduleAvailabilityCheck(it, message) }
         refreshPlaybackDetails()
         ui.removeCallbacks(hideInfo); hideInfo.run()
+    }
+
+    private fun cancelAvailabilityWait() {
+        availabilityWait?.let(ui::removeCallbacks)
+        availabilityWait = null
+    }
+
+    private fun scheduleAvailabilityCheck(ch: Channel, reason: String) {
+        if (isFinishing || isDestroyed || drmProbeRunning || layer.visibility != View.VISIBLE) return
+        val delay = availability.nextCheckDelay(SystemClock.elapsedRealtime()) ?: return
+        val gate = NativeRecheck(ch.key, playToken, SystemClock.elapsedRealtime() + delay)
+        val check = object : Runnable {
+            override fun run() {
+                if (availabilityWait !== this) return
+                val currentChannel = shown.getOrNull(current) ?: run { cancelAvailabilityWait(); return }
+                val left = gate.remaining(SystemClock.elapsedRealtime(), currentChannel.key, playToken,
+                    layer.visibility == View.VISIBLE && !isFinishing && !isDestroyed, drmProbeRunning)
+                    ?: run { cancelAvailabilityWait(); return }
+                if (left <= 0) {
+                    availabilityWait = null
+                    recovery.reset(); beginNativeSession(currentChannel, automatic = true)
+                    TgServers.invalidate(currentChannel.id, currentChannel.v2)
+                    resolveAndStart(currentChannel, fresh = true)
+                    return
+                }
+                spinner.visibility = View.GONE
+                playMsg("$reason\nWaiting for available/refreshed sources. Automatic check in ${(left + 999) / 1000}s.\n" +
+                    "${availability.report()}\nMENU: other source · OK: details · Hold OK: check now · Back: stop")
+                refreshPlaybackDetails()
+                ui.postDelayed(this, 1000)
+            }
+        }
+        availabilityWait = check
+        check.run()
     }
 
     private fun releasePlayer() {

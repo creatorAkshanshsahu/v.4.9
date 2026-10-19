@@ -105,7 +105,8 @@ internal object JjtvProtocol {
     private fun freshest(values: List<String>, now: Long): String = values.filter { it.isNotBlank() }
         .maxWithOrNull(compareBy<String> {
             val expiry = StreamRequestPolicy.expiry("", it)
-            when { expiry == null -> 1; expiry > now + 10_000 -> 2; else -> 0 }
+            val starts = StreamRequestPolicy.notBefore("", it)
+            when { starts != null && starts > now + 10_000 -> 0; expiry == null -> 1; expiry > now + 10_000 -> 2; else -> 0 }
         }.thenBy { StreamRequestPolicy.expiry("", it) ?: Long.MIN_VALUE }).orEmpty()
 
     fun streams(channel: JSONObject, config: Config, regular: String, fallback: String, star: String,

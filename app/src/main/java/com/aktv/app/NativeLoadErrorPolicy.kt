@@ -10,7 +10,7 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
  */
 internal class NativeLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     private fun rejected(info: LoadErrorHandlingPolicy.LoadErrorInfo) = ManifestReplies.error(info.exception) != null ||
-        PlaybackProblems.from(info.exception).http.let { it == 401 || it == 403 }
+        PlaybackProblems.from(info.exception).http.let { it == 401 || it == 403 || it == 429 }
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long =
         if (rejected(loadErrorInfo)) C.TIME_UNSET else super.getRetryDelayMsFor(loadErrorInfo)
     override fun getFallbackSelectionFor(fallbackOptions: LoadErrorHandlingPolicy.FallbackOptions,

@@ -98,10 +98,14 @@ class StreamRequestPolicy(private val stream: TgStream) {
 
         fun expiry(url: String, cookie: String = ""): Long? {
             val token = cookieToken(cookie) ?: tokenOf(url) ?: return null
-            return tokenExpiry(token)
+            return tokenTime(token, "exp")
         }
-        private fun tokenExpiry(token: String): Long? = try {
-            Regex("(?:^|~)exp=(\\d+)(?:~|$)").find(URLDecoder.decode(token, "UTF-8"))?.groupValues?.get(1)?.toLongOrNull()?.let {
+        fun notBefore(url: String, cookie: String = ""): Long? {
+            val token = cookieToken(cookie) ?: tokenOf(url) ?: return null
+            return tokenTime(token, "st")
+        }
+        private fun tokenTime(token: String, field: String): Long? = try {
+            Regex("(?:^|~)$field=(\\d+)(?:~|$)").find(URLDecoder.decode(token, "UTF-8"))?.groupValues?.get(1)?.toLongOrNull()?.let {
                 if (it > Long.MAX_VALUE / 1000) null else it * 1000
             }
         } catch (_: Exception) { null }

@@ -51,8 +51,10 @@ internal class JjtvResolver(
         val star = if (hasStar) cookie(config.starCookies, JjtvLookupStage.STAR_COOKIE) { JjtvProtocol.starCookie(it, id, tokenClock.now()) } else ""
         val regular = if (hasRegular) cookie(config.primaryCookie, JjtvLookupStage.PRIMARY_COOKIE) { JjtvProtocol.regularCookie(it, now = tokenClock.now()) } else ""
         val fallback = if (hasRegular) cookie(config.fallbackCookie, JjtvLookupStage.FALLBACK_COOKIE) { JjtvProtocol.regularCookie(it, fallback = true, now = tokenClock.now()) } else ""
-        val result = JjtvProtocol.streams(channel, config, regular, fallback, star, page, site)
+        val advertised = JjtvProtocol.streams(channel, config, regular, fallback, star, page, site)
             .flatMap(JjtvRequestProfiles::variants)
+        val result = try { CredentialFreshness.usable(LiveProvider.JJTV, advertised, tokenClock) }
+            catch (error: SourceCredentialsUnavailableException) { throw lastCookieFailure ?: error }
         checkInterrupted()
         if (result.isEmpty()) throw lastCookieFailure ?: IOException("JJTV did not supply a current native source for this channel")
         val expiry = result.mapNotNull { StreamRequestPolicy.expiry(it.url, it.cookie) }.minOrNull()
@@ -105,7 +107,8 @@ internal class JjtvResolver(
         var expiry = StreamRequestPolicy.expiry("", value)
         // Different PL channels in the same JSON can expire at different times. Refresh the endpoint
         // once when this channel's credential is absent/near expiry; never substitute another channel.
-        if ((cached != null && value.isBlank()) || (expiry != null && expiry <= tokenClock.now() + 10_000)) {
+        if ((cached != null && value.isBlank()) || (expiry != null && expiry <= tokenClock.now() + 10_000) ||
+            (StreamRequestPolicy.notBefore("", value)?.let { it > tokenClock.now() + 10_000 } == true)) {
             body = fetch()
             reused = false
             value = select(body)

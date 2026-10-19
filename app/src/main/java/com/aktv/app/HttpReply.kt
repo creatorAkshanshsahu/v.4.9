@@ -6,11 +6,11 @@ import java.io.IOException
 /** Deliberately data-poor: never holds a URL, header value, token, key or response text. */
 internal data class HttpReply(
     val status: Int, val mime: Mime, val body: Body, val prefixBytes: Int,
-    val challenge: Boolean = false, val redirects: Int = 0
+    val challenge: Boolean = false, val redirects: Int = 0, val retryAfterMs: Long? = null
 ) {
     enum class Mime { DASH, HLS, HTML, JSON, TEXT, SCRIPT, MP4, OTHER, MISSING }
     enum class Body { DASH, HLS, HTML, JSON, XML_ERROR, XML, MP4, GZIP, OTHER, EMPTY, UNREAD }
-    fun describe() = "HTTP $status; MIME ${mime.name}; body ${body.name}; prefix $prefixBytes B; redirects $redirects" +
+    fun describe() = "HTTP $status; MIME ${mime.name}; body ${body.name}; prefix $prefixBytes B; redirects ${if (redirects >= 0) redirects.toString() else "unknown"}" +
         if (challenge) "; server challenge indicated" else ""
 
     companion object {
@@ -59,15 +59,26 @@ internal data class HttpReply(
         }
         fun of(status: Int, type: String, prefix: ByteArray, challenge: Boolean = false, redirects: Int = 0) =
             HttpReply(status, mime(type), kind(prefix), minOf(prefix.size, PREFIX), challenge, redirects.coerceIn(0, 20))
+        fun retryAfter(value: String?, responseDate: String?, nowMs: Long = System.currentTimeMillis()): Long? {
+            if (value.isNullOrBlank()) return null
+            value.trim().toLongOrNull()?.let { seconds ->
+                if (seconds < 0) return null
+                return if (seconds > Long.MAX_VALUE / 1000) Long.MAX_VALUE else seconds * 1000
+            }
+            val date = HttpReferenceClock.parse(value.trim()) ?: return null
+            val reference = HttpReferenceClock.parse(responseDate) ?: nowMs
+            return try { Math.subtractExact(date, reference).coerceAtLeast(0) } catch (_: ArithmeticException) { Long.MAX_VALUE }
+        }
         /** Called after OkHttp's bridge has decompressed normal gzip responses. Peek does not consume media. */
         fun inspect(response: Response): HttpReply {
             var hops = 0; var prior = response.priorResponse
             while (prior != null && hops < 20) { hops++; prior = prior.priorResponse }
             val type = mime(response.header("Content-Type").orEmpty())
             val challenged = response.header("cf-mitigated").equals("challenge", true)
+            val retry = retryAfter(response.header("Retry-After"), response.header("Date"))
             val prefix = try { response.peekBody(PREFIX.toLong()).bytes() } catch (_: IOException) { null }
-            return if (prefix == null) HttpReply(response.code, type, Body.UNREAD, 0, challenged, hops)
-            else HttpReply(response.code, type, kind(prefix), prefix.size, challenged, hops)
+            return if (prefix == null) HttpReply(response.code, type, Body.UNREAD, 0, challenged, hops, retry)
+            else HttpReply(response.code, type, kind(prefix), prefix.size, challenged, hops, retry)
         }
     }
 }

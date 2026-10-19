@@ -32,18 +32,27 @@ internal object PlaybackProblems {
             if (chain.any { it === item }) return@repeat
             chain.add(item); cause = item.cause
         }
-        val http = chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode
+        val invalidHttp = chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+        val http = invalidHttp?.responseCode
             ?: chain.filterIsInstance<JjtvHttpException>().firstOrNull()?.status
             ?: chain.filterIsInstance<TgResolveException>().firstOrNull()?.status
             ?: chain.filterIsInstance<FrostResolveException>().firstOrNull()?.status
         val deniedLookup = chain.filterIsInstance<JjtvHttpException>().firstOrNull()
         val badLookup = chain.filterIsInstance<JjtvDataException>().firstOrNull()
         val badManifest = chain.filterIsInstance<ManifestReplyException>().firstOrNull()
-        val reply = deniedLookup?.reply ?: badLookup?.reply ?: badManifest?.reply
+        val reply = deniedLookup?.reply ?: badLookup?.reply ?: badManifest?.reply ?:
+            chain.filterIsInstance<TgResolveException>().firstOrNull()?.reply ?: invalidHttp?.let { response ->
+                fun header(name: String) = response.headerFields.entries.firstOrNull { it.key.equals(name, true) }?.value?.firstOrNull()
+                HttpReply.of(response.responseCode, header("Content-Type").orEmpty(), response.responseBody,
+                    header("cf-mitigated").equals("challenge", true)).copy(redirects = -1,
+                    retryAfterMs = HttpReply.retryAfter(header("Retry-After"), header("Date")))
+            }
         val lookupStage = deniedLookup?.stage ?: badLookup?.stage
+        val credentialIssue = chain.filterIsInstance<SourceCredentialsUnavailableException>().firstOrNull()?.issue
         val crypto = chain.filterIsInstance<MediaCodec.CryptoException>().firstOrNull()?.errorCode
         val family = when {
             http != null -> PlaybackDiagnostics.Family.HTTP
+            credentialIssue != null -> PlaybackDiagnostics.Family.CREDENTIALS
             badLookup != null || badManifest != null || (playerCode != null && playerCode in 3000..3999) ||
                 chain.any { it is ParserException } -> PlaybackDiagnostics.Family.FORMAT
             chain.any { it is SSLException || (it is FrostResolveException && it.kind == "tls") } -> PlaybackDiagnostics.Family.TLS
@@ -63,7 +72,7 @@ internal object PlaybackProblems {
             }
             info?.takeIf { code -> code.matches(Regex("android\\.media\\.[A-Za-z0-9_.-]{1,70}")) }
         }
-        return PlaybackDiagnostics.Problem(family, playerCode, http, listOfNotNull(names, native).joinToString(" : ").take(180), crypto, reply, lookupStage)
+        return PlaybackDiagnostics.Problem(family, playerCode, http, listOfNotNull(names, native).joinToString(" : ").take(180), crypto, reply, lookupStage, credentialIssue)
     }
 }
 

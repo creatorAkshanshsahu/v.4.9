@@ -30,7 +30,7 @@ expired = {}
 for line in reports:
     try:
         data = json.loads(line[len('TG_NATIVE '):])
-        if any(source.get('tokenSecondsLeft', 1) <= 0 for source in data.get('sources', [])):
+        if data.get('credentialIssue') == 'EXPIRED' or any(source.get('tokenSecondsLeft', 1) <= 0 for source in data.get('sources', [])):
             expired.setdefault(data.get('provider', 'unknown'), set()).add(data.get('channel', 'unknown'))
     except (ValueError, TypeError):
         pass

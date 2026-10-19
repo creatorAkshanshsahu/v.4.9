@@ -89,4 +89,11 @@ class HttpReplyTest {
         assertNull(recovery.correct(native, reply("#EXTM3U")))
     }
 
+    @Test fun `Retry-After accepts seconds or a server-relative date without relying on the device clock`() {
+        assertEquals(90_000L, HttpReply.retryAfter("90", null, 0))
+        assertEquals(60_000L, HttpReply.retryAfter("Mon, 19 Oct 2026 06:18:00 GMT", "Mon, 19 Oct 2026 06:17:00 GMT", 1))
+        assertEquals(Long.MAX_VALUE, HttpReply.retryAfter(Long.MAX_VALUE.toString(), null, 0))
+        assertNull(HttpReply.retryAfter("not-a-time", null, 0))
+    }
+
 }

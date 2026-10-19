@@ -66,4 +66,14 @@ class NativeLoadErrorPolicyTest {
         assertTrue(problem.describe().contains("body HTML"))
     }
 
+    @Test fun `rate limits go to the bounded application policy rather than immediate loader retries`() {
+        assertEquals(C.TIME_UNSET, NativeLoadErrorPolicy().getRetryDelayMsFor(info(status(429))))
+    }
+    @Test fun `expired provider data is not mislabelled as HTTP or a codec failure`() {
+        val problem = PlaybackProblems.from(SourceCredentialsUnavailableException(LiveProvider.JJTV, CredentialIssue.EXPIRED))
+        assertEquals(PlaybackDiagnostics.Family.CREDENTIALS, problem.family)
+        assertNull(problem.http)
+        assertTrue(problem.describe().contains("expired"))
+    }
+
 }

@@ -7,13 +7,15 @@ internal class PlaybackDiagnostics {
     enum class Drm { NONE, CLEARKEY, WIDEVINE }
     enum class DrmStep { NOT_REQUESTED, CREATING, CREATED, SESSION_OPEN, KEY_REQUEST, KEY_RESPONSE, KEYS_LOADED }
     enum class Load { MANIFEST, INITIALIZATION, MEDIA, OTHER }
-    enum class Family { HTTP, TLS, NETWORK, DRM, DECODER, FORMAT, PLAYER }
+    enum class Family { HTTP, TLS, NETWORK, CREDENTIALS, DRM, DECODER, FORMAT, PLAYER }
     data class Problem(val family: Family, val code: Int? = null, val http: Int? = null,
                        val detail: String = "", val cryptoCode: Int? = null,
-                       val reply: HttpReply? = null, val lookupStage: JjtvLookupStage? = null) {
+                       val reply: HttpReply? = null, val lookupStage: JjtvLookupStage? = null,
+                       val credentialIssue: CredentialIssue? = null) {
         fun describe(): String = buildString {
             lookupStage?.let { append("JJTV ${it.label}: ") }
             append(family.name)
+            credentialIssue?.let { append(if (it == CredentialIssue.EXPIRED) " supplied by provider have expired" else " supplied by provider are not valid yet") }
             http?.let { append(" $it") }
             code?.let { append(" / Media3 $it") }
             cryptoCode?.let { append(" / native $it") }

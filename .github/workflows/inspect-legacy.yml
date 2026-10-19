@@ -1,6 +1,8 @@
 name: Inspect historical APK
 on:
-  pull_request:
+  # The historical APK is large; a push diff avoids re-downloading it on every update of this PR.
+  push:
+    branches: [arena/eac96ac3-v-4-9]
     paths:
       - '.github/workflows/inspect-legacy.yml'
       - '.github/scripts/inspect-legacy-apk.py'

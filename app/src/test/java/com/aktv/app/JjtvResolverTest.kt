@@ -348,4 +348,32 @@ class JjtvResolverTest {
         assertEquals(1, http.requests.size)
     }
 
+    @Test fun `stale credentials returned again after refresh are reported unavailable using HTTP time`() {
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page()).copy(serverTimeMs = 100_000)
+            "/channels.json" -> response("[${channel("872")}]").copy(serverTimeMs = 100_000)
+            "/general.json" -> response(primary("st=1~exp=50~hmac=old")).copy(serverTimeMs = 100_000)
+            else -> throw AssertionError("Unexpected metadata")
+        } }
+        val error = assertThrows(SourceCredentialsUnavailableException::class.java) {
+            JjtvResolver(http, now = { 1 }, elapsed = { 0 }).resolve("872")
+        }
+        assertEquals(CredentialIssue.EXPIRED, error.issue)
+        assertEquals(2, http.count("/general.json"))
+        assertFalse(error.message.orEmpty().contains("hmac"))
+    }
+    @Test fun `a renewed credential is accepted after previously stale provider data`() {
+        var fresh = false
+        val http = Fake { url, _ -> when (URI(url).path) {
+            "/pind" -> response(page()).copy(serverTimeMs = 100_000)
+            "/channels.json" -> response("[${channel("872")}]").copy(serverTimeMs = 100_000)
+            "/general.json" -> response(primary(if (fresh) "st=1~exp=500~hmac=current" else "st=1~exp=50~hmac=old")).copy(serverTimeMs = 100_000)
+            else -> throw AssertionError("Unexpected metadata")
+        } }
+        val resolver = JjtvResolver(http, now = { 1 }, elapsed = { 0 })
+        assertThrows(SourceCredentialsUnavailableException::class.java) { resolver.resolve("872") }
+        fresh = true
+        assertTrue(resolver.resolve("872", fresh = true).first().cookie.contains("exp=500"))
+    }
+
 }
