@@ -16,7 +16,7 @@ internal object HomeChrome {
         val compact = height / dp < 420
         val rail = ((if (compact) 82 else 100) * dp).toInt()
         val header = ((if (compact) 54 else 80) * dp).toInt()
-        val hero = (height * if (compact && movies) 0.32f else if (compact) 0.40f else 0.40f).toInt()
+        val hero = (height * if (movies) 0.32f else 0.40f).toInt()
         return Metrics(rail, header, hero, ((if (compact) 20 else 28) * dp).toInt(), compact)
     }
 
@@ -61,7 +61,7 @@ internal object HomeChrome {
                 bottomMargin = px(if (m.compact) 13 else 22)
             }
         }
-        root.findViewById<TextView>(R.id.heroTitle).apply { textSize = if (m.compact) 23f else 32f; maxLines = if (m.compact) 1 else 2 }
+        root.findViewById<TextView>(R.id.heroTitle).apply { textSize = if (m.compact) 23f else if (movies) 28f else 32f; maxLines = if (m.compact) 1 else 2 }
         root.findViewById<TextView>(R.id.heroDesc).maxLines = if (m.compact || !movies) 1 else 2
         root.findViewById<View>(R.id.heroChips).let { (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 10 else 16) }
         root.findViewById<View>(R.id.heroLogo).apply {

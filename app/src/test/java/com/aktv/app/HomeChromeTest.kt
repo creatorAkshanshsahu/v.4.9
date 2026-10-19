@@ -53,4 +53,9 @@ class HomeChromeTest {
         assertTrue("Poster shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 165)
         assertEquals(1, root.findViewById<TextView>(R.id.heroTitle).maxLines)
     }
+    @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
+    fun `TV movie hero leaves the complete first poster row and labels visible`() = screen(960, 540, movies = true) { root ->
+        assertTrue("Movie shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 280)
+    }
+
 }

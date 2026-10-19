@@ -720,7 +720,7 @@ class MainActivity : AppCompatActivity() {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)
                 } })
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
-                heroDesc.text = t.m.description; heroDesc.visibility = if (compact || t.m.description.isEmpty()) View.GONE else View.VISIBLE
+                heroDesc.text = t.m.description; heroDesc.visibility = View.GONE // full synopsis lives in the responsive detail page
                 ui.removeCallbacks(heroGuideRunnable)
                 glowHero(red, 0xFF0E5362.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
             }

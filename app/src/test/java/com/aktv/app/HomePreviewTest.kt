@@ -49,6 +49,7 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.heroBadge).text = if (movies) "MOVIES  /  SERIES" else "SPORTS  /  HINDI"
             root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "Explore the stories you love. All in one place." else "Your front-row seat to the channels you love."
             root.findViewById<View>(R.id.status).visibility = View.GONE
+            if (movies) root.findViewById<View>(R.id.heroDesc).visibility = View.GONE
             root.findViewById<View>(R.id.heroDot).visibility = if (movies) View.GONE else View.VISIBLE
             root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.ic_mark)
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
