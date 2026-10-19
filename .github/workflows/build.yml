@@ -21,6 +21,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Test bounded trace reports and credential-health redaction
+        run: |
+          node --test .github/scripts/compact-tg-trace.test.cjs
+          python3 -B .github/scripts/inspect-jjtv-player.test.py
       - name: Inspect live player metadata without saving credentials
         run: python3 .github/scripts/inspect-tg-player.py
       - name: Inspect the user-provided JJTV native stream contract

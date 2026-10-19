@@ -24,6 +24,7 @@ PAGE = SITE + '/pind?id=816'
 reports = []
 endpoints = {}
 http_times = {}
+data_bodies = {}
 
 
 class Scripts(HTMLParser):
@@ -151,6 +152,8 @@ def token_health(text, clock):
 def inspect_data():
     for name, url in endpoints.items():
         status, kind, text = get(url)
+        if status == 200:
+            data_bodies[name] = text
         browser_status, browser_kind, browser_text = get(url, browser_style=True)
         report = {'endpoint': name, 'url': safe_url(url), 'status': status, 'type': kind, 'bytes': len(text),
                   'canonicalNoReferrer': {'status': browser_status, 'type': browser_kind, 'bytes': len(browser_text)},
@@ -173,7 +176,7 @@ def inspect_data():
             report['schema'] = list(data.keys()) if isinstance(data, dict) else 'array'
             if name == 'CHANNELS_URL':
                 report['channelCount'] = len(data)
-                selected = [entry for entry in data if str(entry.get('id')) in ('816', '872', '1106', '1108', '362')]
+                selected = [entry for entry in data if str(entry.get('id')) in ('165', '816', '872', '1106', '1108', '362')]
                 report['selected'] = shared['sanitize'](selected)
                 report['keyFormats'] = {str(entry.get('id')): [
                     {key: len(str(value)) for key, value in pair.items()}
@@ -206,7 +209,7 @@ def inspect_data():
             elif name == 'COOKIE_STAR_SPORTS':
                 entries = (data.get('successful_results') or []) + (data.get('failed_results') or [])
                 report['resultCount'] = len(entries)
-                selected = [entry for entry in entries if str(entry.get('channel_id')) in ('816', '872', '1106', '1108', '362')]
+                selected = [entry for entry in entries if str(entry.get('channel_id')) in ('165', '816', '872', '1106', '1108', '362')]
                 report['selected'] = shared['sanitize'](selected)
             else:
                 report['data'] = shared['sanitize'](data[:2] if isinstance(data, list) else data)
@@ -216,10 +219,95 @@ def inspect_data():
         reports.insert(0, 'JJTV data\n' + json.dumps(report, ensure_ascii=True))
 
 
+def credential(value):
+    if not isinstance(value, str):
+        return ''
+    match = re.search(r'__hdnea__=([^&\s;"\x27<>]+)', value)
+    return match.group(1) if match else ''
+
+
+def window(token, clock):
+    decoded = urllib.parse.unquote(token)
+    def seconds(name):
+        match = re.search(r'(?:^|~)' + name + r'=(\d+)(?:~|$)', decoded)
+        return int(match.group(1)) - clock if match else None
+    expires, starts = seconds('exp'), seconds('st')
+    return {'present': bool(token), 'expiresInSeconds': expires, 'startsInSeconds': starts,
+            'expired': expires is not None and expires <= 0, 'notYetValid': starts is not None and starts > 0}
+
+
+def pick_token(values, clock, respect_start=False):
+    def score(value):
+        data = window(value, clock)
+        rank = 0 if (data['expiresInSeconds'] is not None and data['expiresInSeconds'] <= 10) or (respect_start and data['notYetValid']) else 1 if data['expiresInSeconds'] is None else 2
+        return rank, data['expiresInSeconds'] if data['expiresInSeconds'] is not None else -10**20
+    return max((value for value in values if value), key=score, default='')
+
+
+def comparison_probe(url):
+    # Only the provider's advertised Jio manifests; no invented proxy, account auth or alternate host.
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != 'https' or parsed.hostname not in {'jiotvmblive.cdn.jio.com', 'jiotvpllive.cdn.jio.com'} or parsed.username:
+        return {'skipped': 'not-an-advertised-Jio-manifest'}
+    request = urllib.request.Request(url, headers={'User-Agent': shared['UA'], 'Origin': SITE,
+        'Cache-Control': 'no-cache', 'Range': 'bytes=0-8191'})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            prefix = response.read(8192)
+            return {'status': response.status, 'prefixBytes': len(prefix),
+                    'dashSignature': b'<MPD' in prefix, 'hlsSignature': prefix.lstrip().startswith(b'#EXTM3U')}
+    except urllib.error.HTTPError as error:
+        return {'status': error.code}
+    except Exception as error:
+        return {'errorClass': type(error).__name__}
+
+
+def inspect_availability():
+    """Compare the working control and failing exact channels, never credentials or token hashes."""
+    try:
+        body = data_bodies.get('CHANNELS_URL', '').lstrip('\ufeff').strip()
+        catalog = json.loads(body if body.startswith('[') else '[' + body + ']')
+        primary = json.loads(data_bodies.get('COOKIE_PRIMARY', '[]'))
+        star = json.loads(data_bodies.get('COOKIE_STAR_SPORTS', '{}'))
+        clock = int(time.time())
+        primary_token = pick_token([credential(entry.get('cookie')) for entry in primary if isinstance(entry, dict)], clock)
+        rows = []
+        for channel in ('165', '872', '1106', '1108', '362'):
+            entry = next((entry for entry in catalog if str(entry.get('id')) == channel), None)
+            if entry is None:
+                rows.append({'channel': channel, 'cataloguePresent': False}); continue
+            url = entry.get('url', '').replace('bpk-tv//', 'bpk-tv/', 1)
+            parsed = urllib.parse.urlsplit(url)
+            is_star = parsed.hostname == 'jiotvpllive.cdn.jio.com'
+            entries = (star.get('successful_results') or []) + (star.get('failed_results') or [])
+            values = [credential((item.get('error_details') or {}).get('final_url') or item.get('final_url'))
+                      for item in entries if str(item.get('channel_id')) == channel]
+            selected = pick_token(values, clock) if is_star else primary_token
+            original = credential(url)
+            report = {'channel': channel, 'cataloguePresent': True, 'family': 'PL' if is_star else 'general',
+                      'selected': window(selected, clock), 'advertisedUrl': window(original, clock),
+                      'sameCredential': bool(selected) and selected == original,
+                      'usesGeneralCookie': bool(selected) and selected == primary_token}
+            if channel in ('165', '872', '1108'):
+                if selected and not window(selected, clock)['expired'] and not window(selected, clock)['notYetValid']:
+                    query = [part for part in parsed.query.split('&') if part and part.split('=', 1)[0] != '__hdnea__']
+                    query.append('__hdnea__=' + selected)
+                    supplied = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '&'.join(query), ''))
+                    report['selectedProbe'] = comparison_probe(supplied)
+                if original and original != selected and not window(original, clock)['expired'] and not window(original, clock)['notYetValid']:
+                    report['advertisedUrlProbe'] = comparison_probe(url)
+            rows.append(report)
+        reports.insert(0, 'JJTV exact-channel availability\n' + json.dumps({'inspectedUtcEpoch': clock,
+            'devicePlaybackTested': False, 'channels': rows}))
+    except Exception as error:
+        reports.insert(0, 'JJTV availability comparison incomplete: ' + type(error).__name__)
+
+
 if __name__ == '__main__':
     try:
         inspect()
         inspect_data()
+        inspect_availability()
     finally:
         text = '\n\n'.join(reports)[:24000]
         for start in range(0, len(text), 3000):

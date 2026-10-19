@@ -1,6 +1,7 @@
 // Read-only browser trace: compare actual source selection/headers with native metadata resolution.
 // Never emit stream query values, cookies, key IDs, licence bodies or raw browser console messages.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { compactTrace } = require('./compact-tg-trace.cjs');
 
 const TG = 'https://livetgtv.lovable.app';
 const JJ = 'https://jjtvxweb.pages.dev';
@@ -178,17 +179,13 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage'] });
   try {
-    const cases = ['1106', '1108', '362', '872'].map(channel => [channel, 'TG-embedded']);
+    const cases = ['165', '872', '1108', '1106', '362'].map(channel => [channel, 'TG-embedded']);
     const results = await Promise.all(cases.map(([channel, entrypoint]) => trace(browser, channel, entrypoint)));
     for (const result of results) {
       const channel = result.channel;
       // Keep the final state and actual requests, not thirteen duplicate video-state snapshots.
-      const metadataReport = JSON.stringify({ channel, entrypoint: result.entrypoint, metadata: result.metadata });
-      for (let start = 0; start < Math.min(metadataReport.length, 6000); start += 3000) {
-        const text = metadataReport.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
-        console.log(`::notice title=Browser metadata ${channel} ${start / 3000 + 1}::${text}`);
-      }
-      const report = JSON.stringify({ ...result, metadata: undefined, records: result.records.filter(record => record.event !== 'state' && record.event !== 'media-request') });
+      // Five cases x at most two notices: do not lose the last channel to GitHub's step notice limit.
+      const report = compactTrace(result);
       for (let start = 0; start < Math.min(report.length, 6000); start += 3000) {
         const text = report.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
         console.log(`::notice title=Browser trace ${result.entrypoint} ${channel} ${start / 3000 + 1}::${text}`);
