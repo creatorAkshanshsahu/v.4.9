@@ -351,7 +351,7 @@ class JjtvResolverTest {
     @Test fun `stale credentials returned again after refresh are reported unavailable using HTTP time`() {
         val http = Fake { url, _ -> when (URI(url).path) {
             "/pind" -> response(page()).copy(serverTimeMs = 100_000)
-            "/channels.json" -> response("[${channel("872")}]").copy(serverTimeMs = 100_000)
+            "/channels.json" -> response("[${channel("872").replace("media.example/fixture-872-v1.mpd", "jiotvmblive.cdn.jio.com/bpk-tv/SonyYAYHin_MOB/WDVLive/index.mpd")}]").copy(serverTimeMs = 100_000)
             "/general.json" -> response(primary("st=1~exp=50~hmac=old")).copy(serverTimeMs = 100_000)
             else -> throw AssertionError("Unexpected metadata")
         } }
@@ -366,7 +366,7 @@ class JjtvResolverTest {
         var fresh = false
         val http = Fake { url, _ -> when (URI(url).path) {
             "/pind" -> response(page()).copy(serverTimeMs = 100_000)
-            "/channels.json" -> response("[${channel("872")}]").copy(serverTimeMs = 100_000)
+            "/channels.json" -> response("[${channel("872").replace("media.example/fixture-872-v1.mpd", "jiotvmblive.cdn.jio.com/bpk-tv/SonyYAYHin_MOB/WDVLive/index.mpd")}]").copy(serverTimeMs = 100_000)
             "/general.json" -> response(primary(if (fresh) "st=1~exp=500~hmac=current" else "st=1~exp=50~hmac=old")).copy(serverTimeMs = 100_000)
             else -> throw AssertionError("Unexpected metadata")
         } }

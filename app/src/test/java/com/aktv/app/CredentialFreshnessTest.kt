@@ -57,4 +57,9 @@ class CredentialFreshnessTest {
         assertEquals(120_000L, StreamRequestPolicy.notBefore("", "__hdnea__=st%3D120%7Eexp%3D300%7Ehmac%3Dsynthetic"))
         assertNull(StreamRequestPolicy.notBefore("", "__hdnea__=opaque"))
     }
+    @Test fun `additional provider auth headers keep validity with the server rather than guessing precedence`() {
+        val stream = source("exp=1~hmac=old").copy(headers = mapOf("Authorization" to "Bearer synthetic-current"))
+        assertNull(CredentialFreshness.issue(stream, trusted()))
+    }
+
 }

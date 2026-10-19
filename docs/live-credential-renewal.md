@@ -1,0 +1,73 @@
+# Intermittent live-channel access and renewal — 4.9.20
+
+Investigated 2026-10-19. The goal is better native recovery, **not a claim of uninterrupted availability from third-party providers**.
+
+## New device evidence
+
+The user supplied working and failing **4.9.18 phone** reports:
+
+- Channel **165**, identified by the user as the working Zee HD stream: JJTV / DASH / ClearKey, `KEYS_LOADED`, CENC, HEVC 1920×1080 using `c2.qti.hevc.decoder`, AAC stereo using `c2.android.aac.decoder`, video-frame and audio-advancement events.
+- Channel **872**, Sony YAY Hindi, on October 18: JJTV / DASH / ClearKey, CENC, H.264 1024×576 using `c2.qti.avc.decoder`, AAC stereo, loaded keys, rendered-frame/audio-advancement events and a visible picture behind the dialog.
+- Channel **872**, on October 19: JJTV and TG attempts report HTTP 403 / Media3 2004; the displayed subsequent TG attempt has no completed manifest/init/media load or selected decoder.
+- The local synthetic ClearKey test passes on the pictured phone. That is **not** a real-channel or HEVC decoding test; the separate working-channel reports provide the relevant playback evidence.
+- The application is running as a 32-bit process on a device advertising arm64 support. Those working frames do not support blaming this phone's APK bitness for the 403.
+
+These reports establish the working codec/DRM path on the **phone**, not on the user's TV box. A decoder library cannot make an HTTP-refused source or an expired signature valid. The box's current build, exact failure stage and codec capabilities remain separately unverified.
+
+## What the live provider supplied
+
+Read-only comparison: [run 39208988485](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39208988485), inspection job `117917935049`, **2026-10-19 06:17:15 UTC / 11:47:15 IST**.
+
+| Exact channel ID | Credential service | Selected credential at inspection |
+| --- | --- | --- |
+| 165 — user's working Zee HD control | PL / per-channel | Valid for approximately 6m25s more |
+| 872 — Sony YAY Hindi | General cookie | Expired approximately 5h17m earlier |
+| 1106 — Star Sports 1 HD | PL / exact channel | Expired approximately 4h55m earlier |
+| 1108 — Star Sports 1 Hindi HD | PL / exact channel | Expired approximately 4h55m earlier |
+| 362 — Star Sports 1 Hindi SD | PL / exact channel | Expired approximately 10h57m earlier |
+
+- Provider HTTPS `Date` values were within a few seconds of the runner clock and reported `Age: 0`; this is not an inference from a possibly incorrect TV wall clock.
+- The general cookie endpoint supplied one known-expiry credential and it was expired. The PL endpoint contained **24 expired credentials among 69 distinct known-expiry tokens**.
+- Fresh/cache-busted requests returned **unchanged** cookie documents in that check.
+- The catalogue URLs' own embedded credentials were also expired by several days. No fresh alternative was established from those original URLs.
+- The native metadata checks in build job `117917934860` independently reported expired supplied credentials for the same Sony/Star cases. A TG relay's own URL/query is still distinct from a direct signed Jio request; a relay may generate a new redirect and is not treated as statically expired merely because TG repeats an old cookie field on it.
+- Runner media access returns 451 and does not verify decoded playback. The expired metadata is a separate, directly observed finding that fits the user's intermittent 403/recovery reports; it does not prove that every past/future 403 has the same cause.
+
+The provider must publish or return a legitimate renewed signature. The app cannot generate that signature, extend its expiry, borrow another channel's token, or guarantee playback while every supplied route is unavailable. Caching yesterday's URL or adding a decoder would not solve that condition.
+
+## Changes in 4.9.20 / versionCode 37
+
+### Recognise unusable supplied authorization
+
+- Compare known direct-Jio `st`/`exp` fields against an observed **HTTPS Date/Age reference**, advancing on monotonic elapsed time.
+- Never reject a credential solely because the device's wall clock is wrong. Unknown token formats and requests with additional provider auth headers remain for the server to judge.
+- Use conservative margins: clearly expired by more than 30 seconds, or not valid for more than 10 seconds yet.
+- Prefer a currently usable supplied token over a future-start token with a longer expiry.
+- Preserve unexpired alternatives. If all applicable sources have unusable credentials after the bounded metadata refresh, report **provider credentials expired / not yet valid** rather than pretending the decoder failed.
+- Do not modify provider-owned signatures or infer an expiry for relay endpoints that can issue a new signed redirect.
+
+### Avoid repeating the same refused request
+
+- Keep session-local hashes of the **effective direct-Jio request**, including the supplied authorization and header profile—not a server label.
+- A recently refused identical request is suppressed briefly. A changed legitimate URL/cookie/header combination can be tried immediately; a different channel or explicit manual retry starts its own context.
+- Dynamic relay URLs are not suppressed merely because the URL is unchanged.
+- An auth refresh no longer retires **every untried source/profile** from that provider. If renewal fails, other already-advertised alternatives remain eligible within the existing deadlines.
+
+### Bounded automatic recovery
+
+- After eligible access/network/credential failures, gently check for fresh available sources after **30, 60 and 120 seconds**, only while the user remains on that channel.
+- Keep the existing per-cycle/provider startup bounds; there is no endless spinner or tight retry loop.
+- Cancel delayed checks on channel/session change, Back/close, backgrounding or an explicit DRM test. A late callback cannot resume a different channel.
+- Honour `Retry-After`. Long rate-limit delays are not shortened. A provider explicitly indicating a browser challenge is not repeatedly retried or worked around.
+- Decoder/DRM/geographical failures alone do not initiate credential polling. A separate provider's decoder failure does not erase an eligible renewal for another provider.
+- After three scheduled checks, stop automatic work and leave manual source/retry controls available. A real stable playback period resets the recovery budget for a later interruption.
+
+The 4.9.19 request-policy and response-classification corrections remain. Frost Movies/Series, source-owned DRM and native playback remain intact. **No software-video decoder, fabricated source, substituted key, or web/backup player is added.**
+
+## Verification and limits
+
+Deterministic tests cover trusted versus device clock, expiry/start windows, unchanged-request suppression, changed credentials/headers, relay exceptions, independent channel/provider contexts, retry bounds, Retry-After, challenge handling, and delayed-work lifecycle guards. Both APK ABIs must pass the offline suite before delivery.
+
+The live checks are separate and non-gating: they must report provider-supplied stale credentials as unavailable instead of disguising that state as a successful playback test. Final build/test/artifact evidence is recorded in PR #1.
+
+The expected improvement is **clearer status, fewer redundant requests and automatic recovery when usable provider data appears**. It is not a promise that Sony YAY/Star will play immediately while the provider is still returning expired credentials, nor a physical TV-box playback verification.

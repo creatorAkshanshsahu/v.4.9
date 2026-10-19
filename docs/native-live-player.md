@@ -1,3 +1,11 @@
+## 4.9.20: expired provider credentials and bounded automatic renewal
+
+October 19 device reports show channel 165 playing HEVC/ClearKey while Sony YAY 872 returns HTTP 403; October 18 reports show Sony playing H.264/ClearKey on the same phone. A fresh comparison found still-valid authorization for 165 but expired supplied Sony/Star credentials, unchanged by fresh/cache-busted metadata requests. [Evidence and recovery changes](live-credential-renewal.md) distinguish that provider-side condition from a decoder failure.
+
+The native resolver now recognises definitely expired/not-yet-valid direct credentials using HTTPS response time, preserves legitimate alternatives and dynamic relays, avoids recently refused identical requests, and offers at most three gentle automatic checks while the same channel remains open. No generated token, cross-channel credential, web backup or software-video decoder is introduced. This improves recovery; it cannot guarantee availability until a provider supplies usable authorization.
+
+---
+
 ## 4.9.19: phone HTTP/manifest failures
 
 The user confirmed current mobile failures before decoding: JJTV metadata HTTP 403, TG HTTP 403, and a manifest parsing error. [Investigation and changes](mobile-http-errors.md) cover the newly traced JJTV metadata Origin/Referer mismatch, canonical metadata URLs, per-stage HTTP response classification, guarded native format correction, and **Copy redacted report** with an exact build ID. This is not a confirmed codec/Gecko failure or a verified on-phone fix; the current same-channel website comparison remains untested.

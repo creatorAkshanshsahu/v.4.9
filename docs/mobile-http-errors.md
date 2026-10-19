@@ -21,6 +21,10 @@ A parser exception alone does **not** prove the server sent HTML. It could also 
 
 The user reports JJTV recovered on **unchanged 4.9.18 on mobile**, using the native “browser request” profile, while the Android box still retries and ends in 403. That recovery cannot be attributed to the 4.9.19 patch. The box's currently installed build and precise failing stage remain unconfirmed. The user also reports successful playback on this box in 4.7; the [extended comparison now includes static inspection of the actual 4.7.3 APK](tv-4.7.2-comparison.md), including its different native HTTP/cookie path. Neither a missing codec nor use of the old web fallback has been established as the box's explanation.
 
+## October 19 follow-up
+
+New working/failed reports now identify channel 165 (HEVC/ClearKey, keys loaded and A/V progress) and Sony YAY 872 (working H.264/ClearKey on October 18, HTTP 403 on October 19). A fresh provider check found current authorization for 165 but expired supplied Sony/Star credentials. See [4.9.20 credential-renewal evidence and changes](live-credential-renewal.md). This is concrete new evidence, not a retrospective claim that every earlier 403 had the same cause.
+
 ## New browser trace: metadata, not just video
 
 Read-only run [39058745317](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39058745317), inspection job `117472093974`, extended the existing TG/JJTV trace to metadata requests. Representative IDs were 1106, 1108, 362 and 872; these are **not claimed to identify the user's unnamed failing channel**.

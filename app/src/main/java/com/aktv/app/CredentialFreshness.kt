@@ -16,6 +16,9 @@ internal class SourceCredentialsUnavailableException(val provider: LiveProvider,
 internal object CredentialFreshness {
     fun issue(source: TgStream, clock: HttpReferenceClock): CredentialIssue? {
         if (!clock.hasReference()) return null
+        // If the provider also supplied an explicit auth header, its precedence is unknown here.
+        // Do not reject a request based on one query field while another credential may authorize it.
+        if (source.headers.keys.any { it.equals("Authorization", true) || it.equals("Cookie", true) }) return null
         val uri = try { URI(source.url) } catch (_: Exception) { return null }
         if (uri.scheme != "https" || uri.host?.lowercase() !in setOf("jiotvmblive.cdn.jio.com", "jiotvpllive.cdn.jio.com") ||
             uri.port !in setOf(-1, 443) || !uri.path.orEmpty().startsWith("/bpk-tv/")) return null
