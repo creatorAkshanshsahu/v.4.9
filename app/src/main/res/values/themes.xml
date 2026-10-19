@@ -15,7 +15,7 @@
         <item name="android:textColorSecondary">@color/text_dim</item>
         <item name="colorAccent">@color/signal</item>
     </style>
-    <style name="Widget.AKTV.RailItem">
+    <style name="Widget.AKTV.RailItem" parent="@android:style/Widget.TextView">
         <item name="android:layout_width">match_parent</item><item name="android:layout_height">56dp</item>
         <item name="android:layout_marginBottom">4dp</item><item name="android:gravity">center</item>
         <item name="android:focusable">true</item><item name="android:clickable">true</item>
