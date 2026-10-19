@@ -70,4 +70,21 @@ Final CI results and APK artifact are recorded in PR #1. **Physical TV testing o
 - Sixteen working-4.9.18 contract hashes verified before building.
 - Native Android layout previews checked at 960×540 (TV/live + movies) and 800×360 (phone). Navigation-label clipping was corrected; the movie hero leaves the complete first poster row and captions visible.
 - `design/previews/` contains native-layout renders using labelled sample content; `design/entrance-preview.gif` is a motion illustration, not a physical-device recording.
-- No physical TV smoothness success is claimed. Test the exact Hindi HD channel, then use **MENU → Picture quality** if a manual stable rendition is preferred.
+- No physical TV smoothness success is claimed for Star Sports. Test the exact Hindi HD channel, then use **MENU → Picture quality** if a manual stable rendition is preferred.
+
+## 2026-10-20 paired device check — Sony YAY (channel 872)
+
+The user retried build **4.9.21 / code 38 / build 39230231216** on both the Hivendor Android TV and a OnePlus phone within about 80 seconds. Both reports show the same app build, channel ID 872, and native Media3/SurfaceView engine; neither uses WebView or Gecko for live playback.
+
+- **Phone succeeded:** JJTV / DASH / ClearKey, CENC keys loaded, 12 manifests, 2 init loads and 30 media loads (~6.6 MB); H.264 1024×576 at 25 fps / ~1.7 Mbps with AAC; first video frame and audio advancement both reported true. The status bar shows 5G+.
+- **TV did not start a picture:** it showed “waiting for the first picture”; two JJTV ClearKey attempts returned HTTP 403 / Media3 2004. A separate TG/DASH attempt configured as DRM NONE reported unsupported DRM and loaded manifest bytes but zero init/media segments and selected no tracks; another TG attempt reported Media3 3002 / ParserException. The TV report also showed codec-limit fallback enabled, but these errors occur before a TV video decoder was selected.
+- The user confirms that the phone and TV use the same mobile hotspot; the same network had worked for both earlier that morning. The user also reports that the TV sometimes connects to JJTV. The phone's 5G+ icon therefore is not evidence of a different egress route. A general hotspot/ISP outage or permanent TV incompatibility is not a good explanation. Same egress still does not guarantee identical per-device HTTP requests or provider authorization. The earlier “webpage versus native player” explanation does not apply: both are native Media3.
+- The prior redacted metadata check at 00:01 IST showed several hours of validity remaining for Sony YAY authorization. Expiry alone is not a fit for this later phone-success/TV-403 pair; a 403 still means that specific TV request was refused. Do not treat the test-runner's 451 as the TV result.
+- **Next useful evidence:** copy the full **redacted playback report** from a failing TV attempt and, if it plays again, from a successful TV attempt on the same setup. Comparing those same-device reports should show whether the successful case used a different provider/profile or reached different playback stages. A successful phone report is useful context but is less discriminating now. Do not ask the user to press **Check DRM** during playback; it stops the stream and checks only the local ClearKey service. The TV decoder remains untested until that device receives tracks and media segments.
+
+## Follow-up build 4.9.22
+
+The paired result above is carried into a new build rather than a new UI. See
+`docs/tv-jjtv-403-4.9.22.md` for the two bounded changes (JJTV-first default for Sony YAY, and a
+startup credential-headroom pre-flight), the unchanged 4.9.18 request/DRM contract, and the
+verification that is still outstanding. Version is now `4.9.22` / code `39`.
