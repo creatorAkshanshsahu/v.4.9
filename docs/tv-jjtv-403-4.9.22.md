@@ -100,3 +100,11 @@ Version is `4.9.23` / code `40`.
 2. Open 872 and leave it alone. A retry message appears only if the provider refuses.
 3. If it plays, note whether the retry message appeared — that is the new path working.
 4. If it fails, open **Playback details → Copy redacted report** and share it.
+
+## Build evidence for 4.9.23
+
+- CI build [39392205009](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392205009),
+  job `build` succeeded for both ABIs; APK artifact
+  [12250805492](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392205009/artifacts/12250805492).
+- Baseline guard, offline unit tests, TV/phone layout previews and the read-only live checks ran in
+  the same build.
