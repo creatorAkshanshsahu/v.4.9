@@ -60,20 +60,21 @@ internal object PlaybackProblems {
 }
 
 internal class NativePlaybackDiagnostics(private val trace: PlaybackDiagnostics.Attempt) : AnalyticsListener {
+    private fun loadType(dataType: Int) = when (dataType) {
+        C.DATA_TYPE_MANIFEST -> PlaybackDiagnostics.Load.MANIFEST
+        C.DATA_TYPE_MEDIA_INITIALIZATION -> PlaybackDiagnostics.Load.INITIALIZATION
+        C.DATA_TYPE_MEDIA -> PlaybackDiagnostics.Load.MEDIA
+        else -> PlaybackDiagnostics.Load.OTHER
+    }
     override fun onLoadCompleted(eventTime: AnalyticsListener.EventTime, loadEventInfo: LoadEventInfo, mediaLoadData: MediaLoadData) {
-        val type = when (mediaLoadData.dataType) {
-            C.DATA_TYPE_MANIFEST -> PlaybackDiagnostics.Load.MANIFEST
-            C.DATA_TYPE_MEDIA_INITIALIZATION -> PlaybackDiagnostics.Load.INITIALIZATION
-            C.DATA_TYPE_MEDIA -> PlaybackDiagnostics.Load.MEDIA
-            else -> PlaybackDiagnostics.Load.OTHER
-        }
+        val type = loadType(mediaLoadData.dataType)
         val date = loadEventInfo.responseHeaders.entries.firstOrNull { it.key.equals("Date", true) }?.value?.firstOrNull()
         val skew = try { date?.let { (System.currentTimeMillis() - ZonedDateTime.parse(it, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()) / 1000 } }
             catch (_: Exception) { null }
         trace.loaded(type, loadEventInfo.bytesLoaded, skew)
     }
     override fun onLoadError(eventTime: AnalyticsListener.EventTime, loadEventInfo: LoadEventInfo, mediaLoadData: MediaLoadData, error: IOException, wasCanceled: Boolean) {
-        if (!wasCanceled) trace.loadError(PlaybackProblems.from(error))
+        if (!wasCanceled) trace.loadError(PlaybackProblems.from(error), loadType(mediaLoadData.dataType))
     }
     override fun onTracksChanged(eventTime: AnalyticsListener.EventTime, tracks: Tracks) {
         var video = 0; var audio = 0; var drm = 0; var codec = 0; var exceeds = 0

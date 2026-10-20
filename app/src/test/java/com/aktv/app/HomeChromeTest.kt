@@ -42,8 +42,10 @@ class HomeChromeTest {
         }
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
-    fun `short landscape phone keeps search and the content shelf on screen`() = screen(800, 360) { root ->
-        val search = root.findViewById<View>(R.id.searchBtn)
+    fun `short landscape phone keeps horizontal section pills and the content shelf on screen`() = screen(800, 360) { root ->
+        assertEquals(View.GONE, root.findViewById<View>(R.id.navRail).visibility)
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.phoneNavScroll).visibility)
+        val search = root.findViewById<View>(R.id.phoneSearch)
         assertTrue(search.top >= 0); assertTrue(search.bottom <= 360)
         assertTrue(root.findViewById<View>(R.id.rows).height >= 100)
         assertTrue(root.findViewById<View>(R.id.heroTitle).width > 220)

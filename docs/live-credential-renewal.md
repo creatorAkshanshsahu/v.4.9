@@ -16,7 +16,12 @@ The user supplied working and failing **4.9.18 phone** reports:
 - The local synthetic ClearKey test passes on the pictured phone. That is **not** a real-channel or HEVC decoding test; the separate working-channel reports provide the relevant playback evidence.
 - The application is running as a 32-bit process on a device advertising arm64 support. Those working frames do not support blaming this phone's APK bitness for the 403.
 
-These reports establish the working codec/DRM path on the **phone**, not on the user's TV box. A decoder library cannot make an HTTP-refused source or an expired signature valid. The box's current build, exact failure stage and codec capabilities remain separately unverified.
+These earlier reports establish a working codec/DRM path on the **phone**, not on the TV. The user later supplied a near-simultaneous paired test on build **4.9.21 / code 38 / build 39230231216**, channel 872:
+
+- The OnePlus phone (Android 16 / API 36; 32-bit app process) played JJTV/DASH/ClearKey with CENC keys loaded, H.264 1024×576, AAC, 30 media loads, first-frame and audio-advance events. Its status bar showed 5G+.
+- The Hivendor TV report (API 28; `armeabi-v7a`; 32-bit process) showed no first picture. JJTV attempts returned HTTP 403 / Media3 2004; TG attempts separately showed a 3002 parser error and a DRM NONE / unsupported-DRM no-track result, with zero init/media loads on that attempt. Both devices show the same AK TV build and native Media3/SurfaceView live engine.
+
+This is direct evidence that the channel and a real ClearKey playback route worked on the phone while the TV's request failed. The user confirms both devices were using the same mobile hotspot, that the same network had worked for both earlier that morning, and that the TV sometimes connects to JJTV. Thus the 5G+ icon does not indicate different egress here; a general ISP/hotspot block or permanent TV incompatibility is not a good explanation. The remaining issue is intermittent and per-client/session: the phone's native request succeeds while the TV's request is refused, even on the same network. The screenshot's TV 403 is a request refusal, not a decoder error. The TV's actual codec capability remains untested because no tracks were selected. Earlier language attributing this pair to webpage-versus-native playback was incorrect: both clients used native Media3. The most useful next evidence is the redacted playback reports from a failing TV attempt and, if it plays again, a successful TV attempt on the same setup; these can show whether the successful case used a different provider/profile or reached different playback stages.
 
 ## What the live provider supplied
 

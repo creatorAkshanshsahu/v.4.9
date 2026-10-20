@@ -23,10 +23,10 @@ object Epg {
     private val cache = HashMap<String, Hit>()
     private const val TTL = 45_000L          // the API itself caches for ~30 s
 
-    fun cached(id: String): Guide? =
+    @Synchronized fun cached(id: String): Guide? =
         cache[id]?.takeIf { System.currentTimeMillis() - it.at < TTL }?.g
 
-    fun put(id: String, g: Guide) { cache[id] = Hit(System.currentTimeMillis(), g) }
+    @Synchronized fun put(id: String, g: Guide) { cache[id] = Hit(System.currentTimeMillis(), g) }
 
     private fun str(o: JSONObject, k: String) = if (o.isNull(k)) "" else o.optString(k, "").trim()
 

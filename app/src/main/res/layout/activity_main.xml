@@ -77,11 +77,20 @@
                 <TextView android:id="@+id/infoDesc" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:maxWidth="620dp"
                     android:textColor="@color/text_dim" android:textSize="12sp" android:visibility="gone"/>
-                <TextView android:id="@+id/infoNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                <TextView android:id="@+id/infoScheduleNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="620dp"
                     android:textColor="@color/text_dim" android:textSize="12sp" android:visibility="gone"/>
+                <TextView android:id="@+id/infoNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="620dp"
+                    android:textColor="@color/text_faint" android:textSize="11sp" android:visibility="gone"/>
+                <LinearLayout android:id="@+id/infoActions" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
+                    <TextView android:id="@+id/infoSourceAction" style="@style/Widget.AKTV.PlayerAction" android:text="SOURCE"/>
+                    <TextView android:id="@+id/infoQualityAction" style="@style/Widget.AKTV.PlayerAction" android:text="PICTURE QUALITY"/>
+                    <TextView android:id="@+id/infoRetryAction" style="@style/Widget.AKTV.PlayerAction" android:text="RETRY"/>
+                </LinearLayout>
                 <TextView android:id="@+id/infoHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:textColor="@color/text_faint" android:textSize="12sp"/>
+                    android:layout_marginTop="7dp" android:textColor="@color/text_faint" android:textSize="11sp"/>
             </LinearLayout>
         </LinearLayout>
         <TextClock android:id="@+id/playerClock" android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -122,7 +131,7 @@
             </LinearLayout>
         </LinearLayout>
         <ProgressBar android:id="@+id/spinner" android:layout_width="56dp" android:layout_height="56dp"
-            android:layout_gravity="center" android:indeterminateTint="@color/ion"/>
+            android:layout_gravity="center" android:indeterminateTint="@color/ion" android:visibility="gone"/>
         <TextView android:id="@+id/playStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="top|center_horizontal" android:layout_marginTop="28dp" android:textColor="@color/text_dim"
             android:gravity="center" android:maxWidth="700dp" android:paddingStart="24dp" android:paddingEnd="24dp"

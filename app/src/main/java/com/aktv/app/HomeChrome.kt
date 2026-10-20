@@ -11,19 +11,23 @@ import androidx.recyclerview.widget.RecyclerView
 
 /** Shared native layout rules for real screens and offline layout/snapshot tests. No network or player. */
 internal object HomeChrome {
-    data class Metrics(val rail: Int, val header: Int, val hero: Int, val margin: Int, val compact: Boolean)
+    data class Metrics(val rail: Int, val header: Int, val hero: Int, val margin: Int, val compact: Boolean, val phone: Boolean)
     fun metrics(width: Int, height: Int, dp: Float, movies: Boolean): Metrics {
         val compact = height / dp < 420
-        val rail = ((if (compact) 82 else 100) * dp).toInt()
+        val phone = width / dp < 600 || (compact && width / dp < 900)
+        val rail = if (phone) 0 else ((if (compact) 82 else 100) * dp).toInt()
         val header = ((if (compact) 54 else 80) * dp).toInt()
-        val hero = (height * if (movies) 0.32f else 0.40f).toInt()
-        return Metrics(rail, header, hero, ((if (compact) 20 else 28) * dp).toInt(), compact)
+        val heroRatio = if (phone && compact) { if (movies) 0.24f else 0.28f } else if (movies) 0.32f else 0.40f
+        val hero = (height * heroRatio).toInt()
+        return Metrics(rail, header, hero, ((if (compact) 20 else 28) * dp).toInt(), compact, phone)
     }
 
     fun apply(root: View, screenWidth: Int, screenHeight: Int, dp: Float, movies: Boolean): Metrics {
         val m = metrics(screenWidth, screenHeight, dp, movies)
         fun px(value: Int) = (value * dp).toInt()
         val rail = root.findViewById<LinearLayout>(R.id.navRail)
+        rail.visibility = if (m.phone) View.GONE else View.VISIBLE
+        root.findViewById<View>(R.id.phoneNavScroll).visibility = if (m.phone) View.VISIBLE else View.GONE
         rail.layoutParams.width = m.rail
         rail.setPadding(px(if (m.compact) 7 else 10), px(if (m.compact) 10 else 20), px(if (m.compact) 7 else 10), px(10))
         root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply { width = px(if (m.compact) 48 else 56); height = px(if (m.compact) 24 else 34) }
@@ -49,8 +53,10 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.sectionKicker).textSize = if (m.compact) 8f else 9f
         root.findViewById<View>(R.id.librarySummary).visibility = if (screenWidth / dp < 800) View.GONE else View.VISIBLE
         root.findViewById<View>(R.id.heroMedia).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply { height = m.hero; topMargin = m.header; marginStart = m.rail + m.margin; marginEnd = m.margin }
-            background = Ui.pill(dp, 0xFF101E2B.toInt(), if (m.compact) 18f else 24f)
+            (layoutParams as FrameLayout.LayoutParams).apply { height = m.hero; topMargin = m.header + if (m.phone) px(48) else 0; marginStart = m.rail + m.margin; marginEnd = m.margin }
+            background = Ui.pill(dp, 0xE6101E2B.toInt(), if (m.compact) 18f else 24f).apply {
+                setStroke((1 * dp).toInt().coerceAtLeast(1), 0x33FFFFFF)
+            }
             clipToOutline = true
         }
         root.findViewById<View>(R.id.heroArea).layoutParams.height = m.hero
@@ -91,14 +97,21 @@ internal object HomeChrome {
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 42 else 58) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
         } else {
-            val width = ((if (compact) 92 else 128) * dp).toInt()
+            val width = ((if (compact) 108 else 148) * dp).toInt()
             lp.width = width
+            val contentWidth = (width - (24 * dp).toInt()).coerceAtLeast((72 * dp).toInt())
+            tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = contentWidth
             tile.findViewById<ImageView>(R.id.poster)?.let { posterView ->
                 val box = posterView.parent as View
-                box.layoutParams.apply { this.width = width - (12 * dp).toInt(); height = ((if (compact) 110 else 164) * dp).toInt() }
+                val posterWidth = contentWidth - (8 * dp).toInt()
+                box.layoutParams.apply { this.width = posterWidth; height = (posterWidth * 1.5f).toInt() }
             }
-            tile.findViewById<TextView>(R.id.posterTitle)?.textSize = if (compact) 10f else 12f
-            tile.findViewById<TextView>(R.id.posterMeta)?.textSize = if (compact) 9f else 10f
+            tile.findViewById<TextView>(R.id.posterRank)?.apply {
+                textSize = if (compact) 43f else 62f
+                layoutParams.height = ((contentWidth - (8 * dp).toInt()) * 1.5f).toInt()
+            }
+            tile.findViewById<TextView>(R.id.posterTitle)?.textSize = if (compact) 9f else 11f
+            tile.findViewById<TextView>(R.id.posterMeta)?.textSize = if (compact) 8f else 9f
         }
     }
 }

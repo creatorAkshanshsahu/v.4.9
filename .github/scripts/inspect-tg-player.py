@@ -192,6 +192,32 @@ def probe_media(config):
     return reports
 
 
+def credential_window(value, clock):
+    """Timing only; this cannot validate a signature or establish channel playback."""
+    token = re.search(r'__hdnea__=([^&\s;"\x27<>]+)', value or '')
+    if not token:
+        return {'present': False, 'expiresInSeconds': None, 'startsInSeconds': None, 'expired': None}
+    decoded = urllib.parse.unquote(token.group(1))
+    def remaining(field):
+        match = re.search(r'(?:^|~)' + field + r'=(\d+)(?:~|$)', decoded)
+        return int(match.group(1)) - clock if match else None
+    expires, starts = remaining('exp'), remaining('st')
+    return {'present': True, 'expiresInSeconds': expires, 'startsInSeconds': starts,
+            'expired': None if expires is None else expires <= 0,
+            'notYetValid': None if starts is None else starts > 0}
+
+
+def source_credential_status(config, clock):
+    rows = []
+    for index, source in enumerate([config] + (config.get('backups') or [])[:3]):
+        urls = [url for url in (source.get('urls') or [])[:2] if isinstance(url, str)]
+        rows.append({'sourceIndex': index + 1, 'providedCookie': credential_window(source.get('cookie', ''), clock),
+                     'urls': [{'host': urllib.parse.urlsplit(url).hostname,
+                               'relayOwnsQuery': 'allinonereborn' in (urllib.parse.urlsplit(url).hostname or ''),
+                               'embeddedCredential': credential_window(url, clock)} for url in urls]})
+    return rows
+
+
 def inspect():
     page = f'{SITE}/watch/{CHANNEL}?_contract={int(time.time())}'
     status, kind, html = get(page)
@@ -228,13 +254,13 @@ def inspect():
     if not player_ids:
         emit('TG RPC', {'error': 'No function found in the deployed servers chunk'})
         raise SystemExit(1)
-    for channel in ('872', '1106', '1108', '362'):
+    for channel in ('165', '872', '1106', '1108', '362'):
         inner = {'t': 10, 'i': 0, 'p': {'k': ['data'], 'v': [
             {'t': 10, 'i': 1, 'p': {'k': ['id'], 'v': [{'t': 1, 's': channel}]}, 'o': 0}]}, 'o': 0}
         payload = urllib.parse.quote(json.dumps({'t': inner, 'f': 127, 'm': []}, separators=(',', ':')))
         for fn in player_ids[:3]:
             code, kind, body = get(f'{SITE}/_serverFn/{fn}?payload={payload}', rpc=True)
-            report = {'channel': channel, 'function': fn, 'status': code, 'type': kind, 'bytes': len(body)}
+            report = {'channel': channel, 'function': fn, 'status': code, 'type': kind, 'bytes': len(body), 'checkedUtcEpoch': int(time.time())}
             try:
                 refs = {}
                 decoded = [decode(record, refs) for record in records(body, kind)]
@@ -242,6 +268,7 @@ def inspect():
                 for record in decoded:
                     config = record.get('result') if isinstance(record, dict) else None
                     if isinstance(config, dict) and 'urls' in config:
+                        report['credentialStatus'] = source_credential_status(config, report['checkedUtcEpoch'])
                         report['manifests'] = probe_media(config)
             except Exception as error:
                 report['decodeError'] = type(error).__name__

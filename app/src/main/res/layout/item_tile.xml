@@ -8,15 +8,24 @@
         android:layout_gravity="center" android:layout_marginBottom="14dp" android:gravity="center"
         android:textColor="#FFFFFF" android:textSize="19sp" android:fontFamily="@font/sora_bold"
         android:includeFontPadding="false" android:visibility="gone"/>
-    <View android:layout_width="match_parent" android:layout_height="46dp" android:layout_gravity="bottom"
+    <View android:layout_width="match_parent" android:layout_height="54dp" android:layout_gravity="bottom"
         android:background="@drawable/scrim_card"/>
     <View android:layout_width="6dp" android:layout_height="6dp" android:layout_margin="11dp"
         android:background="@drawable/dot" android:backgroundTint="@color/live"/>
+    <TextView android:id="@+id/liveBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_gravity="top|end" android:layout_margin="8dp" android:text="LIVE"
+        android:background="@drawable/live_pill" android:textColor="#FFFFFF" android:textSize="8sp"
+        android:fontFamily="@font/sora_bold" android:letterSpacing="0.08" android:paddingStart="7dp"
+        android:paddingEnd="7dp" android:paddingTop="2dp" android:paddingBottom="2dp"/>
     <TextView android:id="@+id/fav" android:layout_width="wrap_content" android:layout_height="wrap_content"
         android:layout_gravity="top|end" android:layout_margin="8dp" android:text="♥" android:textColor="@color/live"
         android:textSize="14sp" android:visibility="gone"/>
     <TextView android:id="@+id/name" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_gravity="bottom" android:layout_marginBottom="9dp" android:paddingStart="12dp" android:paddingEnd="12dp"
+        android:layout_gravity="bottom" android:layout_marginBottom="25dp" android:paddingStart="12dp" android:paddingEnd="12dp"
         android:gravity="start" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text"
-        android:textSize="13sp" android:fontFamily="@font/sora_semibold"/>
+        android:textSize="12sp" android:fontFamily="@font/sora_semibold"/>
+    <TextView android:id="@+id/nowCaption" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="bottom" android:layout_marginBottom="7dp" android:paddingStart="12dp" android:paddingEnd="12dp"
+        android:gravity="start" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text_dim"
+        android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
 </FrameLayout>

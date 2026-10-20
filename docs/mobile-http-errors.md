@@ -2,6 +2,10 @@
 
 Investigation date: 2026-10-18. This follow-up concerns **live TV**, not the Frost movie player.
 
+## Current status
+
+The user subsequently confirmed all channels working on the TV with **4.9.18**, apart from Star Sports 1 Hindi HD stutter, and clarified that website playback could work while the APK failed. The investigation below is historical and not a complete attribution of that mismatch. [4.9.21](ui-refresh-4.9.21.md) preserves the working 4.9.18 playback contracts while rebuilding UI/branding and stabilising actual rendition selection.
+
 ## User evidence and its limits
 
 The user supplied four phone screenshots and confirmed that the **first three Playback Details screenshots came from 4.9.18**. The fourth explicitly shows an older 4.9.15 build. The user selected “another channel / several channels,” without naming the exact channel, and has **not checked current playback on TG's website**. Earlier website-works reports must not be treated as a new same-time comparison.
