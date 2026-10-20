@@ -1,6 +1,7 @@
 package com.aktv.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RequestProfileFallbackTest {
@@ -34,6 +35,26 @@ class RequestProfileFallbackTest {
     @Test fun `the alternative style wins over the same source when both exist`() {
         val sources = listOf(browser, native)
         assertEquals(1, RequestProfileFallback.preferredIndex(sources, browser) { it.label == browser.label })
+    }
+
+    @Test fun `a single advertised request style clamps to the first source instead of -1`() {
+        // Every TG channel advertises one request style, so no alternative exists and the
+        // delayed-retry caller shape ({ false }) must still receive a usable index.
+        val tgOnly = listOf(source(TgResolver.SITE, false, "Server 1"), source(TgResolver.SITE, false, "Server 2"))
+        val refused = tgOnly[1]
+        assertEquals(-1, RequestProfileFallback.alternative(tgOnly, refused))
+        val index = RequestProfileFallback.preferredIndex(tgOnly, refused) { false }
+        assertEquals(0, index)
+        assertTrue(index in tgOnly.indices)
+    }
+
+    @Test fun `preferredIndex never returns a negative index for any caller shape`() {
+        val tgOnly = listOf(source(TgResolver.SITE, false, "Server 1"))
+        for (refused in listOf(tgOnly[0], null)) {
+            val index = RequestProfileFallback.preferredIndex(tgOnly, refused) { false }
+            assertEquals(0, index)
+            assertTrue(index in tgOnly.indices)
+        }
     }
 
     @Test fun `no refused source falls back to the previous identity instead of crashing`() {

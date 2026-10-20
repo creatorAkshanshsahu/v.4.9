@@ -19,9 +19,16 @@ internal object RequestProfileFallback {
         }
     }
 
-    /** Index to try next: the other style when one exists, otherwise the previous source identity. */
+    /** Index to try next: the other style when one exists, otherwise the previous source identity.
+     *
+     * The result is a usable index, never -1: a provider that advertises a single request style
+     * (every TG channel) has no alternative to offer, so the answer clamps to the first source
+     * instead of leaking indexOfFirst's -1 to callers that assign it straight to a server index.
+     */
     fun preferredIndex(sources: List<TgStream>, refused: TgStream?, sameAsBefore: (TgStream) -> Boolean): Int {
-        alternative(sources, refused).takeIf { it >= 0 }?.let { return it }
-        return sources.indexOfFirst(sameAsBefore).coerceAtLeast(0)
+        val otherStyle = alternative(sources, refused)
+        if (otherStyle >= 0) return otherStyle
+        val previous = sources.indexOfFirst(sameAsBefore)
+        return if (previous >= 0) previous else 0
     }
 }
