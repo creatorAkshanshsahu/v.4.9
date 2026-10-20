@@ -165,7 +165,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
     private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
     private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
+    private lateinit var infoGuideAction: TextView
     private lateinit var playStatus: TextView; private var currentGuideNow: Programme? = null
+    private var currentGuideData: Guide? = null
+    private lateinit var programmeGuidePanel: ViewGroup; private lateinit var programmeGuideScrim: View
+    private lateinit var programmeGuideClose: TextView; private lateinit var programmeGuideChannel: TextView
+    private lateinit var programmeGuideStatus: TextView; private lateinit var programmeGuideEntries: LinearLayout
+    private lateinit var programmeGuideCredit: TextView; private var programmeGuideShown = false
+    private var programmeGuideCurrentChannel: String? = null
     // channel guide
     private val FAV = "Favorites"
     private lateinit var home: ViewGroup; private var homeFocusMode = 0; private var lastHomeFocus: View? = null
@@ -208,16 +215,33 @@ class MainActivity : AppCompatActivity() {
         infoDesc = findViewById(R.id.infoDesc); infoScheduleNext = findViewById(R.id.infoScheduleNext)
         infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus); infoActions = findViewById(R.id.infoActions)
         infoSourceAction = findViewById(R.id.infoSourceAction); infoQualityAction = findViewById(R.id.infoQualityAction); infoRetryAction = findViewById(R.id.infoRetryAction)
+        infoGuideAction = findViewById(R.id.infoGuideAction)
         infoSourceAction.setOnClickListener { showNativeSourceMenu() }
         infoQualityAction.setOnClickListener { showPictureMenu() }
         infoRetryAction.setOnClickListener { reloadStream() }
-        listOf(infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+        infoGuideAction.setOnClickListener { showProgrammeGuide() }
+        listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
             action.setOnFocusChangeListener { v, focused ->
                 (v as TextView).setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
                 v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f)
                     .translationZ(if (focused) 8 * dp else 0f).setDuration(180).start()
             }
         }
+        programmeGuidePanel = findViewById(R.id.programmeGuidePanel)
+        programmeGuideScrim = findViewById(R.id.programmeGuideScrim)
+        programmeGuideClose = findViewById(R.id.programmeGuideClose)
+        programmeGuideChannel = findViewById(R.id.programmeGuideChannel)
+        programmeGuideStatus = findViewById(R.id.programmeGuideStatus)
+        programmeGuideEntries = findViewById(R.id.programmeGuideEntries)
+        programmeGuideCredit = findViewById(R.id.programmeGuideCredit)
+        programmeGuideClose.setOnClickListener { closeProgrammeGuide() }
+        programmeGuideScrim.setOnClickListener { closeProgrammeGuide() }
+        val scheduleWidth = minOf(440f * dp, (resources.displayMetrics.widthPixels - 32f * dp).coerceAtLeast(280f * dp)).toInt()
+        (programmeGuidePanel.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+            lp.width = scheduleWidth; lp.gravity = Gravity.END; lp.setMargins((16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt())
+            programmeGuidePanel.layoutParams = lp
+        }
+
         // Phones have no MENU/OK remote keys: make the visible source/status lines actionable.
         infoNext.setOnClickListener { if (!guideShown) showNativeSourceMenu() }
         playStatus.setOnClickListener { showPlaybackDetails() }
@@ -230,12 +254,31 @@ class MainActivity : AppCompatActivity() {
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        infoCard.background = Ui.pill(dp, 0xD914202B.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF) }
+        infoCard.background = Ui.pill(dp, 0xE10E1422.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
         infoCard.elevation = 8 * dp
         findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f)
+        if (resources.configuration.screenWidthDp < 600) {
+            val card = infoCard as LinearLayout
+            card.orientation = LinearLayout.VERTICAL; card.minimumWidth = 0
+            val margin = (16 * dp).toInt()
+            val cardWidth = (resources.displayMetrics.widthPixels - 2 * margin).coerceAtLeast(1)
+            card.setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
+            (card.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+                lp.width = cardWidth; lp.gravity = Gravity.BOTTOM or Gravity.START
+                lp.setMargins(margin, margin, margin, margin); card.layoutParams = lp
+            }
+            findViewById<View>(R.id.infoLogoBox).visibility = View.GONE
+            (card.getChildAt(1).layoutParams as? LinearLayout.LayoutParams)?.let { lp -> lp.marginStart = 0; card.getChildAt(1).layoutParams = lp }
+            infoName.maxWidth = cardWidth - (28 * dp).toInt()
+            listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+                action.textSize = 9f; action.setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), 0)
+                (action.layoutParams as? LinearLayout.LayoutParams)?.let { lp -> lp.marginEnd = (4 * dp).toInt(); action.layoutParams = lp }
+            }
+        }
         findViewById<TextView>(R.id.infoHint).text = SpannableStringBuilder().apply {
             key(this, "▲ ▼", "Channel"); append("     "); key(this, "▶", "All channels"); append("     ")
-            key(this, "Hold OK", "Reload"); append("     "); key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
+            key(this, "GUIDE", "Schedule"); append("     "); key(this, "Hold OK", "Reload"); append("     ")
+            key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
         }
         val track = ColorStateList.valueOf(Color.argb(60, 255, 255, 255))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
@@ -257,7 +300,7 @@ class MainActivity : AppCompatActivity() {
         guide = findViewById(R.id.guide); guideScrim = findViewById(R.id.guideScrim); guideDivider = findViewById(R.id.guideDivider)
         catList = findViewById(R.id.catList); chList = findViewById(R.id.chList)
         chCol = findViewById(R.id.chCol); chHeader = findViewById(R.id.chHeader); channelSearch = findViewById(R.id.channelSearch)
-        guide.background = Ui.pill(dp, 0xF21A1C21.toInt(), 22f)
+        guide.background = Ui.pill(dp, 0xF20E1422.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         listOf(catList to catAdapter, chList to chAdapter).forEach { (rv, ad) ->
             rv.layoutManager = LinearLayoutManager(this); rv.adapter = ad; rv.itemAnimator = null
@@ -346,11 +389,11 @@ class MainActivity : AppCompatActivity() {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
         setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
-        val bg = Ui.pill(dp, if (primary) Accent.SIGNAL else 0xB31C2B39.toInt(), 10f)
+        val bg = Ui.pill(dp, if (primary) Accent.SIGNAL else 0xB31C2740.toInt(), 10f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (focused) Accent.SIGNAL else if (primary) Accent.SIGNAL else 0xB31C2B39.toInt())
+            bg.setColor(if (focused) Accent.SIGNAL else if (primary) Accent.SIGNAL else 0xB31C2740.toInt())
             bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.SIGNAL)
             setTextColor(if (focused || primary) Accent.ABYSS else Accent.TEXT)
         }
@@ -367,7 +410,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
-        bg.setColor(when { focused -> Accent.SIGNAL; active -> 0xFF163B39.toInt(); else -> Color.TRANSPARENT })
+        bg.setColor(when { focused -> Accent.SIGNAL; active -> 0xFF202A52.toInt(); else -> Color.TRANSPARENT })
         val fg = when { focused -> Accent.ABYSS; active -> Accent.SIGNAL; else -> Accent.DIM }
         tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
         bg.setStroke(if (active && !focused) (1 * dp).toInt().coerceAtLeast(1) else 0, 0xFF285C55.toInt())
@@ -770,23 +813,25 @@ class MainActivity : AppCompatActivity() {
                 if (t.m.logo.isNotBlank()) heroLogo.load(t.m.logo) {
                     crossfade(180); listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.imdb == t.m.imdb) heroLogo.animate().alpha(1f).setDuration(220).start() })
                 } else {
-                    heroLogo.setImageResource(R.drawable.ic_mark)
+                    heroLogo.setImageResource(R.drawable.ic_brand)
                     heroLogo.animate().alpha(0.92f).setDuration(220).start()
                 }
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
                 heroDesc.text = t.m.description; heroDesc.visibility = View.GONE // full synopsis lives in the responsive detail page
                 ui.removeCallbacks(heroGuideRunnable)
-                glowHero(red, 0xFF0E5362.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
+                glowHero(red, 0xFF294C83.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
             }
             else -> {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "Your world. On screen."
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.ic_mark)
+                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.ic_brand)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
         }
     }
 
     // ---------- programme details ----------
+    private fun guideHasSchedule(g: Guide?) = g != null && (g.now != null || g.next != null || g.upcoming.isNotEmpty())
+
     private fun fetchGuide(c: Channel, cb: (Guide?) -> Unit) {
         if (c.v2) { cb(null); return }
         Epg.cached(c.id)?.let { cb(it); return }
@@ -797,9 +842,13 @@ class MainActivity : AppCompatActivity() {
         }
         if (!leader) return
         io.execute {
-            val g = try { Epg.parse(get("$GUIDE/${c.id}", 2)).also { Epg.put(c.id, it) } } catch (_: Exception) { null }
+            val primary = try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
+            val guide = if (guideHasSchedule(primary)) primary
+                else ExternalEpg.guide(applicationContext, c.id) ?: primary
+                ?: Guide(null, null, emptyList(), "No schedule currently published")
+            Epg.put(c.id, guide)
             val callbacks = synchronized(guideWaiters) { guideWaiters.remove(c.id).orEmpty() }
-            runOnUiThread { callbacks.forEach { it(g) } }
+            runOnUiThread { callbacks.forEach { it(guide) } }
         }
     }
     private fun span(sb: SpannableStringBuilder, from: Int, color: Int) {
@@ -853,6 +902,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private val hideInfo = Runnable {
+        if (programmeGuideShown) return@Runnable
         ui.removeCallbacks(guideProgressTick)
         infoCard.animate().alpha(0f).translationY(14 * dp).setDuration(450).withEndAction { infoActions.visibility = View.GONE }.start()
         playerScrim.animate().alpha(0f).setDuration(450).start()
@@ -874,7 +924,7 @@ class MainActivity : AppCompatActivity() {
         val ac = accentOf(ch.key)
         spinner.indeterminateTintList = ColorStateList.valueOf(ac)
         infoProgress.progressTintList = ColorStateList.valueOf(ac)
-        currentGuideNow = null
+        currentGuideNow = null; currentGuideData = null; programmeGuideCurrentChannel = ch.key
         infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE
         infoScheduleNext.visibility = View.GONE; infoNext.visibility = View.GONE
         if (ch.v2) { infoNow.text = "24/7 live channel · programme schedule unavailable"; infoNow.visibility = View.VISIBLE }
@@ -883,19 +933,134 @@ class MainActivity : AppCompatActivity() {
     }
     private fun fillInfoGuide(g: Guide?) {
         val n = g?.now
+        currentGuideData = g
         currentGuideNow = n
         if (n == null) {
-            infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE
+            infoNow.text = if (g?.next != null) "No current programme listing · see Guide for what’s next"
+                else "Programme schedule unavailable · live playback continues"
+            infoNow.visibility = View.VISIBLE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE
             infoScheduleNext.visibility = View.GONE
+        } else {
+            infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
+            infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
+            infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
+            val next = g?.next
+            infoScheduleNext.visibility = if (next == null) View.GONE else View.VISIBLE
+            if (next != null) infoScheduleNext.text = progLine("NEXT", next)
+        }
+        if (programmeGuideShown && programmeGuideCurrentChannel == shown.getOrNull(current)?.key) {
+            shown.getOrNull(current)?.let { renderProgrammeGuide(g, it, loading = false) }
+        }
+    }
+
+    private fun showProgrammeGuide() {
+        val ch = shown.getOrNull(current) ?: return
+        if (guideShown) closeGuide()
+        ui.removeCallbacks(hideInfo)
+        programmeGuideShown = true; programmeGuideCurrentChannel = ch.key
+        programmeGuideScrim.visibility = View.VISIBLE; programmeGuideScrim.alpha = 0f
+        programmeGuidePanel.visibility = View.VISIBLE; programmeGuidePanel.alpha = 0f; programmeGuidePanel.translationX = 24 * dp
+        programmeGuideScrim.animate().alpha(1f).setDuration(180).start()
+        programmeGuidePanel.animate().alpha(1f).translationX(0f).setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
+        renderProgrammeGuide(currentGuideData, ch, loading = !ch.v2 && currentGuideData == null)
+        programmeGuideClose.requestFocus()
+        if (!ch.v2 && currentGuideData == null) fetchGuide(ch) { guideData ->
+            if (programmeGuideShown && programmeGuideCurrentChannel == ch.key) renderProgrammeGuide(guideData, ch, loading = false)
+        }
+    }
+
+    private fun renderProgrammeGuide(g: Guide?, ch: Channel, loading: Boolean) {
+        programmeGuideChannel.text = ch.name
+        programmeGuideEntries.removeAllViews()
+        if (ch.v2) {
+            programmeGuideStatus.text = "This always-on channel does not publish a programme schedule."
+            programmeGuideCredit.text = "Live playback is unaffected. V2 channels currently have no schedule feed."
             return
         }
-        infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
-        infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
-        infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
-        val next = g?.next
-        infoScheduleNext.visibility = if (next == null) View.GONE else View.VISIBLE
-        if (next != null) infoScheduleNext.text = progLine("NEXT", next)
-        // Provider/source state remains in infoNext; schedule data has its own line.
+        val available = g?.now != null || g?.next != null || !g?.upcoming.isNullOrEmpty()
+        programmeGuideStatus.text = when {
+            loading -> "Checking the channel schedule…"
+            !available -> "No current or upcoming listings are available for this channel."
+            g?.now == null -> "Now on air is not listed. Upcoming programmes are shown below."
+            else -> "Now on air and the next programmes"
+        }
+        if (g?.now != null) programmeGuideEntries.addView(programmeEntry("NOW ON", g.now, true))
+        if (g?.next != null) programmeGuideEntries.addView(programmeEntry("UP NEXT", g.next, false))
+        g?.upcoming.orEmpty().forEachIndexed { index, programme ->
+            programmeGuideEntries.addView(programmeEntry(if (g?.next == null && index == 0) "UP NEXT" else "LATER", programme, false))
+        }
+        programmeGuideCredit.text = if (guideHasSchedule(g))
+            "Schedule source: ${g?.source}. Listings are informational; the live stream stays native."
+            else "Checked the TG guide and the community JioTV XMLTV fallback. Live playback is unaffected."
+    }
+
+    private fun programmeEntry(label: String, p: Programme, currentProgramme: Boolean): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
+            background = Ui.pill(dp, 0x66151C2D, 14f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x2AFFFFFF) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (10 * dp).toInt() }
+        }
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val badge = TextView(this).apply {
+            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.ION else Accent.SIGNAL)
+            letterSpacing = 0.08f
+        }
+        val time = TextView(this).apply {
+            text = Epg.range(p); textSize = 10f; typeface = fSemi; setTextColor(Accent.DIM); gravity = Gravity.END
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        top.addView(badge, LinearLayout.LayoutParams(0, -2, 1f)); top.addView(time, LinearLayout.LayoutParams(0, -2, 1.5f))
+        card.addView(top)
+        card.addView(TextView(this).apply {
+            text = p.title; textSize = 16f; typeface = fSemi; setTextColor(Accent.TEXT); maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, (7 * dp).toInt(), 0, 0)
+        })
+        if (p.desc.isNotBlank()) card.addView(TextView(this).apply {
+            text = p.desc; textSize = 11f; setTextColor(Accent.DIM); maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, (5 * dp).toInt(), 0, 0)
+        })
+        if (currentProgramme) card.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000; progress = (Epg.progress(p) * 1000).toInt(); progressTintList = ColorStateList.valueOf(Accent.ION)
+            progressBackgroundTintList = ColorStateList.valueOf(0x55FFFFFF); minimumHeight = (3 * dp).toInt()
+        }, LinearLayout.LayoutParams(-1, (3 * dp).toInt()).apply { topMargin = (10 * dp).toInt() })
+        return card
+    }
+
+    private fun closeProgrammeGuide() {
+        if (!programmeGuideShown) return
+        programmeGuideShown = false; programmeGuideCurrentChannel = null
+        programmeGuidePanel.animate().cancel(); programmeGuideScrim.animate().cancel()
+        programmeGuidePanel.animate().alpha(0f).translationX(24 * dp).setDuration(170).withEndAction {
+            if (!programmeGuideShown) programmeGuidePanel.visibility = View.GONE
+        }.start()
+        programmeGuideScrim.animate().alpha(0f).setDuration(170).withEndAction {
+            if (!programmeGuideShown) programmeGuideScrim.visibility = View.GONE
+        }.start()
+        if (layer.visibility == View.VISIBLE && !guideShown) {
+            showInfo()
+            infoGuideAction.requestFocus()
+        }
+    }
+
+    private fun resetProgrammeGuide() {
+        programmeGuideShown = false; programmeGuideCurrentChannel = null
+        if (::programmeGuidePanel.isInitialized) {
+            programmeGuidePanel.animate().cancel(); programmeGuideScrim.animate().cancel()
+            programmeGuidePanel.visibility = View.GONE; programmeGuideScrim.visibility = View.GONE
+            programmeGuidePanel.alpha = 1f; programmeGuidePanel.translationX = 0f; programmeGuideScrim.alpha = 1f
+        }
+    }
+
+    private fun programmeGuideKey(e: KeyEvent): Boolean {
+        if (e.action != KeyEvent.ACTION_DOWN) return false
+        when (e.keyCode) {
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_GUIDE -> { closeProgrammeGuide(); return true }
+            KeyEvent.KEYCODE_CHANNEL_UP -> { closeProgrammeGuide(); play(current - 1); return true }
+            KeyEvent.KEYCODE_CHANNEL_DOWN -> { closeProgrammeGuide(); play(current + 1); return true }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> return true
+        }
+        return false
     }
     private fun playMsg(msg: String?) {
         if (msg == null) playStatus.visibility = View.GONE else { playStatus.text = msg; playStatus.visibility = View.VISIBLE }
@@ -1601,7 +1766,7 @@ class MainActivity : AppCompatActivity() {
     private fun closePlayer() {
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null)
-        releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide()
+        releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide(); resetProgrammeGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
         layer.animate().cancel(); layer.visibility = View.GONE; home.visibility = View.VISIBLE
         home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
@@ -1618,6 +1783,7 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (intro.visibility == View.VISIBLE) { if (e.action == KeyEvent.ACTION_DOWN) intro.skip(); return true }
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
+        if (layer.visibility == View.VISIBLE && programmeGuideShown) return programmeGuideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && guideShown) return guideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER)) {
             // tap OK = info / next native source, hold OK = fetch a fresh stream
@@ -1630,6 +1796,7 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility == View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) when (e.keyCode) {
             KeyEvent.KEYCODE_BACK -> { closePlayer(); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
+            KeyEvent.KEYCODE_GUIDE -> { showProgrammeGuide(); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
             KeyEvent.KEYCODE_MENU -> { showNativeSourceMenu(); return true }
@@ -1708,7 +1875,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onStop() {
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
-        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; layer.keepScreenOn = false; resetGuide()
+        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; layer.keepScreenOn = false; resetGuide(); resetProgrammeGuide()
         if (searchShown) hideSearch(false)
     }
 

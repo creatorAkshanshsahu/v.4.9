@@ -81,7 +81,21 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
           cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+      - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
+        run: |
+          python3 .github/scripts/verify-apk-archives.test.py
+          python3 .github/scripts/verify-apk-archives.py out
       - uses: actions/upload-artifact@v4
         with:
           name: AK-TV-apks
-          path: out/*.apk
+          path: |
+            out/*.apk
+            out/SHA256SUMS
+            out/apk-validation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-arm32-install
+          path: |
+            out/AK-TV-arm32.apk
+            out/SHA256SUMS
+            out/apk-validation.json

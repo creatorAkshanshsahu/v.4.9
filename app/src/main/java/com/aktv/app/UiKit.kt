@@ -16,18 +16,18 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.max
 
-/** AK TV cinema palette: midnight surfaces, aqua accents and clear white focus + colour extraction from channel logos. */
+/** AK TV cinema palette: ink-black surfaces, electric blue controls, cyan media cues and violet depth. */
 object Accent {
-    val ABYSS = 0xFF080D14.toInt()
-    val SURFACE = 0xFF17232F.toInt()
-    val SIGNAL = 0xFF32E5CE.toInt()
-    val ION = 0xFF85F6E5.toInt()
-    val INDIGO = 0xFF4B3BD6.toInt()
-    val DEEP = 0xFF1B1A6B.toInt()
-    val LIVE = 0xFFFF6B73.toInt()
-    val TEXT = 0xFFEFF6FA.toInt()
-    val DIM = 0xFFA6B7C6.toInt()
-    val FAINT = 0xFF6D8296.toInt()
+    val ABYSS = 0xFF080B14.toInt()
+    val SURFACE = 0xFF151C2D.toInt()
+    val SIGNAL = 0xFF6687FF.toInt()
+    val ION = 0xFF4ED9F2.toInt()
+    val INDIGO = 0xFF8B78FF.toInt()
+    val DEEP = 0xFF20254F.toInt()
+    val LIVE = 0xFFFF5D7A.toInt()
+    val TEXT = 0xFFF2F5FF.toInt()
+    val DIM = 0xFFAAB6D2.toInt()
+    val FAINT = 0xFF7180A1.toInt()
 
     /** Makes any logo colour usable as a tint: saturated, mid-light. Greys fall back to the brand blue. */
     fun normalize(c: Int?): Int {

@@ -139,10 +139,10 @@ class DetailActivity : Activity() {
         root.addView(contentScroll, FrameLayout.LayoutParams(-1, -1))
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(inset.toInt(), (8 * dp).toInt(), inset.toInt(), (8 * dp).toInt())
-            setBackgroundColor(0xE6080D14.toInt())
+            setBackgroundColor(0xE6080B14.toInt())
         }
         toolbar.addView(button("‹  Back", false) { finish() })
-        toolbar.addView(ImageView(this).apply { setImageResource(R.drawable.ic_mark); scaleType = ImageView.ScaleType.FIT_CENTER },
+        toolbar.addView(ImageView(this).apply { setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER },
             LinearLayout.LayoutParams((42 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (20 * dp).toInt() })
         toolbar.addView(tv(12f, Accent.TEXT, fSemi).apply { text = "  AK TV"; letterSpacing = 0.08f })
         root.addView(toolbar, FrameLayout.LayoutParams(-1, (60 * dp).toInt(), Gravity.TOP))

@@ -51,29 +51,29 @@ class HomePreviewTest {
             root.findViewById<View>(R.id.status).visibility = View.GONE
             if (movies) root.findViewById<View>(R.id.heroDesc).visibility = View.GONE
             root.findViewById<View>(R.id.heroDot).visibility = if (movies) View.GONE else View.VISIBLE
-            root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.ic_mark)
+            root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.ic_brand)
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF153239.toInt(), 0xFF14253D.toInt(), 0xFF0D1724.toInt()))
+                intArrayOf(0xFF273E7A.toInt(), 0xFF273253.toInt(), 0xFF10182B.toInt()))
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
             val heroActions = if (movies) listOf("▶   Explore title") else listOf("▶   Watch live", "+   My favorites")
             heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
                     text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)
                     setPadding(16, if (compact) 7 else 10, 18, if (compact) 7 else 10)
-                    background = Ui.pill(1f, if (index == 0) Accent.SIGNAL else 0xB31C2B39.toInt(), 10f)
+                    background = Ui.pill(1f, if (index == 0) Accent.SIGNAL else 0xB31C2740.toInt(), 10f)
                 }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 8 })
             }
             for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0xFF163B39.toInt() else Color.TRANSPARENT, 12f)
+                view.background = Ui.pill(1f, if (selected) 0xFF202A52.toInt() else Color.TRANSPARENT, 12f)
                 view.setTextColor(if (selected) Accent.SIGNAL else Accent.DIM)
                 view.compoundDrawableTintList = android.content.res.ColorStateList.valueOf(if (selected) Accent.SIGNAL else Accent.DIM)
             }
             for (id in listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0xFF163B39.toInt() else Color.TRANSPARENT, 20f)
+                view.background = Ui.pill(1f, if (selected) 0xFF202A52.toInt() else Color.TRANSPARENT, 20f)
                 view.setTextColor(if (selected) Accent.SIGNAL else Accent.DIM)
             }
             val rows = root.findViewById<RecyclerView>(R.id.rows)

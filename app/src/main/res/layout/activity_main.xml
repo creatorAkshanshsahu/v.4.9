@@ -6,7 +6,7 @@
 
     <!-- search: on-screen keyboard on the left, live results on the right -->
     <FrameLayout android:id="@+id/searchLayer" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#FA080D14" android:visibility="gone" android:clickable="true">
+        android:background="#FA080B14" android:visibility="gone" android:clickable="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
             android:id="@+id/searchBody" android:layout_marginStart="28dp" android:layout_marginEnd="28dp" android:layout_marginTop="24dp"
             android:layout_marginBottom="36dp" android:orientation="horizontal">
@@ -85,6 +85,7 @@
                     android:textColor="@color/text_faint" android:textSize="11sp" android:visibility="gone"/>
                 <LinearLayout android:id="@+id/infoActions" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
+                    <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>
                     <TextView android:id="@+id/infoSourceAction" style="@style/Widget.AKTV.PlayerAction" android:text="SOURCE"/>
                     <TextView android:id="@+id/infoQualityAction" style="@style/Widget.AKTV.PlayerAction" android:text="PICTURE QUALITY"/>
                     <TextView android:id="@+id/infoRetryAction" style="@style/Widget.AKTV.PlayerAction" android:text="RETRY"/>
@@ -97,6 +98,40 @@
             android:layout_gravity="top|end" android:layout_margin="36dp" android:format12Hour="h:mm" android:format24Hour="HH:mm"
             android:textColor="@color/text" android:textSize="20sp" android:fontFamily="@font/sora_regular" android:alpha="0"
             android:shadowColor="#99000000" android:shadowRadius="12"/>
+        <!-- programme guide: dedicated EPG panel, separate from the channel-zap drawer -->
+        <View android:id="@+id/programmeGuideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:background="#BA050813" android:visibility="gone" android:clickable="true" android:focusable="false"/>
+        <LinearLayout android:id="@+id/programmeGuidePanel" android:layout_width="440dp" android:layout_height="match_parent"
+            android:layout_gravity="end" android:layout_margin="16dp" android:orientation="vertical" android:padding="24dp"
+            android:background="@drawable/guide_panel" android:visibility="gone" android:clickable="true" android:focusable="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV  /  LIVE"
+                        android:textColor="@color/ion" android:textSize="10sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.12"/>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                        android:text="Programme guide" android:textColor="@color/text" android:textSize="24sp" android:fontFamily="@font/sora_bold"/>
+                </LinearLayout>
+                <TextView android:id="@+id/programmeGuideClose" android:layout_width="48dp" android:layout_height="42dp" android:gravity="center"
+                    android:text="✕" android:textColor="@color/text_dim" android:textSize="16sp" android:background="@drawable/player_action"
+                    android:focusable="true" android:clickable="true" android:contentDescription="Close programme guide"/>
+            </LinearLayout>
+            <TextView android:id="@+id/programmeGuideChannel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="18dp" android:textColor="@color/text" android:textSize="16sp" android:fontFamily="@font/sora_semibold"
+                android:maxLines="2" android:ellipsize="end"/>
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="12dp"
+                android:background="#28FFFFFF"/>
+            <TextView android:id="@+id/programmeGuideStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/text_dim" android:textSize="13sp" android:lineSpacingExtra="3dp"/>
+            <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+                android:layout_marginTop="8dp" android:fillViewport="false" android:overScrollMode="never">
+                <LinearLayout android:id="@+id/programmeGuideEntries" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical"/>
+            </ScrollView>
+            <TextView android:id="@+id/programmeGuideCredit" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:textColor="@color/text_faint" android:textSize="10sp" android:lineSpacingExtra="2dp"/>
+        </LinearLayout>
+
         <!-- channel guide: Right opens, Left goes back -->
         <View android:id="@+id/guideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="@drawable/scrim_guide" android:visibility="gone"/>

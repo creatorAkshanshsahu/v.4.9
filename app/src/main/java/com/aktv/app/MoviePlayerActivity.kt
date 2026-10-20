@@ -122,7 +122,7 @@ class MoviePlayerActivity : Activity() {
     private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemUi()
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Accent.ABYSS) }
         view = PlayerView(this).apply {
             useController = true
             controllerShowTimeoutMs = 5000
@@ -131,17 +131,39 @@ class MoviePlayerActivity : Activity() {
             setShowSubtitleButton(true)
             setShowNextButton(false); setShowPreviousButton(false)
             setKeepContentOnPlayerReset(false)
-            setShutterBackgroundColor(Color.BLACK)
+            setShutterBackgroundColor(Accent.ABYSS)
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         overlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(22), px(15), px(22), px(24))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xE6000000.toInt(), 0xA6000000.toInt(), Color.TRANSPARENT))
+            setPadding(px(24), px(17), px(24), px(26))
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xF0080B14.toInt(), 0xE10E1422.toInt(), 0xA8101422.toInt(), Color.TRANSPARENT))
         }
-        heading = TextView(this).apply { textSize = 21f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); maxLines = 2 }
-        status = TextView(this).apply { textSize = 13f; setTextColor(0xFFDDDDDD.toInt()); maxLines = 4; setPadding(0, px(5), 0, px(8)) }
-        overlay.addView(heading); overlay.addView(status)
+        val identity = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val brand = ImageView(this).apply {
+            setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "AK TV"; layoutParams = LinearLayout.LayoutParams(px(42), px(42))
+        }
+        identity.addView(brand)
+        val identityText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, 0, 0) }
+        identityText.addView(TextView(this).apply {
+            text = if (title.isSeries) "AK TV  /  SERIES" else "AK TV  /  MOVIE"
+            textSize = 9f; letterSpacing = 0.13f; setTextColor(Accent.ION); setTypeface(null, Typeface.BOLD)
+        })
+        heading = TextView(this).apply {
+            textSize = 22f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
+            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0x99000000.toInt())
+        }
+        identityText.addView(heading); identity.addView(identityText, LinearLayout.LayoutParams(0, -2, 1f))
+        overlay.addView(identity)
+        overlay.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Accent.ION, Accent.SIGNAL, Accent.INDIGO))
+        }, LinearLayout.LayoutParams(px(88), px(2)).apply { topMargin = px(13) })
+        status = TextView(this).apply {
+            textSize = 12f; setTextColor(Accent.DIM); maxLines = 4; setPadding(0, px(8), 0, px(9))
+        }
+        overlay.addView(status)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(button("Back") { finish() })
         row.addView(button("Sources") { showSources() })
@@ -169,14 +191,24 @@ class MoviePlayerActivity : Activity() {
 
     private fun px(value: Int) = (value * dp).toInt()
     private fun button(label: String, click: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-        isFocusable = true; isClickable = true; setPadding(px(16), px(11), px(16), px(11))
-        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) }
+        text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
+        isFocusable = true; isClickable = true; setPadding(px(17), px(12), px(17), px(12))
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(9) }
         fun style(focused: Boolean) {
-            background = GradientDrawable().apply { cornerRadius = px(8).toFloat(); setColor(if (focused) Accent.SIGNAL else 0xCC162532.toInt()) }
-            setTextColor(if (focused) Color.BLACK else Color.WHITE)
+            background = GradientDrawable().apply {
+                cornerRadius = px(12).toFloat()
+                setColor(if (focused) Accent.SIGNAL else 0xE1151C2D.toInt())
+                setStroke(px(if (focused) 2 else 1), if (focused) Accent.ION else 0x3BFFFFFF)
+            }
+            setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
+            elevation = if (focused) px(8).toFloat() else 0f
         }
-        style(false); setOnFocusChangeListener { _, focused -> style(focused) }; setOnClickListener { click() }
+        style(false)
+        setOnFocusChangeListener { v, focused ->
+            style(focused)
+            v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f).setDuration(150).start()
+        }
+        setOnClickListener { click() }
     }
 
     private fun updateTitle() {

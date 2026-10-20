@@ -11,7 +11,7 @@ data class Programme(
     val desc: String, val category: String, val image: String
 )
 
-data class Guide(val now: Programme?, val next: Programme?, val upcoming: List<Programme>)
+data class Guide(val now: Programme?, val next: Programme?, val upcoming: List<Programme>, val source: String = "TG public guide")
 
 /**
  * Programme guide from GET /api/public/guide/{id} (V1 channels only).

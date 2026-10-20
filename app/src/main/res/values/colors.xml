@@ -1,11 +1,12 @@
 <resources>
-    <color name="abyss">#080D14</color>
-    <color name="night">#0D151F</color>
-    <color name="surface">#17232F</color>
-    <color name="signal">#32E5CE</color>
-    <color name="ion">#85F6E5</color>
-    <color name="live">#FF6B73</color>
-    <color name="text">#EFF6FA</color>
-    <color name="text_dim">#A6B7C6</color>
-    <color name="text_faint">#6D8296</color>
+    <color name="abyss">#080B14</color>
+    <color name="night">#0E1422</color>
+    <color name="surface">#151C2D</color>
+    <color name="signal">#6687FF</color>
+    <color name="ion">#4ED9F2</color>
+    <color name="indigo">#8B78FF</color>
+    <color name="live">#FF5D7A</color>
+    <color name="text">#F2F5FF</color>
+    <color name="text_dim">#AAB6D2</color>
+    <color name="text_faint">#7180A1</color>
 </resources>
