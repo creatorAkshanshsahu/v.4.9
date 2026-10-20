@@ -70,8 +70,10 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         if (finished || animator.isStarted) return
         detached = false
         if (!ValueAnimator.areAnimatorsEnabled()) { finish(); return }
-        prepareSound()
+        // Start the animator first: SoundPool can finish loading synchronously on fast devices, and
+        // playSting intentionally refuses to play before the reveal is running.
         animator.start()
+        prepareSound()
     }
     fun skip() = finish()
 
@@ -79,7 +81,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         if (!soundEnabled || soundPool != null) return
         try {
             val attributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
             val pool = SoundPool.Builder().setMaxStreams(1).setAudioAttributes(attributes).build()
             soundPool = pool
@@ -97,7 +99,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         if (!soundEnabled || finished || detached || !animator.isRunning || !soundLoaded) return
         val audio = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         if (audio.ringerMode == AudioManager.RINGER_MODE_SILENT || audio.getStreamVolume(AudioManager.STREAM_MUSIC) <= 0) return
-        soundStream = runCatching { pool?.play(soundId, 0.78f, 0.78f, 1, 0, 1f) ?: 0 }.getOrDefault(0)
+        soundStream = runCatching { pool?.play(soundId, 0.95f, 0.95f, 1, 0, 1f) ?: 0 }.getOrDefault(0)
     }
 
     private fun toggleSound() {
