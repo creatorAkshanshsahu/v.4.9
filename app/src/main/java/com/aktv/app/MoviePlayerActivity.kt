@@ -137,9 +137,9 @@ class MoviePlayerActivity : Activity() {
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         overlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(24), px(17), px(24), px(26))
+            setPadding(px(34), px(28), px(34), px(30))
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF0080B14.toInt(), 0xE10E1422.toInt(), 0xA8101422.toInt(), Color.TRANSPARENT))
+                intArrayOf(0xF5080B14.toInt(), 0xD30A1020.toInt(), 0x960A1020.toInt(), Color.TRANSPARENT))
         }
         val identity = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val brand = ImageView(this).apply {
@@ -149,22 +149,28 @@ class MoviePlayerActivity : Activity() {
         identity.addView(brand)
         val identityText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, 0, 0) }
         identityText.addView(TextView(this).apply {
-            text = if (title.isSeries) "AK TV  /  SERIES" else "AK TV  /  MOVIE"
-            textSize = 9f; letterSpacing = 0.13f; setTextColor(Accent.ION); setTypeface(null, Typeface.BOLD)
+            text = if (title.isSeries) "AK ORIGINALS  ·  SERIES" else "AK CINEMA  ·  MOVIE"
+            textSize = 10f; letterSpacing = 0.15f; setTextColor(if (title.isSeries) Accent.INDIGO else Accent.GOLD); setTypeface(null, Typeface.BOLD)
         })
         heading = TextView(this).apply {
-            textSize = 22f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
+            textSize = 27f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
             setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0x99000000.toInt())
         }
         identityText.addView(heading); identity.addView(identityText, LinearLayout.LayoutParams(0, -2, 1f))
         overlay.addView(identity)
         overlay.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Accent.ION, Accent.SIGNAL, Accent.INDIGO))
-        }, LinearLayout.LayoutParams(px(88), px(2)).apply { topMargin = px(13) })
+            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(if (title.isSeries) Accent.INDIGO else Accent.GOLD, Accent.ION, Color.TRANSPARENT))
+        }, LinearLayout.LayoutParams(px(170), px(2)).apply { topMargin = px(15) })
         status = TextView(this).apply {
-            textSize = 12f; setTextColor(Accent.DIM); maxLines = 4; setPadding(0, px(8), 0, px(9))
+            textSize = 12f; setTextColor(Accent.DIM); maxLines = 3
+            setPadding(px(12), px(8), px(12), px(8))
+            background = GradientDrawable().apply {
+                cornerRadius = px(12).toFloat(); setColor(0xAA101827.toInt())
+                setStroke(px(1), 0x44FFFFFF)
+            }
         }
-        overlay.addView(status)
+        overlay.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(10); bottomMargin = px(12) })
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(button("Back") { finish() })
         row.addView(button("Sources") { showSources() })
@@ -180,7 +186,9 @@ class MoviePlayerActivity : Activity() {
         val scroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row) }
         overlay.addView(scroll, LinearLayout.LayoutParams(-1, -2))
         root.addView(overlay, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-        spinner = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Accent.SIGNAL) }
+        spinner = ProgressBar(this).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.INDIGO else Accent.GOLD)
+        }
         root.addView(spinner, FrameLayout.LayoutParams(px(48), px(48), Gravity.CENTER))
         setContentView(root)
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
@@ -193,16 +201,17 @@ class MoviePlayerActivity : Activity() {
     private fun px(value: Int) = (value * dp).toInt()
     private fun button(label: String, click: () -> Unit) = TextView(this).apply {
         text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
-        isFocusable = true; isClickable = true; setPadding(px(17), px(12), px(17), px(12))
-        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(9) }
+        isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
+        val accent = if (title.isSeries) Accent.INDIGO else Accent.GOLD
         fun style(focused: Boolean) {
             background = GradientDrawable().apply {
-                cornerRadius = px(12).toFloat()
-                setColor(if (focused) Accent.SIGNAL else 0xE1151C2D.toInt())
-                setStroke(px(if (focused) 2 else 1), if (focused) Accent.ION else 0x3BFFFFFF)
+                cornerRadius = px(16).toFloat()
+                setColor(if (focused) accent else 0xE1151C2D.toInt())
+                setStroke(px(if (focused) 2 else 1), if (focused) 0xFFEFF6FF.toInt() else 0x4AFFFFFF)
             }
             setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
-            elevation = if (focused) px(8).toFloat() else 0f
+            elevation = if (focused) px(9).toFloat() else 0f
         }
         style(false)
         setOnFocusChangeListener { v, focused ->

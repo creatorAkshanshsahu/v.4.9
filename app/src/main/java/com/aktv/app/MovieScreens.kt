@@ -43,7 +43,7 @@ class DetailActivity : Activity() {
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
-    private val RED = Accent.SIGNAL
+    private val pageAccent get() = if (title.isSeries) Accent.INDIGO else Accent.GOLD
 
     private lateinit var title: Movies.Title
     private var episodes = listOf<Movies.Episode>(); private var seasons = listOf<Int>(); private var season = 1
@@ -101,7 +101,7 @@ class DetailActivity : Activity() {
         val inset = (if (compact) 28 else 48) * dp
         val textWidth = (resources.displayMetrics.widthPixels * if (compact) 0.73f else 0.62f).toInt()
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(inset.toInt(), ((if (compact) 72 else 94) * dp).toInt(), inset.toInt(), (32 * dp).toInt()) }
-        body.addView(tv(10f, Accent.SIGNAL, fSemi).apply { text = if (title.isSeries) "SERIES  /  ON DEMAND" else "MOVIES  /  ON DEMAND"; letterSpacing = 0.12f },
+        body.addView(tv(10f, pageAccent, fSemi).apply { text = if (title.isSeries) "AK SERIES  /  ON DEMAND" else "AK CINEMA  /  ON DEMAND"; letterSpacing = 0.14f },
             LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (12 * dp).toInt() })
         logo = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_START; adjustViewBounds = true; visibility = View.GONE }
         body.addView(logo, LinearLayout.LayoutParams(minOf(textWidth, (420 * dp).toInt()), ((if (compact) 74 else 110) * dp).toInt()))
@@ -120,7 +120,7 @@ class DetailActivity : Activity() {
         buttons.addView(playBtn)
         trailerBtn = button("▶  Trailer", primary = false) { showTrailerPanel() }
         buttons.addView(trailerBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
-        loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(RED) }
+        loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(pageAccent) }
         buttons.addView(loading, LinearLayout.LayoutParams((28 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (16 * dp).toInt() })
         body.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (26 * dp).toInt() })
 
@@ -160,7 +160,7 @@ class DetailActivity : Activity() {
         background = bg
         val style = { f: Boolean ->
             bg.setColor(if (f && !primary) Color.WHITE else if (primary) Color.WHITE else 0x991A2936.toInt())
-            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.SIGNAL)
+            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, pageAccent)
             setTextColor(if (primary || f) Accent.ABYSS else Accent.TEXT)
             animate().scaleX(if (f) 1.045f else 1f).scaleY(if (f) 1.045f else 1f).translationZ(if (f) 8 * dp else 0f)
                 .setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
@@ -306,7 +306,7 @@ class DetailActivity : Activity() {
             card.addView(img, LinearLayout.LayoutParams((240 * dp).toInt(), (135 * dp).toInt()))
             val n = tv(14f, Accent.TEXT, fSemi).apply { id = 2; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
             card.addView(n, LinearLayout.LayoutParams((240 * dp).toInt(), -2).apply { topMargin = (10 * dp).toInt() })
-            card.addView(View(p.context).apply { id = 3; setBackgroundColor(Accent.SIGNAL); visibility = View.GONE },
+            card.addView(View(p.context).apply { id = 3; setBackgroundColor(pageAccent); visibility = View.GONE },
                 LinearLayout.LayoutParams((240 * dp).toInt(), (2 * dp).toInt()).apply { topMargin = (5 * dp).toInt() })
             card.layoutParams = RecyclerView.LayoutParams(-2, -2).apply { marginEnd = (18 * dp).toInt() }
             return VH(card)

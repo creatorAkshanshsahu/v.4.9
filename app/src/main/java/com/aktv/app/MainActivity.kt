@@ -221,8 +221,13 @@ class MainActivity : AppCompatActivity() {
         infoRetryAction.setOnClickListener { reloadStream() }
         infoGuideAction.setOnClickListener { showProgrammeGuide() }
         listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+            action.background = Ui.pill(dp, 0xB31C2432.toInt(), 18f)
             action.setOnFocusChangeListener { v, focused ->
-                (v as TextView).setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
+                val text = v as TextView
+                text.background = Ui.pill(dp, if (focused) Accent.LIVE else 0xB31C2432.toInt(), 18f).apply {
+                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) 0xFFFFB3C0.toInt() else 0x55FFFFFF)
+                }
+                text.setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
                 v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f)
                     .translationZ(if (focused) 8 * dp else 0f).setDuration(180).start()
             }
@@ -254,9 +259,15 @@ class MainActivity : AppCompatActivity() {
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        infoCard.background = Ui.pill(dp, 0xE10E1422.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
-        infoCard.elevation = 8 * dp
-        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f)
+        infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(0xF00B101A.toInt(), 0xE10E1422.toInt())).apply {
+            cornerRadius = 22 * dp
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x99FF5D7A.toInt())
+        }
+        infoCard.elevation = 10 * dp
+        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
+            setStroke((1 * dp).toInt().coerceAtLeast(1), Accent.LIVE)
+        }
         if (resources.configuration.screenWidthDp < 600) {
             val card = infoCard as LinearLayout
             card.orientation = LinearLayout.VERTICAL; card.minimumWidth = 0
@@ -389,12 +400,13 @@ class MainActivity : AppCompatActivity() {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
         setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
-        val bg = Ui.pill(dp, if (primary) Accent.SIGNAL else 0xB31C2740.toInt(), 10f)
+        val accent = sectionAccent()
+        val bg = Ui.pill(dp, if (primary) accent else 0xB31C2740.toInt(), 10f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (focused) Accent.SIGNAL else if (primary) Accent.SIGNAL else 0xB31C2740.toInt())
-            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.SIGNAL)
+            bg.setColor(if (focused || primary) accent else 0xB31C2740.toInt())
+            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, accent)
             setTextColor(if (focused || primary) Accent.ABYSS else Accent.TEXT)
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
@@ -409,11 +421,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.home).requestLayout()
     }
 
+    private fun sectionAccent() = when (tab) { 0 -> Accent.LIVE; 1 -> Accent.ION; 2 -> Accent.GOLD; else -> Accent.INDIGO }
+
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
-        bg.setColor(when { focused -> Accent.SIGNAL; active -> 0xFF202A52.toInt(); else -> Color.TRANSPARENT })
-        val fg = when { focused -> Accent.ABYSS; active -> Accent.SIGNAL; else -> Accent.DIM }
+        val accent = sectionAccent()
+        bg.setColor(when { focused -> accent; active -> Ui.mix(Accent.ABYSS, accent, 0.24f); else -> Color.TRANSPARENT })
+        val fg = when { focused -> Accent.ABYSS; active -> accent; else -> Accent.DIM }
         tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
-        bg.setStroke(if (active && !focused) (1 * dp).toInt().coerceAtLeast(1) else 0, 0xFF285C55.toInt())
+        bg.setStroke(if (active && !focused) (1 * dp).toInt().coerceAtLeast(1) else 0, Ui.mix(accent, Color.WHITE, 0.12f))
     }
     private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
 
@@ -426,7 +441,10 @@ class MainActivity : AppCompatActivity() {
         phoneSearchBtn.contentDescription = when (tab) { 2 -> "Search movies"; 3 -> "Search series"; else -> "Search channels" }
         navStyle(phoneSearchBtn, phoneSegBgs[4], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "Movies"; else -> "Series" }
-        findViewById<TextView>(R.id.sectionKicker).text = if (tab < 2) "YOUR FRONT ROW" else "FIND YOUR NEXT FAVORITE"
+        findViewById<TextView>(R.id.sectionKicker).apply {
+            text = when (tab) { 0 -> "LIVE, RIGHT NOW"; 1 -> "PLAY ANYTIME · 24/7"; 2 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING" }
+            setTextColor(sectionAccent())
+        }
         val count = when (tab) { 0 -> all.size; 1 -> allV2.size; else -> vodRows[tab - 2].sumOf { it.tiles.size } }
         findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 2) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
@@ -773,7 +791,10 @@ class MainActivity : AppCompatActivity() {
         when (t) {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
-                heroDot.visibility = View.VISIBLE; heroDot.backgroundTintList = ColorStateList.valueOf(Accent.LIVE)
+                heroDot.visibility = View.VISIBLE
+                (heroDot as? TextView)?.text = if (t.c.v2) "●  ALWAYS ON" else "●  LIVE NOW"
+                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.ION else Accent.LIVE)
+                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
                 heroChips.addView(chip("▶   Watch live", true).apply { setOnClickListener {
@@ -800,8 +821,12 @@ class MainActivity : AppCompatActivity() {
                 scheduleHeroGuide(t.c)
             }
             is Tile.Mv -> {
-                val red = Accent.SIGNAL
-                heroDot.visibility = View.GONE
+                val accent = sectionAccent()
+                heroDot.visibility = View.VISIBLE
+                (heroDot as? TextView)?.apply {
+                    text = if (t.m.isSeries) "SERIES SPOTLIGHT" else "FEATURED MOVIE"
+                    setTextColor(accent); backgroundTintList = ColorStateList.valueOf(accent)
+                }
                 heroTitle.text = t.m.name
                 heroBadge.text = if (t.m.isSeries) "SERIES  /  ON DEMAND" else "MOVIE  /  ON DEMAND"
                 heroChips.addView(chip("▶   Details", true).apply { setOnClickListener {
@@ -817,9 +842,11 @@ class MainActivity : AppCompatActivity() {
                     heroLogo.animate().alpha(0.92f).setDuration(220).start()
                 }
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
-                heroDesc.text = t.m.description; heroDesc.visibility = View.GONE // full synopsis lives in the responsive detail page
+                heroDesc.text = t.m.description
+                heroDesc.visibility = if (!compact && t.m.description.isNotBlank()) View.VISIBLE else View.GONE
                 ui.removeCallbacks(heroGuideRunnable)
-                glowHero(red, 0xFF294C83.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
+                glowHero(accent, if (t.m.isSeries) 0xFF493A8A.toInt() else 0xFF815331.toInt())
+                showBackdrop(t.m.background.ifEmpty { t.m.poster })
             }
             else -> {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "Your world. On screen."

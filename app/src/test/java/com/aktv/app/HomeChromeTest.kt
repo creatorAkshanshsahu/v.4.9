@@ -35,6 +35,8 @@ class HomeChromeTest {
         assertTrue(content.left >= rail.right)
         val media = root.findViewById<View>(R.id.heroMedia)
         assertTrue(media.left >= rail.right); assertTrue(media.right <= root.width)
+        assertEquals("spotlight art begins at the top edge", 0, media.top)
+        assertTrue("cinematic backdrop extends beyond the reserved hero shelf", media.height > root.findViewById<View>(R.id.heroArea).height)
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)

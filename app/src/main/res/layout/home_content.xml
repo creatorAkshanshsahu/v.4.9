@@ -1,7 +1,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
-    <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="230dp"
-        android:layout_gravity="top" android:layout_marginStart="128dp" android:layout_marginEnd="28dp" android:layout_marginTop="84dp">
+    <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:layout_gravity="top" android:layout_marginStart="100dp">
         <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent">
             <ImageView android:id="@+id/heroLogo" android:layout_width="144dp" android:layout_height="144dp"
                 android:layout_gravity="center_vertical|end" android:layout_marginEnd="76dp" android:scaleType="fitCenter"/>
@@ -23,7 +23,8 @@
     <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="match_parent"
         android:layout_marginStart="100dp" android:orientation="vertical">
         <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="84dp"
-            android:paddingStart="28dp" android:paddingEnd="30dp" android:orientation="horizontal" android:gravity="center_vertical">
+            android:paddingStart="28dp" android:paddingEnd="30dp" android:orientation="horizontal" android:gravity="center_vertical"
+            android:background="@drawable/home_top_scrim">
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
                 <TextView android:id="@+id/sectionKicker" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:text="YOUR FRONT ROW" android:textSize="9sp" android:letterSpacing="0.18" android:textColor="@color/signal" android:fontFamily="@font/sora_semibold"/>
@@ -101,7 +102,7 @@
         <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
             android:nextFocusUp="@id/segSeries" android:nextFocusRight="@id/rows"/>
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
-        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.26"
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.27"
             android:layout_marginTop="10dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
     </LinearLayout>
 </FrameLayout>

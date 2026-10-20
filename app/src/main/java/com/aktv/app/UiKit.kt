@@ -25,6 +25,7 @@ object Accent {
     val INDIGO = 0xFF8B78FF.toInt()
     val DEEP = 0xFF20254F.toInt()
     val LIVE = 0xFFFF5D7A.toInt()
+    val GOLD = 0xFFFFC46B.toInt()
     val TEXT = 0xFFF2F5FF.toInt()
     val DIM = 0xFFAAB6D2.toInt()
     val FAINT = 0xFF7180A1.toInt()

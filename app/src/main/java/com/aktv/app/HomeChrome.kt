@@ -53,11 +53,15 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.sectionKicker).textSize = if (m.compact) 8f else 9f
         root.findViewById<View>(R.id.librarySummary).visibility = if (screenWidth / dp < 800) View.GONE else View.VISIBLE
         root.findViewById<View>(R.id.heroMedia).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply { height = m.hero; topMargin = m.header + if (m.phone) px(48) else 0; marginStart = m.rail + m.margin; marginEnd = m.margin }
-            background = Ui.pill(dp, 0xE6101E2B.toInt(), if (m.compact) 18f else 24f).apply {
-                setStroke((1 * dp).toInt().coerceAtLeast(1), 0x33FFFFFF)
+            // The selected art is an edge-to-edge backdrop behind the title bar and the first shelf,
+            // rather than a floating thumbnail card. Keep the shelf reservation below unchanged.
+            (layoutParams as FrameLayout.LayoutParams).apply {
+                val backdropFraction = when { m.phone && !m.compact -> 0.56f; m.compact -> 0.72f; else -> 0.78f }
+                height = maxOf((screenHeight * backdropFraction).toInt(), m.header + m.hero)
+                topMargin = 0; marginStart = m.rail; marginEnd = 0
             }
-            clipToOutline = true
+            background = null
+            clipToOutline = false
         }
         root.findViewById<View>(R.id.heroArea).layoutParams.height = m.hero
         root.findViewById<View>(R.id.heroText).apply {
