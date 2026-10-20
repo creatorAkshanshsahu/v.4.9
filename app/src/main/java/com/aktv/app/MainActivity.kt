@@ -843,8 +843,8 @@ class MainActivity : AppCompatActivity() {
         if (!leader) return
         io.execute {
             val primary = try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
-            val guide = if (guideHasSchedule(primary)) primary
-                else ExternalEpg.guide(applicationContext, c.id) ?: primary
+            val guide = primary?.takeIf(::guideHasSchedule)
+                ?: ExternalEpg.guide(applicationContext, c.id) ?: primary
                 ?: Guide(null, null, emptyList(), "No schedule currently published")
             Epg.put(c.id, guide)
             val callbacks = synchronized(guideWaiters) { guideWaiters.remove(c.id).orEmpty() }
