@@ -3,5 +3,24 @@
         <item name="android:windowBackground">@color/abyss</item>
         <item name="android:fontFamily">@font/sora_regular</item>
         <item name="colorAccent">@color/signal</item>
+        <item name="android:statusBarColor">@color/abyss</item>
+        <item name="android:navigationBarColor">@color/abyss</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="alertDialogTheme">@style/Theme.AKTV.Dialog</item>
+    </style>
+    <style name="Theme.AKTV.Dialog" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:windowBackground">@color/night</item>
+        <item name="android:colorBackground">@color/night</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:textColorSecondary">@color/text_dim</item>
+        <item name="colorAccent">@color/signal</item>
+    </style>
+    <style name="Widget.AKTV.RailItem" parent="@android:style/Widget.TextView">
+        <item name="android:layout_width">match_parent</item><item name="android:layout_height">56dp</item>
+        <item name="android:layout_marginBottom">4dp</item><item name="android:gravity">center</item>
+        <item name="android:focusable">true</item><item name="android:clickable">true</item>
+        <item name="android:textSize">10sp</item><item name="android:fontFamily">@font/sora_semibold</item>
+        <item name="android:drawablePadding">5dp</item><item name="android:paddingTop">8dp</item><item name="android:paddingBottom">8dp</item>
+        <item name="android:textColor">@color/text_dim</item><item name="android:maxLines">1</item>
     </style>
 </resources>

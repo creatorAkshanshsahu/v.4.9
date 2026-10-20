@@ -8,10 +8,10 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
-import android.net.Uri
 import android.os.Bundle
-import android.os.Handler
+import android.os.Build
 import android.os.SystemClock
+import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
@@ -19,31 +19,22 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.TypefaceSpan
-import android.util.Base64
 import android.view.*
-import org.mozilla.geckoview.ContentBlocking
-import org.mozilla.geckoview.GeckoResult
-import org.mozilla.geckoview.GeckoRuntime
-import org.mozilla.geckoview.GeckoSession
-import org.mozilla.geckoview.GeckoSessionSettings
-import org.mozilla.geckoview.GeckoView
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.res.ResourcesCompat
 import androidx.media3.common.*
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.drm.*
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
-import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.*
 import coil.load
@@ -56,6 +47,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 class VH(v: View) : RecyclerView.ViewHolder(v)
 
@@ -79,8 +71,10 @@ class MainActivity : AppCompatActivity() {
     private val RECENT = "Recently watched"; private val CONTINUE = "Continue watching"
     private lateinit var heroBackdrop: ImageView; private lateinit var heroPreview: View; private lateinit var previewPv: PlayerView
     private var previewPlayer: ExoPlayer? = null; private var previewToken = 0
+    private var previewJob: Future<*>? = null
+    private var previewStall: Runnable? = null
     // ➜ CHANNEL UPDATE LINKS: the app re-reads both lists from here every launch
-    private val SITE = "https://livetgtv.lovable.app"
+    private val SITE = TgServers.SITE
     private val BASE = "$SITE/api/public/channels"            // V1 live TV
     private val BASE_V2 = "$SITE/api/public/v2/channels"      // V2 24/7
     private val GUIDE = "$SITE/api/public/guide"              // programme details (V1)
@@ -96,49 +90,66 @@ class MainActivity : AppCompatActivity() {
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
     private var favs = setOf<String>(); private var heroTile: Tile? = null
     private val accents = HashMap<String, Int>()
-    private var tab = 0; private var current = -1; private var retries = 0
+    private var tab = 0; private var current = -1
     private var player: ExoPlayer? = null
     private var lastRefresh = 0L; private var v1Msg = "Loading channels…"
 
-    // playback state: how this channel is being tried, so a refused stream can move on by itself
+    // Only the native player owns live TV playback. Resolve jobs are cancelled/guarded when zapping.
     private var playToken = 0
-    private var routes = listOf<Pair<Int, Int>>(); private var routeIdx = 0          // (source, header profile)
-    private var v1Sources = listOf<String>(); private var v1Drms = listOf<JSONObject?>()
-    private val jjUrls = java.util.Collections.synchronizedSet(HashSet<String>())   // streams from jjtvxweb.pages.dev
-    private var v2Servers = listOf<Pair<String, String>>(); private var serverIdx = 0  // (stream url, type)
-    private var v2Extra = listOf<Pair<JSONObject?, Int>>()   // per V2 server: (ClearKey drm, header profile or -1 for the plain relay)
-    private var attempts = 0; private var refreshed = false; private var lastCode: Int? = null
-    private var okLong = false; private var stalls = 0
+    private var resolveJob: Future<*>? = null
+    private val playbackIo = Executors.newFixedThreadPool(2)
+    private var nativeSources = emptyList<TgStream>()
+    private var serverIdx = 0
+    private var nativeProviders = listOf(LiveProvider.TG)
+    private var nextNativeProvider = 1
+    private var nativePassFresh = false
+    private var currentNativeProvider = LiveProvider.JJTV
+    private var requestedNativeProvider: Pair<String, LiveProvider>? = null
+    private val providerWindow = NativeProviderWindow()
+    private val decoderRetries = NativeDecoderRetries()
+    private val authRecovery = PlaybackAuthRecovery()
+    private val recovery = PlaybackRecovery()
+    // A transient provider refusal is retried once on the provider that actually plays this
+    // channel, instead of spending the remaining tuning budget on a source with broken DRM.
+    private var refusalRetried = false
+    private var okLong = false
+    private var renderedFrame = false
+    private val television get() = NativePlaybackPolicy.isTelevision(this)
+    private var compatiblePlayback = false
+    private var playbackActive = false
+    private val startupBudget = PlaybackStartupBudget()
+    private var playbackHealth: PlaybackHealth? = null
+    private var surfaceWait: Pair<SurfaceHolder, SurfaceHolder.Callback>? = null
+    private var diagnostics = PlaybackDiagnostics()
+    private var activeAttempt: PlaybackDiagnostics.Attempt? = null
+    private var diagnosticsDialog: AlertDialog? = null
+    private var sourceMenu: AlertDialog? = null
+    private var diagnosticsText: TextView? = null
+    private val drmProbeIo = Executors.newSingleThreadExecutor()
+    private var drmProbeRunning = false
+    private var drmProbeStatus = "ClearKey self-test: not run (MENU > Playback details > Check DRM)."
+    private val appVersion by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" }
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
-    private var capH = 1080; private var badSeconds = 0
+    private var picture: NativePictureController? = null
     private val lowEnd by lazy {
         (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isLowRamDevice || android.os.Build.SUPPORTED_64_BIT_ABIS.isEmpty()
     }
     private fun startCap(): Int {
         val ch = shown.getOrNull(current)
-        val saved = if (ch != null) prefs.getInt("q_${ch.key}", 0) else 0     // what worked last time for this channel
-        return if (saved > 0) saved else if (lowEnd) 720 else 1080
+        val saved = if (ch != null) prefs.getInt("q_${ch.key}", 0) else 0
+        val ceiling = if (lowEnd || television) 720 else 1080
+        return if (saved > 0) minOf(saved, ceiling) else ceiling
     }
-    private val dropWatcher = object : AnalyticsListener {
-        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
-            if (elapsedMs <= 0) return
-            if (droppedFrames * 1000f / elapsedMs >= 6f) badSeconds++ else badSeconds = (badSeconds - 1).coerceAtLeast(0)
-            if (badSeconds < 3 || capH <= 540) return
-            badSeconds = 0
-            capH = if (capH > 720) 720 else 540
-            shown.getOrNull(current)?.let { prefs.edit().putInt("q_${it.key}", capH).apply() }
-            trackSel?.let { it.setParameters(it.buildUponParameters().setMaxVideoSize(capH * 16 / 9, capH)) }
-            playMsg("Smoothing playback (${capH}p)…")
-        }
-    }
+    private fun stablePicture(ch: Channel?): Boolean = ch != null && prefs.getBoolean("stable_picture_${ch.key}",
+        (television && !ch.v2 && ch.id == "1108") || prefs.getInt("q_${ch.key}", 0) > 0)
 
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
     private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
     private val segs by lazy { listOf(segLive, segV2, segSites, segSeries) }   // 0 Live, 1 24/7, 2 Movies, 3 Series
     // top navigation (Google TV style): flat pills, white while focused, grey for the open tab
-    private val segBgs by lazy { List(4) { Ui.pill(dp, Color.TRANSPARENT) } }
+    private val segBgs by lazy { List(4) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
@@ -168,7 +179,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        TgServers.init(applicationContext); TgServers.warmAlt(); TgServers.refreshSite()
+        TgServers.init(applicationContext)
+        // Old releases remembered web/backup engines and guessed HTTP profiles. Do not carry those forward.
+        if (!prefs.getBoolean("native_only_v2", false)) {
+            val edit = prefs.edit()
+            prefs.all.keys.filter { it.startsWith("eng_") || it.startsWith("p_") }.forEach { edit.remove(it) }
+            edit.putBoolean("native_only_v2", true).apply()
+        }
         setContentView(R.layout.activity_main)
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
@@ -183,6 +200,9 @@ class MainActivity : AppCompatActivity() {
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
         infoMono = findViewById(R.id.infoMono); infoNow = findViewById(R.id.infoNow); infoProgress = findViewById(R.id.infoProgress)
         infoDesc = findViewById(R.id.infoDesc); infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus)
+        // Phones have no MENU/OK remote keys: make the visible source/status lines actionable.
+        infoNext.setOnClickListener { if (!guideShown) showNativeSourceMenu() }
+        playStatus.setOnClickListener { showPlaybackDetails() }
         searchLayer = findViewById(R.id.searchLayer); searchQuery = findViewById(R.id.searchQuery); searchKeys = findViewById(R.id.searchKeys)
         searchResults = findViewById(R.id.searchResults); searchCount = findViewById(R.id.searchCount); searchEmpty = findViewById(R.id.searchEmpty)
         intro = findViewById(R.id.splash)
@@ -192,10 +212,11 @@ class MainActivity : AppCompatActivity() {
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 16f)
+        infoCard.background = Ui.pill(dp, 0xEB0D1925.toInt(), 18f)
+        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f)
         findViewById<TextView>(R.id.infoHint).text = SpannableStringBuilder().apply {
             key(this, "▲ ▼", "Channel"); append("     "); key(this, "▶", "All channels"); append("     ")
-            key(this, "Hold OK", "Reload"); append("     "); key(this, "◀", "Switch player"); append("     "); key(this, "Back", "Exit")
+            key(this, "Hold OK", "Reload"); append("     "); key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
         }
         val track = ColorStateList.valueOf(Color.argb(60, 255, 255, 255))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
@@ -260,16 +281,13 @@ class MainActivity : AppCompatActivity() {
         }
         styleSegs(); fillHero(null); loadChannels()
 
-        // Entrance: the AK ribbons unfold, then the mark flies through and the home screen rises in behind it.
+        // A short, skippable reveal. No hidden movie-catalogue warm-up competing with live decoding.
         intro.wordmark = fSemi
-        home.alpha = 0f; home.translationY = 28 * dp
-        intro.onReveal = {
-            home.animate().alpha(1f).translationY(0f).setDuration(650).setInterpolator(DecelerateInterpolator(2f)).start()
-        }
-        intro.onDone = { intro.visibility = View.GONE; rowsView.requestFocus() }
+        home.alpha = 0f; home.translationY = 0f
+        intro.onReveal = { home.alpha = 1f }
+        intro.onDone = { home.alpha = 1f; intro.visibility = View.GONE; segs[tab].requestFocus() }
         Movies.diskDir = cacheDir
-        ui.postDelayed({ loadVod(2) }, 1500)   // warm up the Movies tab, then Series, in the background
-        ui.postDelayed({ loadVod(3) }, 5000)
+        findViewById<TextView>(R.id.navVersion).text = appVersion
         intro.start()
     }
 
@@ -284,49 +302,50 @@ class MainActivity : AppCompatActivity() {
 
     /** Hero button: [primary] is the white pill (Watch / Details), the rest are soft grey pills. */
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
-        this.text = text; textSize = 13f; typeface = fSemi
+        this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
+        isFocusable = true; isClickable = true
+        setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
+        val bg = Ui.pill(dp, if (primary) Accent.SIGNAL else 0xB31C2B39.toInt(), 10f)
+        background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
-        setPadding((22 * dp).toInt(), (11 * dp).toInt(), (24 * dp).toInt(), (11 * dp).toInt())
-        background = Ui.pill(dp, if (primary) Accent.SIGNAL else 0xCC1D2433.toInt())
-        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (10 * dp).toInt() }
+        setOnFocusChangeListener { _, focused ->
+            bg.setColor(if (focused) Color.WHITE else if (primary) Accent.SIGNAL else 0xB31C2B39.toInt())
+            setTextColor(if (focused || primary) Accent.ABYSS else Accent.TEXT)
+        }
+        nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
     }
 
-    /** Sizes the hero card from the real screen: rounded card under the top bar, text inside it at the bottom-left, rows below. */
     private fun layoutHero() {
         val dm = resources.displayMetrics
-        val w = dm.widthPixels; val h = dm.heightPixels
-        val bar = ((if (compact) 56 else 72) * dp).toInt()
-        val cardH = (h * (if (compact) 0.36f else 0.40f)).toInt()
-        findViewById<View>(R.id.topBar).layoutParams.height = bar
-        val media = findViewById<View>(R.id.heroMedia)
-        (media.layoutParams as FrameLayout.LayoutParams).apply { height = cardH; topMargin = bar }
-        media.background = Ui.pill(dp, 0xFF11151D.toInt(), 26f); media.clipToOutline = true
-        findViewById<View>(R.id.heroArea).layoutParams.height = cardH
-        heroText.layoutParams.width = (w * 0.46f).toInt()
-        heroDesc.maxLines = if (compact) 1 else 2
-        heroTitle.textSize = if (compact) 26f else 34f
+        HomeChrome.apply(findViewById(R.id.home), dm.widthPixels, dm.heightPixels, dp, tab >= 2)
+        val searchWidth = minOf(340f, dm.widthPixels / dp * 0.43f)
+        findViewById<View>(R.id.searchInputColumn).layoutParams.width = (searchWidth * dp).toInt()
+        findViewById<View>(R.id.home).requestLayout()
     }
 
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
-        bg.setColor(when { focused -> 0xFFFFFFFF.toInt(); active -> Accent.SIGNAL; else -> 0xFF1D2A47.toInt() })
-        val fg = if (focused || active) Accent.ABYSS else 0xFFC4D5F7.toInt()
+        bg.setColor(when { focused -> Color.WHITE; active -> 0xFF163B39.toInt(); else -> Color.TRANSPARENT })
+        val fg = when { focused -> Accent.ABYSS; active -> Accent.SIGNAL; else -> Accent.DIM }
         tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
-        val sc = if (focused) 1.07f else 1f
-        if (tv.scaleX != sc) tv.animate().scaleX(sc).scaleY(sc).setDuration(150).start()
+        bg.setStroke(if (active && !focused) (1 * dp).toInt().coerceAtLeast(1) else 0, 0xFF285C55.toInt())
     }
-    private val searchBg by lazy { Ui.pill(dp, 0xFF1D2A47.toInt()) }
+    private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
 
     private fun styleSegs() {
-        // one search button per section: it always searches the section you are in
-        val label = when (tab) { 2 -> "Search Movies"; 3 -> "Search Series"; else -> "Search Channels" }
-        if (searchBtn.text.toString() != label) searchBtn.text = label
+        searchBtn.text = "Search"
+        searchBtn.contentDescription = when (tab) { 2 -> "Search movies"; 3 -> "Search series"; else -> "Search channels" }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tab == i) }
         navStyle(searchBtn, searchBg, searchBtn.isFocused, false)
+        findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "Movies"; else -> "Series" }
+        findViewById<TextView>(R.id.sectionKicker).text = if (tab < 2) "YOUR FRONT ROW" else "FIND YOUR NEXT FAVORITE"
+        val count = when (tab) { 0 -> all.size; 1 -> allV2.size; else -> vodRows[tab - 2].sumOf { it.tiles.size } }
+        findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 2) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
 
     /** Focused card grows a little; the white ring comes from the view's own foreground state. No shadows, no glow. */
     private fun focusAnim(x: View, f: Boolean, color: Int = 0) {
-        val s = if (f) 1.08f else 1f
+        val s = if (f) 1.035f else 1f
         x.animate().cancel()
         x.animate().setStartDelay(0).scaleX(s).scaleY(s).setDuration(150).setInterpolator(DecelerateInterpolator(1.6f)).start()
     }
@@ -437,6 +456,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyV1(list: List<Channel>) {
         if (list == all) return
         all = list; seedAccents(list); updateStatus()
+        list.firstOrNull()?.let { TgServers.refreshSite(it.id) }
         if (tab == 0) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
         if (searchShown) updateResults()
     }
@@ -581,7 +601,7 @@ class MainActivity : AppCompatActivity() {
             else -> rows.firstOrNull()?.tiles?.firstOrNull()
         }
         setHero(first, immediate = true)
-        updateStatus()
+        updateStatus(); styleSegs()
     }
 
     private fun toggleFav(c: Channel) {
@@ -599,7 +619,7 @@ class MainActivity : AppCompatActivity() {
     private fun switchTab(t: Int) {
         if (t == tab) return
         val dir = if (t > tab) 1 else -1
-        tab = t; styleSegs(); stopPreview()
+        tab = t; layoutHero(); styleSegs(); stopPreview()
         val shift = 28 * dp * dir
         rowsView.animate().cancel()
         rowsView.animate().alpha(0f).translationY(-shift).setDuration(150).withEndAction {
@@ -629,7 +649,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun prefetch(url: String) {
-        if (url.isEmpty()) return
+        if (url.isEmpty() || layer.visibility == View.VISIBLE) return
         imageLoader.enqueue(ImageRequest.Builder(this).data(url).build())
     }
     private fun setHero(t: Tile?, immediate: Boolean = false) {
@@ -646,7 +666,7 @@ class MainActivity : AppCompatActivity() {
     }
     /** Tints the still hero panel (shown until the live preview is ready) with the channel's colour. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(Accent.ABYSS, c, 0.42f), Ui.mix(Accent.ABYSS, partner, 0.12f))
+        orbBg.colors = intArrayOf(Ui.mix(Accent.ABYSS, c, 0.24f), Ui.mix(Accent.ABYSS, partner, 0.12f))
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
     private fun showBackdrop(url: String?) {
@@ -666,8 +686,13 @@ class MainActivity : AppCompatActivity() {
                 heroDot.visibility = View.VISIBLE; heroDot.backgroundTintList = ColorStateList.valueOf(Accent.LIVE)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
-                heroChips.addView(chip("▶   Watch Live", true))
-                heroChips.addView(chip(keyHint("Hold OK", if (t.c.key in favs) "Remove from favourites" else "Add to favourites")))
+                heroChips.addView(chip("▶   Watch live", true).apply { setOnClickListener {
+                    shown = (if (t.c.v2) allV2 else all).ifEmpty { listOf(t.c) }; shownCat = t.c.category
+                    play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
+                } })
+                heroChips.addView(chip(if (t.c.key in favs) "♥  Saved" else "+  My favorites").apply {
+                    setOnClickListener { toggleFav(t.c); heroChips.getChildAt(1)?.requestFocus() }
+                })
                 if (t.c.logo.isBlank()) {
                     heroLogo.visibility = View.GONE; heroMono.visibility = View.VISIBLE
                     heroMono.text = initials(t.c.name); heroMono.textSize = if (heroMono.text.length > 1) 62f else 84f
@@ -685,7 +710,7 @@ class MainActivity : AppCompatActivity() {
                 scheduleHeroGuide(t.c)
             }
             is Tile.Mv -> {
-                val red = 0xFFE50914.toInt()
+                val red = Accent.SIGNAL
                 heroDot.visibility = View.GONE
                 heroTitle.text = t.m.name
                 heroBadge.text = listOfNotNull(
@@ -694,14 +719,16 @@ class MainActivity : AppCompatActivity() {
                     if (t.m.rating.isNotEmpty()) "★ ${t.m.rating}" else null,
                     t.m.genres.take(2).joinToString(" · ").ifEmpty { null }
                 ).joinToString("   ·   ")
-                heroChips.addView(chip("▶   Details", true))
+                heroChips.addView(chip("▶   Explore title", true).apply { setOnClickListener {
+                    stopPreview(); DetailActivity.open(this@MainActivity, t.m)
+                } })
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
-                heroDesc.text = t.m.description; heroDesc.visibility = if (t.m.description.isEmpty()) View.GONE else View.VISIBLE
+                heroDesc.text = t.m.description; heroDesc.visibility = View.GONE // full synopsis lives in the responsive detail page
                 ui.removeCallbacks(heroGuideRunnable)
-                glowHero(red, 0xFF5A0A12.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
+                glowHero(red, 0xFF0E5362.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
             }
             else -> {
-                heroDot.visibility = View.GONE; heroBadge.text = ""; heroTitle.text = "AK TV"
+                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "Your world. On screen."
                 heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.ic_mark)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
@@ -752,7 +779,7 @@ class MainActivity : AppCompatActivity() {
         heroProgress.visibility = heroProg.visibility
         if (n != null) { heroProg.text = progLine("NOW", n); heroProgress.progress = (Epg.progress(n) * 1000).toInt() }
         val d = n?.desc.orEmpty()
-        heroDesc.text = d; heroDesc.visibility = if (d.isEmpty()) View.GONE else View.VISIBLE
+        heroDesc.text = d; heroDesc.visibility = if (compact || d.isEmpty()) View.GONE else View.VISIBLE
         heroNext.visibility = if (nx != null && !compact) View.VISIBLE else View.GONE
         if (nx != null) heroNext.text = progLine("NEXT", nx, range = false)
     }
@@ -784,531 +811,702 @@ class MainActivity : AppCompatActivity() {
     }
     private fun fillInfoGuide(g: Guide?) {
         val n = g?.now
-        if (n == null) { infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE; infoNext.visibility = View.GONE; return }
+        if (n == null) { infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE; return }
         infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
         infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
         infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
-        val nx = g.next
-        if (nx != null) { infoNext.text = progLine("NEXT", nx); infoNext.visibility = View.VISIBLE } else infoNext.visibility = View.GONE
+        // infoNext belongs to native source selection. A late EPG callback must not replace or hide
+        // the active provider label while a different provider is resolving.
     }
     private fun playMsg(msg: String?) {
         if (msg == null) playStatus.visibility = View.GONE else { playStatus.text = msg; playStatus.visibility = View.VISIBLE }
     }
 
-    // ---------- playback ----------
-    private fun hexToB64Url(hex: String): String {
-        val bytes = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
-        return Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+    // ---------- native live playback ----------
+    /** User picked a channel (or zapped): start with the site's current sources, never a saved web engine. */
+    private fun play(index: Int) {
+        if (shown.isEmpty()) return
+        if (drmProbeRunning) { playMsg("The local DRM check is still running. Please wait, or restart the app if the system service is stuck."); return }
+        current = (index + shown.size) % shown.size
+        requestedNativeProvider = null
+        val ch = shown[current]
+        stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
+        home.visibility = View.INVISIBLE
+        heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
+        ui.removeCallbacks(heroRunnable); ui.removeCallbacks(heroGuideRunnable)
+        nativeSources = emptyList(); serverIdx = 0
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = true
+        if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
+        playMsg(null); bindInfo(ch)
+        resolveAndStart(ch)
     }
 
-    // ---------- TG TV player, embedded right in the player screen (V1 channels) ----------
-    private var gv: GeckoView? = null
-    private var gs: GeckoSession? = null
-
-    private fun geckoRuntime(): GeckoRuntime {
-        BrowserActivity.runtime?.let { return it }
-        val r = GeckoRuntime.create(applicationContext)
-        r.settings.contentBlocking.setAntiTracking(ContentBlocking.AntiTracking.AD or ContentBlocking.AntiTracking.ANALYTIC)
-        BrowserActivity.runtime = r
-        return r
-    }
-
-    /** V1 channels play only in the site's own player page (/embed/{id}): no stream link, header route or ExoPlayer. */
-    private var embedAlt = false; private var embedStart = 0L
-    private fun startEmbed(ch: Channel, alt: Boolean = false) {
-        val tk = ++playToken; disarmStall()
-        pv.player = null; player?.release(); player = null          // no ExoPlayer while a web player is showing
-        spinner.visibility = View.VISIBLE
-        embedAlt = alt; embedStart = System.currentTimeMillis()
-        if (!alt) { openEmbed(ch, "$SITE/embed/${ch.id}"); return }
-        // backup player: jjtvxweb.pages.dev/pind?id=<channel id>
-        io.execute {
-            val u = try { TgServers.altUrl(ch.id, ch.name) } catch (_: Exception) { TgServers.ALT_SITE }
-            runOnUiThread { if (tk == playToken) { embedStart = System.currentTimeMillis(); openEmbed(ch, u) } }
-        }
-    }
-    private fun openEmbed(ch: Channel, url: String) {
-        val open = gs
-        if (open != null) { open.loadUri(url); showInfo(); return }  // zapping reuses the same page view
-        val view = GeckoView(this)
-        val session = GeckoSession(GeckoSessionSettings.Builder()
-            .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_DESKTOP)
-            .viewportMode(GeckoSessionSettings.VIEWPORT_MODE_DESKTOP).build())
-        session.navigationDelegate = object : GeckoSession.NavigationDelegate {
-            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? = null   // block pop-ups
-        }
-        session.progressDelegate = object : GeckoSession.ProgressDelegate {
-            override fun onPageStop(session: GeckoSession, success: Boolean) {
-                // the website's player page itself would not load: go to the last-resort player
-                if (!success && !embedAlt && System.currentTimeMillis() - embedStart > 3000) { val c = shown.getOrNull(current); if (c != null && gs === session) { playMsg("TG player didn't load. Trying backup player…"); startEmbed(c, true); return } }
-                spinner.visibility = View.GONE
-                ui.postDelayed({ if (gs === session) playMsg(null) }, 3500)
+    /** Resolve the last working native provider first; never wait for a web player or bundled playlist. */
+    private fun resolveAndStart(ch: Channel, fresh: Boolean = false) {
+        val token = ++playToken
+        resolveJob?.cancel(true)
+        nativeSources = emptyList(); serverIdx = 0
+        nativeProviders = providerOrder(ch); nextNativeProvider = 1; nativePassFresh = fresh
+        val provider = nativeProviders.first()
+        enterNativeProvider(ch, provider)
+        releasePlayer(); spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        infoNext.visibility = View.VISIBLE
+        playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Connecting to ${providerName(provider)}…")
+        resolveJob = playbackIo.submit {
+            try {
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)
+                runOnUiThread {
+                    if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    nativeSources = sources
+                    val saved = prefs.getString("source_${ch.key}", null)
+                    serverIdx = sources.indexOfFirst { sourceKey(it) == saved }.coerceAtLeast(0)
+                    if (sources.isEmpty()) advanceNative("No native stream was advertised") else startNative()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (token == playToken && layer.visibility == View.VISIBLE) {
+                        diagnostics.metadataFailed(PlaybackProblems.from(e))
+                        nativeSources = emptyList()
+                        advanceNative(if (e is TgResolveException) e.message.orEmpty() else "Couldn't load ${providerName(provider)}'s current streams")
+                    }
+                }
             }
         }
-        session.open(geckoRuntime()); view.setSession(session)
-        (layer as ViewGroup).addView(view, 1, FrameLayout.LayoutParams(-1, -1))
-        gv = view; gs = session
-        session.loadUri(url)
+    }
+
+    private fun providerOrder(ch: Channel) = ChannelProviderOrder.order(
+        ch.id,
+        ch.v2,
+        prefs.getString("source_provider_${ch.key}", null),
+        requestedNativeProvider?.takeIf { it.first == ch.key }?.second
+    )
+    private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(
+        "native_compat_${ch.key}_${provider.name}",
+        prefs.getString("source_provider_${ch.key}", null) == provider.website && prefs.getBoolean("native_compat_${ch.key}", false))
+    private fun enterNativeProvider(ch: Channel, provider: LiveProvider) {
+        currentNativeProvider = provider
+        diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
+        compatiblePlayback = savedCompatibility(ch, provider) || decoderRetries.used(provider)
+        providerWindow.enter(SystemClock.elapsedRealtime())
+    }
+    private fun providerName(provider: LiveProvider) = if (provider == LiveProvider.TG) "TG TV" else "JJTV"
+    private fun sourceKey(source: TgStream) = LiveProviders.sourceKey(source)
+    private fun rememberNativeSource(ch: Channel, source: TgStream) {
+        prefs.edit().putString("source_${ch.key}", sourceKey(source))
+            .putString("source_provider_${ch.key}", source.requestOrigin).apply()
+    }
+
+    /** Load another advertised native source only after the current list fails. Keep one player engine. */
+    private fun loadMoreNative(ch: Channel, fresh: Boolean, reason: String) {
+        val providerIndex = nextNativeProvider
+        val provider = nativeProviders.getOrNull(providerIndex) ?: run { advanceNative(reason); return }
+        nextNativeProvider = providerIndex + 1
+        enterNativeProvider(ch, provider)
+        val token = ++playToken
+        resolveJob?.cancel(true)
+        spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        infoNext.visibility = View.VISIBLE
+        playMsg("Automatically trying ${providerName(provider)} native streams…")
+        resolveJob = playbackIo.submit {
+            var failureReason = reason
+            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
+                runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error)) }
+                failureReason = "Couldn't load ${providerName(provider)}'s current native stream configuration"
+                emptyList()
+            }
+            runOnUiThread {
+                if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
+                if (extra.isEmpty()) advanceNative(failureReason)
+                else {
+                    val first = nativeSources.size
+                    nativeSources = nativeSources + extra
+                    serverIdx = first
+                    startNative()
+                }
+            }
+        }
+    }
+
+    // Keep a comfortable live buffer, but don't wait for the full buffer before showing the first frame.
+    private fun liveCfg() = MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(12000)
+        .setMinOffsetMs(6000).setMaxOffsetMs(40000).setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build()
+
+    /** Shared by full-screen playback and previews so headers, type, redirects and DRM cannot drift apart. */
+    private fun nativeMediaSource(source: TgStream, trace: PlaybackDiagnostics.Attempt? = null): MediaSource {
+        val data = Streams.factory(source)
+        val factory: MediaSource.Factory = when (source.type) {
+            "hls" -> HlsMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+            "mp4" -> ProgressiveMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+            else -> DashMediaSource.Factory(data).setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+        }
+        val item = MediaItem.Builder().setUri(source.url).setLiveConfiguration(liveCfg())
+            .setMimeType(when (source.type) { "hls" -> MimeTypes.APPLICATION_M3U8; "mp4" -> MimeTypes.VIDEO_MP4; else -> MimeTypes.APPLICATION_MPD })
+        source.drm?.let { drm ->
+            val license = ClearKey.license(drm)
+            if (license != null) {
+                // The website overrides manifest DRM with its supplied ClearKeys. Supplying a local
+                // licence alone is insufficient for Widevine-only MPDs or missing default_KID tags.
+                (factory as? DashMediaSource.Factory)?.setManifestParser(ClearKeyDashManifestParser(drm))
+                val manager = DefaultDrmSessionManager.Builder()
+                    .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID,
+                        trace?.let { ObservedMediaDrm.provider(it) } ?: FrameworkMediaDrm.DEFAULT_PROVIDER)
+                    .setMultiSession(true).setPlayClearSamplesWithoutKeys(true)
+                    .build(LocalMediaDrmCallback(license))
+                factory.setDrmSessionManagerProvider { manager }
+            } else {
+                val type = drm.optString("type")
+                val licenseUrl = drm.optString("licenseUrl", drm.optString("license_url"))
+                if (!type.equals("widevine", true) || !licenseUrl.startsWith("https://"))
+                    throw IOException("TG TV did not provide usable DRM for this source")
+                val headers = HashMap<String, String>()
+                drm.optJSONObject("headers")?.let { h -> h.keys().forEach { headers[it] = h.optString(it) } }
+                item.setDrmConfiguration(MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
+                    .setLicenseUri(licenseUrl).setLicenseRequestHeaders(headers).build())
+            }
+        }
+        return factory.createMediaSource(item.build())
+    }
+
+    private fun startNative() {
+        val source = nativeSources.getOrNull(serverIdx) ?: return
+        spinner.visibility = View.VISIBLE
+        val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG) "TG TV · ${source.label}" else source.label
+        infoNext.text = "Auto · $sourceLabel · ${serverIdx + 1} of ${nativeSources.size}" +
+            if (nativeSources.size > 1) "   ·   OK switches server" else ""
+        infoNext.visibility = View.VISIBLE
+        val trace = diagnostics.begin(
+            if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG,
+            when (source.type) { "hls" -> PlaybackDiagnostics.Media.HLS; "mp4" -> PlaybackDiagnostics.Media.FILE; else -> PlaybackDiagnostics.Media.DASH },
+            when { source.drm == null -> PlaybackDiagnostics.Drm.NONE
+                ClearKey.license(source.drm) != null -> PlaybackDiagnostics.Drm.CLEARKEY
+                else -> PlaybackDiagnostics.Drm.WIDEVINE },
+            source.omitReferrer, compatiblePlayback)
+        try { attach(nativeMediaSource(source, trace), trace) }
+        catch (error: Exception) { trace.failed(PlaybackProblems.from(error)); advanceNative("This source could not be opened by the native player") }
+    }
+
+    private fun attach(ms: MediaSource, trace: PlaybackDiagnostics.Attempt) {
+        releasePlayer()
+        stopPreview()
+        val profile = NativePlaybackPolicy.profile(television, lowEnd, compatiblePlayback, startCap())
+        val channel = shown.getOrNull(current)
+        val stable = stablePicture(channel)
+        val ts = NativePlaybackPolicy.tracks(this, profile, shown.getOrNull(current)?.name?.contains("Hindi", true) == true)
+        val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
+            .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
+        val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
+            .setLoadControl(if (stable) androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(10_000, 30_000, 1500, 4000).setBackBuffer(0, false)
+                .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()
+                else NativePlaybackPolicy.buffers(profile)).setTrackSelector(ts).setBandwidthMeter(bw).build()
+        p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+        trackSel = ts; activeAttempt = trace
+        val controller = NativePictureController(p, ts, { player === p && playbackActive },
+            profile.allowReportedCapabilityExceedance, profile.height, stable,
+            remember = { selected -> channel?.let { prefs.edit().putInt("q_${it.key}", selected.height)
+                .putBoolean("stable_picture_${it.key}", true).apply() } },
+            notice = { text -> if (player === p) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); showInfo() } })
+        picture = controller
+        p.addAnalyticsListener(controller); p.addListener(controller)
+        p.addAnalyticsListener(NativePlaybackDiagnostics(trace))
+        renderedFrame = false
+        val health = PlaybackHealth(SystemClock.elapsedRealtime(), expectsVideo())
+        playbackHealth = health
+        p.setVideoFrameMetadataListener { _, _, _, _ -> health.videoProgress(SystemClock.elapsedRealtime()) }
+        p.setMediaSource(ms); p.playWhenReady = true; p.addListener(listenerFor(p, trace))
+        pv.player = p; player = p
+        prepareOnSurface(p)
         showInfo()
     }
 
-    private fun releaseEmbed() {
-        val v = gv; val s = gs
-        gv = null; gs = null
-        if (v != null) { try { v.releaseSession() } catch (_: Exception) {}; (v.parent as? ViewGroup)?.removeView(v) }
-        if (s != null) { try { s.close() } catch (_: Exception) {} }
-    }
-
-    /** OK on the remote = click the middle of the page (the player's big play button). */
-    private fun tapEmbed() {
-        val v = gv ?: return
-        val x = v.width / 2f; val y = v.height / 2f
-        val t = SystemClock.uptimeMillis()
-        val d = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0); d.source = InputDevice.SOURCE_TOUCHSCREEN
-        v.dispatchTouchEvent(d); d.recycle()
-        v.postDelayed({
-            val u = MotionEvent.obtain(t, t + 60, MotionEvent.ACTION_UP, x, y, 0); u.source = InputDevice.SOURCE_TOUCHSCREEN
-            v.dispatchTouchEvent(u); u.recycle()
-        }, 60)
-    }
-
-    /** User picked a channel (or zapped): start fresh. */
-    private fun play(index: Int) {
-        if (shown.isEmpty()) return
-        current = (index + shown.size) % shown.size
-        val ch = shown[current]
-        stopPreview(); rememberChannel(ch)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = true
-        if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
-        attempts = 0; refreshed = false; lastCode = null; serverIdx = 0; stalls = 0
-        playMsg(null); bindInfo(ch)
-        if (wantsTg(ch)) startEmbed(ch, prefs.getString("eng_${ch.key}", "native") == "alt") else resolveAndStart(ch)
-    }
-
-    // ---------- two players for V1: native (ExoPlayer + ClearKey) and the TG web player ----------
-    private fun wantsTg(ch: Channel) = !ch.v2 && prefs.getString("eng_${ch.key}", "native").let { it == "tg" || it == "alt" }
-    private fun setEngine(ch: Channel, tg: Boolean) {
-        if (ch.v2) return
-        val v = if (tg) "tg" else "native"
-        if (prefs.getString("eng_${ch.key}", "native") != v) prefs.edit().putString("eng_${ch.key}", v).apply()
-    }
-
-    /** Native player could not play this V1 channel (refused, DRM, decoder, no answer): continue in the TG player. */
-    private fun fallbackToTg(ch: Channel, why: String) {
-        if (ch.v2) { fail("${ch.name}: $why"); return }
-        setEngine(ch, true)
-        playMsg("Native player: $why. Switching to TG player…")
-        startEmbed(ch)
-    }
-
-    /** Every server failed: last resort, the backup player page (jjtvxweb.pages.dev) inside the app. */
-    private fun fallbackAlt(ch: Channel, why: String) {
-        playMsg("$why. Trying backup player…")
-        startEmbed(ch, true)
-    }
-
-    /** Left / Menu while a V1 channel plays: native player -> TG player -> backup player (remembered per channel). */
-    private fun switchEngine() {
-        val ch = shown.getOrNull(current) ?: return
-        if (ch.v2) { reloadStream(); return }
-        retries = 0; attempts = 0; refreshed = false; stalls = 0; lastCode = null
-        if (gs != null && !embedAlt) { prefs.edit().putString("eng_${ch.key}", "alt").apply(); playMsg("Backup player…"); startEmbed(ch, true) }
-        else if (gs != null) { setEngine(ch, false); playMsg("Native player…"); resolveAndStart(ch) }
-        else { setEngine(ch, true); playMsg("TG player…"); startEmbed(ch) }
-    }
-
-    /** Ask the site for the channel's current stream link(s) (they are short-lived) and start playing them. */
-    private fun resolveAndStart(ch: Channel) {
-        val token = ++playToken
-        val fresh = attempts > 0 || retries > 0 || refreshed
-        disarmStall(); releasePlayer(); spinner.visibility = View.VISIBLE
-        // everything is asked at the same time (site servers, channel API, bundled playlist): playback starts as soon as they are in, not one after another
-        val tgF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.fetch(ch.id, fresh) } catch (_: Exception) { emptyList() } })
-        val apiF = io.submit(java.util.concurrent.Callable<String> { get(if (ch.v2) "$BASE_V2/${ch.id}" else "$BASE/${ch.id}", 2, Streams.CHROME) })
-        // backup server (jjtvxweb.pages.dev) streams, played in the native player as extra servers
-        val altF = io.submit(java.util.concurrent.Callable<List<TgServers.Server>> { try { TgServers.scrapeAlt(ch.name, ch.id) } catch (_: Exception) { emptyList() } })
-        fun altList(wait: Long = 12): List<TgServers.Server> = try { altF.get(wait, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
-        io.execute {
-            try {
-                // jjtvxweb.pages.dev first, exactly like its own player: start the moment its stream is in
-                val jj = altList(6); jj.forEach { jjUrls.add(it.url) }
-                if (!ch.v2 && jj.isNotEmpty()) {
-                    val urls0 = ArrayList<String>(); val drms0 = ArrayList<JSONObject?>()
-                    jj.forEach { if (it.url !in urls0) { urls0.add(it.url); drms0.add(it.drm) } }
-                    runOnUiThread { if (token == playToken) { v1Sources = urls0; v1Drms = drms0; routes = buildRoutes(ch, urls0); routeIdx = 0; startV1() } }
-                    // the other servers are added behind it as fallbacks
-                    val tg2 = try { tgF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
-                    val more = ArrayList<String>(); val moreD = ArrayList<JSONObject?>()
-                    tg2.forEach { if (it.url !in urls0 && it.url !in more) { more.add(it.url); moreD.add(it.drm) } }
-                    Playlist.find(this, ch.name)?.let { pl -> if (pl.url !in urls0 && pl.url !in more) { more.add(pl.url); moreD.add(pl.drm) } }
-                    try { val o = JSONObject(apiF.get(10, java.util.concurrent.TimeUnit.SECONDS)); val src = o.getJSONArray("sources"); val d = o.optJSONObject("drm")
-                        (0 until src.length()).map { src.optString(it, "") }.filter { it.isNotBlank() && it !in urls0 && it !in more }.forEach { more.add(it); moreD.add(d) } } catch (_: Exception) {}
-                    if (more.isNotEmpty()) runOnUiThread { if (token == playToken && v1Sources === urls0) {
-                        val all = urls0 + more; val n0 = urls0.size
-                        routes = routes + buildRoutes(ch, all).filter { it.first >= n0 }
-                        v1Sources = all; v1Drms = drms0 + moreD } }
-                    return@execute
+    /** Avoid configuring an older TV codec against a placeholder before its real SurfaceView exists. */
+    private fun prepareOnSurface(owner: ExoPlayer) {
+        val view = pv.videoSurfaceView as? SurfaceView
+        if (view == null || view.holder.surface.isValid) { activeAttempt?.surfaceReady(); owner.prepare(); return }
+        playMsg("Waiting for the TV video surface…")
+        val holder = view.holder
+        val callback = object : SurfaceHolder.Callback {
+            private val gate = SurfaceStartGate(
+                active = { player === owner && playbackActive },
+                ready = { holder.surface.isValid },
+                prepare = {
+                    holder.removeCallback(this)
+                    if (surfaceWait?.second === this) surfaceWait = null
+                    activeAttempt?.surfaceReady()
+                    try { owner.prepare() } catch (error: Exception) {
+                        activeAttempt?.failed(PlaybackProblems.from(error))
+                        if (player === owner && !(PlaybackProblems.from(error).family == PlaybackDiagnostics.Family.DECODER &&
+                            retryCompatibleDecoder("The TV could not start its video decoder"))) advanceNative("The native video decoder could not be started")
+                    }
                 }
-                val tg = try { tgF.get(if (jj.isNotEmpty()) 3 else 20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { emptyList() }
-                var apiBody: String? = null; var apiErr: Exception? = null
-                try { apiBody = if (tg.isNotEmpty()) apiF.get(400, java.util.concurrent.TimeUnit.MILLISECONDS) else apiF.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (e: Exception) { apiErr = (e.cause as? Exception) ?: e }
-                if (ch.v2) {
-                    val list = ArrayList<Pair<String, String>>(); val extra = ArrayList<Pair<JSONObject?, Int>>()
-                    fun addTg(l: List<TgServers.Server>) = l.forEach { sv ->
-                        if (list.none { it.first == sv.url }) { list.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); extra.add(sv.drm to (if (Streams.isJio(sv.url)) 8 else 5)) }
+            )
+            override fun surfaceCreated(holder: SurfaceHolder) = gate.signal()
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = gate.signal()
+            override fun surfaceDestroyed(holder: SurfaceHolder) = Unit
+        }
+        surfaceWait = holder to callback
+        holder.addCallback(callback)
+        // Surface creation can race registration; the callback is idempotent.
+        if (holder.surface.isValid) callback.surfaceCreated(holder)
+    }
+
+    private fun listenerFor(owner: ExoPlayer, trace: PlaybackDiagnostics.Attempt) = object : Player.Listener {
+        override fun onPlaybackStateChanged(state: Int) {
+            if (player !== owner) return
+            trace.state(when (state) { Player.STATE_READY -> "READY"; Player.STATE_BUFFERING -> "BUFFERING"; Player.STATE_ENDED -> "ENDED"; else -> "IDLE" })
+            when (state) {
+                Player.STATE_READY -> {
+                    if (renderedFrame || !expectsVideo()) {
+                        spinner.visibility = View.GONE; playMsg(null)
+                        if (!expectsVideo()) { startupBudget.rendered(); providerWindow.rendered() }
+                    } else {
+                        spinner.visibility = View.VISIBLE
+                        playMsg("Stream connected — waiting for the first picture…")
                     }
-                    jj.forEach { sv -> if (list.none { it.first == sv.url }) { list.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); extra.add(sv.drm to Streams.JJWEB) } }
-                    addTg(tg)   // every server the site's own player gets (fresh tokens + all keys) first...
-                    if (apiBody != null) try {   // ...then the relay servers
-                        val sv = JSONObject(apiBody).getJSONArray("servers")
-                        (0 until sv.length()).mapNotNull { sv.optJSONObject(it) }
-                            .map { str(it, "playable") to str(it, "type").ifEmpty { "hls" } }
-                            .filter { it.first.isNotEmpty() && list.none { x -> x.first == it.first } }
-                            .forEach { list.add(it); extra.add(null to -1) }
-                    } catch (e: Exception) { apiErr = e }
-                    if (list.isEmpty()) { try { addTg(TgServers.scrape(ch.id)) } catch (_: Exception) {} }
-                    if (tg.isEmpty()) addTg(altList())   // nothing from the site: wait for the backup server
-                    if (list.isEmpty()) {
-                        runOnUiThread { if (token == playToken) fallbackAlt(ch, "no live server") }
-                        return@execute
+                }
+                Player.STATE_BUFFERING -> spinner.visibility = View.VISIBLE
+                Player.STATE_ENDED -> { trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded")); advanceNative("The live stream ended") }
+            }
+        }
+        override fun onRenderedFirstFrame() {
+            if (player !== owner) return
+            renderedFrame = true
+            trace.frameRendered()
+            playbackHealth?.firstFrame(SystemClock.elapsedRealtime())
+            startupBudget.rendered(); providerWindow.rendered()
+            if (owner.playbackState == Player.STATE_READY) { spinner.visibility = View.GONE; playMsg(null) }
+            val ch = shown.getOrNull(current) ?: return
+            nativeSources.getOrNull(serverIdx)?.let { rememberNativeSource(ch, it) }
+        }
+        override fun onPlayerError(error: PlaybackException) {
+            if (player !== owner) return
+            trace.failed(PlaybackProblems.from(error, error.errorCode))
+            val code = httpCode(error)
+            val provider = if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) "JJTV" else "TG TV"
+            val message = when {
+                code == 451 -> "$provider's upstream blocked this stream (HTTP 451)"
+                code != null -> "$provider's stream returned HTTP $code"
+                error.errorCode in 6000..6999 -> "$provider DRM could not be opened (code ${error.errorCode})"
+                error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
+                else -> "The live stream stopped responding (code ${error.errorCode})"
+            }
+            if (refreshNativeCredentials(code)) return
+            if (retryRefusedProvider(code)) return
+            if (code == null && PlaybackProblems.from(error, error.errorCode).family == PlaybackDiagnostics.Family.DECODER &&
+                retryCompatibleDecoder(message)) return
+            advanceNative(message)
+        }
+    }
+
+    private fun httpCode(error: Throwable): Int? {
+        var cause: Throwable? = error
+        repeat(8) {
+            if (cause is HttpDataSource.InvalidResponseCodeException) return (cause as HttpDataSource.InvalidResponseCodeException).responseCode
+            cause = cause?.cause
+        }
+        return null
+    }
+
+    private fun expectsVideo() = shown.getOrNull(current)?.category?.equals("Radio", true) != true
+
+    private fun beginNativeSession(ch: Channel) {
+        playbackActive = true
+        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear()
+        refusalRetried = false
+        compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
+        startupBudget.start(SystemClock.elapsedRealtime())
+        ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
+    }
+
+    private fun endNativeSession() {
+        playbackActive = false; startupBudget.clear(); providerWindow.clear(); ui.removeCallbacks(nativeHealthCheck)
+    }
+
+    private val nativeHealthCheck = object : Runnable {
+        override fun run() {
+            if (!playbackActive || layer.visibility != View.VISIBLE) return
+            val now = SystemClock.elapsedRealtime()
+            if (startupBudget.expired(now)) {
+                activeAttempt?.timeout()
+                fail("No playable picture within 60 seconds. Hold OK to retry.")
+                return
+            }
+            if (providerWindow.expired(now)) {
+                activeAttempt?.timeout()
+                recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == currentNativeProvider })
+                advanceNative("${providerName(currentNativeProvider)} did not start within its 25-second turn")
+                if (playbackActive) ui.postDelayed(this, 500)
+                return
+            }
+            val p = player
+            val health = playbackHealth
+            if (p != null && health != null) {
+                picture?.checkBuffering(now)
+                val state = when (p.playbackState) {
+                    Player.STATE_READY -> PlaybackHealth.State.READY
+                    Player.STATE_BUFFERING -> PlaybackHealth.State.BUFFERING
+                    Player.STATE_ENDED -> PlaybackHealth.State.ENDED
+                    else -> PlaybackHealth.State.IDLE
+                }
+                val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady)
+                if (result.failure != null) activeAttempt?.timeout()
+                when (result.failure) {
+                    PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
+                        val reason = if (surfaceWait != null) "The TV video surface is not ready" else "No picture from ${providerName(currentNativeProvider)}"
+                        if (activeAttempt?.canRetryDecoder() != true || !retryCompatibleDecoder(reason)) advanceNative(reason)
                     }
-                    runOnUiThread { if (token == playToken) { v2Servers = list; v2Extra = extra; if (serverIdx >= list.size) serverIdx = 0; startV2() } }
-                    // instant start like the website player: play the first server now, add the relay + backup servers once they arrive
-                    if (tg.isNotEmpty() || jj.isNotEmpty()) {
-                        val more = ArrayList<Pair<String, String>>(); val moreX = ArrayList<Pair<JSONObject?, Int>>()
-                        val body = apiBody ?: try { apiF.get(15, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { null }
-                        if (body != null) try {
-                            val sv = JSONObject(body).getJSONArray("servers")
-                            (0 until sv.length()).mapNotNull { sv.optJSONObject(it) }
-                                .map { str(it, "playable") to str(it, "type").ifEmpty { "hls" } }
-                                .filter { it.first.isNotEmpty() && list.none { x -> x.first == it.first } && more.none { x -> x.first == it.first } }
-                                .forEach { more.add(it); moreX.add(null to -1) }
-                        } catch (_: Exception) {}
-                        altList().forEach { sv -> if (list.none { it.first == sv.url } && more.none { it.first == sv.url }) {
-                            more.add(sv.url to (if (sv.url.contains(".mpd", true)) "dash" else "hls")); moreX.add(sv.drm to Streams.JJWEB) } }
-                        if (more.isNotEmpty()) runOnUiThread { if (token == playToken && v2Servers === list) {
-                            v2Servers = list + more; v2Extra = extra + moreX
-                            infoNext.text = "Server ${serverIdx + 1} of ${v2Servers.size}   ·   OK switches server" } }
+                    PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
+                        advanceNative("The live stream stopped responding")
+                    null -> if (result.stable) {
+                        recovery.reset(); authRecovery.reset(); refusalRetried = false
+                        shown.getOrNull(current)?.let { ch ->
+                            prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
+                        }
                     }
-                } else {
-                    val urls = ArrayList<String>(); val drms = ArrayList<JSONObject?>()
-                    tg.forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } }
-                    val pl = Playlist.find(this, ch.name)
-                    if (pl != null && pl.url !in urls) { urls.add(pl.url); drms.add(pl.drm) }
-                    if (apiBody != null) try {
-                        val o = JSONObject(apiBody)
-                        val src = o.getJSONArray("sources"); val drm = o.optJSONObject("drm")
-                        (0 until src.length()).map { src.optString(it, "") }.filter { it.isNotBlank() && it !in urls }
-                            .forEach { urls.add(it); drms.add(drm) }
-                    } catch (e: Exception) { apiErr = e }
-                    if (urls.isEmpty()) { try { TgServers.scrape(ch.id).forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } } } catch (_: Exception) {} }
-                    altList(if (urls.isEmpty()) 12 else 0).forEach { if (it.url !in urls) { urls.add(it.url); drms.add(it.drm) } }   // backup server streams, natively (no waiting when others are ready)
-                    if (urls.isEmpty()) throw apiErr ?: IOException("no stream source")
-                    runOnUiThread {
-                        if (token == playToken) { v1Sources = urls; v1Drms = drms; routes = buildRoutes(ch, urls); routeIdx = 0; startV1() }
+                }
+            }
+            if (diagnosticsText != null) refreshPlaybackDetails()
+            if (playbackActive) ui.postDelayed(this, 500)
+        }
+    }
+
+    /** One same-source retry: synchronous adapters, supported AVC/AAC, lower load, software preferred.
+     * The codec selector still enforces secure-decoder requirements. This does not bypass DRM.
+     */
+    private fun retryCompatibleDecoder(reason: String): Boolean {
+        if (compatiblePlayback || !expectsVideo() || nativeSources.getOrNull(serverIdx) == null ||
+            startupBudget.expired(SystemClock.elapsedRealtime())) return false
+        compatiblePlayback = true; decoderRetries.mark(currentNativeProvider)
+        providerWindow.recover(SystemClock.elapsedRealtime())
+        startupBudget.recover(SystemClock.elapsedRealtime())
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        playMsg("$reason. Trying native TV compatibility mode…")
+        ui.post { if (playbackActive && token == playToken && layer.visibility == View.VISIBLE) startNative() }
+        return true
+    }
+
+    /** A rejected token needs fresh configuration, not a second header style carrying the same
+     * credential. Refresh this provider once, inside the existing provider/whole-cycle deadlines.
+     */
+    private fun refreshNativeCredentials(code: Int?): Boolean {
+        val ch = shown.getOrNull(current) ?: return false
+        val provider = currentNativeProvider
+        if (startupBudget.expired(SystemClock.elapsedRealtime()) || providerWindow.expired(SystemClock.elapsedRealtime()) ||
+            !authRecovery.retry(provider, code)) return false
+        startupBudget.recover(SystemClock.elapsedRealtime()); providerWindow.recover(SystemClock.elapsedRealtime())
+        val refusedSource = nativeSources.getOrNull(serverIdx)
+        val previousKey = refusedSource?.let(::sourceKey)
+        recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
+        spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · refreshing rejected credentials…"
+        infoNext.visibility = View.VISIBLE
+        playMsg("${providerName(provider)} returned HTTP $code — fetching fresh stream credentials once…")
+        resolveJob = playbackIo.submit {
+            try {
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2)
+                runOnUiThread {
+                    if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    if (sources.isEmpty()) advanceNative("The provider supplied no refreshed stream")
+                    else {
+                        val retained = nativeSources.withIndex().filter { LiveProviders.provider(it.value) != provider }
+                        recovery.remapSources(retained.mapIndexed { index, item -> item.index to index }.toMap())
+                        val first = retained.size
+                        nativeSources = retained.map { it.value } + sources
+                        // A refused request style is not repeated: try the provider's other
+                        // documented style for the same channel before moving on.
+                        val pick = if (code == 403) RequestProfileFallback.preferredIndex(sources, refusedSource) {
+                            sourceKey(it) == previousKey
+                        } else sources.indexOfFirst { sourceKey(it) == previousKey }.coerceAtLeast(0)
+                        serverIdx = first + pick.coerceIn(0, (sources.size - 1).coerceAtLeast(0))
+                        startNative()
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    diagnostics.metadataFailed(PlaybackProblems.from(error))
+                    advanceNative("Could not refresh ${providerName(provider)} credentials")
+                }
+            }
+        }
+        return true
+    }
+
+    /** The TV is refused on some requests and accepted seconds later. Give the provider that
+     * actually plays this channel one delayed, freshly credentialed retry before moving to a
+     * provider whose advertised DRM cannot be opened. Bounded to once per playback session; every
+     * other HTTP result keeps the existing immediate fallback.
+     */
+    private fun retryRefusedProvider(code: Int?): Boolean {
+        if (code != 403 || refusalRetried || !playbackActive) return false
+        val ch = shown.getOrNull(current) ?: return false
+        if (layer.visibility != View.VISIBLE || startupBudget.expired(SystemClock.elapsedRealtime())) return false
+        refusalRetried = true
+        val provider = currentNativeProvider
+        val refusedSource = nativeSources.getOrNull(serverIdx)
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        spinner.visibility = View.VISIBLE
+        infoNext.text = "Auto · ${providerName(provider)} · retrying after a refused request…"
+        infoNext.visibility = View.VISIBLE
+        playMsg("${providerName(provider)} refused this request — retrying once in a moment…")
+        resolveJob = playbackIo.submit {
+            try { Thread.sleep(4_000) } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt(); return@submit
+            }
+            try {
+                val sources = TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2)
+                runOnUiThread {
+                    if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    if (sources.isEmpty()) advanceNative("Could not refresh ${providerName(provider)} after the refused request")
+                    else {
+                        // A new attempt has its own single credential refresh and provider window.
+                        authRecovery.reset()
+                        providerWindow.enter(SystemClock.elapsedRealtime())
+                        nativeSources = sources
+                        // Same rule as the credential refresh: do not replay the style that was
+                        // just refused when the provider advertises another one for this channel.
+                        serverIdx = RequestProfileFallback.preferredIndex(sources, refusedSource) { false }
+                        startNative()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
-                    if (token == playToken) {
-                        if (!ch.v2) fallbackToTg(ch, why(e)) else fallbackAlt(ch, why(e))
+                    if (token == playToken && playbackActive) {
+                        diagnostics.metadataFailed(PlaybackProblems.from(e))
+                        advanceNative("Could not refresh ${providerName(provider)} after the refused request")
                     }
                 }
             }
         }
+        return true
     }
 
-    /** Every (source x header profile) to try for a V1 channel, starting with the profile that worked for it last time. */
-    private fun buildRoutes(ch: Channel, urls: List<String>): List<Pair<Int, Int>> {
-        val n = Streams.PROFILES.size
-        val first = prefs.getInt("p_${ch.key}", -1)
-        // every site server gets the same treatment: the website player's own presentation first (token as cookie + on every segment)
-        val jioOrder = listOf(8, 6, 7, 5, 0)   // 8 = exactly the backup website player (plaYtv UA, JioTV Referer, token everywhere)
-        val webOrder = listOf(5, 1, 3, 2)
-        val out = ArrayList<Pair<Int, Int>>()
-        for ((i, u) in urls.withIndex()) {
-            if (u in jjUrls) { listOf(Streams.WEBREAL, Streams.JJWEB, 8).forEach { out.add(i to it) }; continue }
-            val base = if (TgServers.isJioPl(u)) listOf(Streams.WEBREAL, 8, 9, 7, 6, 5) else if (Streams.isJio(u)) jioOrder else webOrder
-            val order = (if (first in 0 until n) listOf(first) else emptyList()) + base.filter { it != first }
-            order.forEach { out.add(i to it) }
-        }
-        return out.take(24)     // each source (incl. backup server) with its likely header profiles, 24 tries at most
-    }
-    private fun rememberRoute() {
+    /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
+    private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
-        if (ch.v2) return
-        setEngine(ch, false)
-        val r = routes.getOrNull(routeIdx) ?: return
-        if (prefs.getInt("p_${ch.key}", 0) != r.second) prefs.edit().putInt("p_${ch.key}", r.second).apply()
-    }
-
-    // smoother live playback: a deeper buffer, a calmer live offset and gentle catch-up speed instead of stalls
-    private fun liveCfg() = MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(12000)
-        .setMinOffsetMs(6000).setMaxOffsetMs(40000).setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f).build()   // speed nudging made HD sports judder
-
-    private fun startV1() {
-        if (routeIdx !in routes.indices) return
-        val ch = shown.getOrNull(current) ?: return
-        val (si, pi) = routes[routeIdx]
-        val url = v1Sources[si]
-        Streams.jarFor(pi)
-        if (routeIdx > 0) playMsg("Trying another route (${routeIdx + 1} of ${routes.size})…")
-        val data = Streams.factory(Streams.PROFILES[pi], url)
-        val hls = url.substringBefore('?').lowercase().endsWith(".m3u8")
-        val factory: MediaSource.Factory = if (hls) HlsMediaSource.Factory(data) else DashMediaSource.Factory(data)
-        val drm = v1Drms.getOrNull(si)
-        if (drm != null && drm.length() > 0) {
-            val lic = clearKeyLicense(drm)
-            if (lic == null) { nextSource(ch, "unsupported DRM"); return }
-            val mgr = DefaultDrmSessionManager.Builder()
-                .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
-                .setMultiSession(true).setPlayClearSamplesWithoutKeys(true)
-                .build(LocalMediaDrmCallback(lic))
-            factory.setDrmSessionManagerProvider { mgr }
-        }
-        val item = MediaItem.Builder().setUri(url).setLiveConfiguration(liveCfg()).build()
-        attach(factory.createMediaSource(item))
-    }
-
-    /** 16-byte key / key id from hex (with or without dashes, 0x, spaces) or base64; null when it is not one. */
-    private fun keyBytes(v: String): ByteArray? {
-        val t = v.trim().removePrefix("0x").removePrefix("0X").replace("-", "").replace(":", "").replace(" ", "")
-        if (t.length == 32 && t.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' })
-            return ByteArray(16) { t.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
-        return try {
-            val b = Base64.decode(v.trim().replace('+', '-').replace('/', '_').trimEnd('='), Base64.URL_SAFE or Base64.NO_WRAP)
-            if (b.size == 16) b else null
-        } catch (_: Exception) { null }
-    }
-    private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-
-    /**
-     * ClearKey licence (JWK set) for the channel's `drm` object: {type, keyId, key}. Also accepts several keys
-     * (comma separated, an array, or a `keys` list). Returns null when the DRM is not ClearKey or a key is unreadable.
-     */
-    private fun clearKeyLicense(drm: JSONObject): ByteArray? {
-        val type = drm.optString("type", "")
-        if (type.isNotEmpty() && !type.contains("clear", ignoreCase = true)) return null
-        fun parts(o: Any?): List<String> = when (o) {
-            is JSONArray -> (0 until o.length()).map { o.optString(it, "") }
-            is String -> o.split(',', ';', '\n', ' ')
-            else -> emptyList()
-        }.map { it.trim() }.filter { it.isNotEmpty() }
-        val pairs = ArrayList<Pair<String, String>>()
-        pairs.addAll(parts(drm.opt("keyId") ?: drm.opt("kid") ?: drm.opt("key_id")).zip(parts(drm.opt("key") ?: drm.opt("k"))))
-        drm.optJSONArray("keys")?.let { arr ->
-            for (i in 0 until arr.length()) {
-                val o = arr.optJSONObject(i) ?: continue
-                val id = o.optString("keyId", o.optString("kid", "")); val k = o.optString("key", o.optString("k", ""))
-                if (id.isNotEmpty() && k.isNotEmpty()) pairs.add(id to k)
-            }
-        }
-        if (pairs.isEmpty()) return null
-        val out = JSONArray()
-        for ((id, k) in pairs) {
-            val idB = keyBytes(id) ?: return null; val kB = keyBytes(k) ?: return null
-            out.put(JSONObject().put("kty", "oct").put("k", b64(kB)).put("kid", b64(idB)))
-        }
-        return JSONObject().put("keys", out).put("type", "temporary").toString().toByteArray()
-    }
-
-    private fun startV2() {
-        if (serverIdx !in v2Servers.indices) return
-        val (url, type) = v2Servers[serverIdx]
-        val (drm, prof) = v2Extra.getOrNull(serverIdx) ?: (null to -1)
-        val http: androidx.media3.datasource.DataSource.Factory
-        if (prof >= 0) { Streams.jarFor(prof); http = Streams.factory(Streams.PROFILES[prof], url) }   // site servers: the route that works for them
-        else {
-            Streams.jarFor(0)
-            http = DefaultHttpDataSource.Factory().setUserAgent(Streams.CHROME).setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000).setReadTimeoutMs(15000)
-        }
-        val dash = type.equals("dash", true) || url.contains(".mpd")
-        val item = MediaItem.Builder().setUri(url).setLiveConfiguration(liveCfg())
-            .setMimeType(if (dash) MimeTypes.APPLICATION_MPD else MimeTypes.APPLICATION_M3U8).build()
-        val factory: MediaSource.Factory = if (dash) DashMediaSource.Factory(http) else HlsMediaSource.Factory(http)
-        if (drm != null && drm.length() > 0) {
-            val lic = clearKeyLicense(drm)
-            if (lic == null) { nextServer(); return }
-            val mgr = DefaultDrmSessionManager.Builder()
-                .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
-                .setMultiSession(true).setPlayClearSamplesWithoutKeys(true)
-                .build(LocalMediaDrmCallback(lic))
-            factory.setDrmSessionManagerProvider { mgr }
-        }
-        val ms = factory.createMediaSource(item)
-        if (serverIdx > 0 || attempts > 0) playMsg("Server ${serverIdx + 1} of ${v2Servers.size}…")
-        infoNext.text = "Server ${serverIdx + 1} of ${v2Servers.size}" + if (v2Servers.size > 1) "   ·   OK switches server" else ""
-        infoNext.visibility = View.VISIBLE
-        attach(ms)
-    }
-
-    private fun attach(ms: MediaSource) {
+        startupBudget.recover(SystemClock.elapsedRealtime())
+        providerWindow.recover(SystemClock.elapsedRealtime())
         releasePlayer()
-        stopPreview()
-        val rf = DefaultRenderersFactory(this).setEnableDecoderFallback(true)
-            .forceEnableMediaCodecAsynchronousQueueing()   // smoother 1080p / 50fps decoding on TV boxes
-        val lc = DefaultLoadControl.Builder().setBufferDurationsMs(20000, 50000, 1500, 4000).setBackBuffer(0, false)
-            .setTargetBufferBytes(96 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(true).build()
-        capH = startCap(); badSeconds = 0
-        // steadier quality: switch up only after 30 s of headroom, so adaptive HD streams stop flip-flopping between sizes
-        val ts = androidx.media3.exoplayer.trackselection.DefaultTrackSelector(this, AdaptiveTrackSelection.Factory(15_000, 20_000, 20_000, 0.75f)).apply {
-            setParameters(buildUponParameters()
-                .setMaxVideoSize(capH * 16 / 9, capH)
-                .setViewportSizeToPhysicalDisplaySize(this@MainActivity, true)   // prefer what the screen can show...
-                .setExceedVideoConstraintsIfNecessary(true)                      // ...but if every track is bigger, still play the smallest
-                .setExceedRendererCapabilitiesIfNecessary(true))                 // (false here left audio playing over a black picture)
+        if (startupBudget.expired(SystemClock.elapsedRealtime())) { fail("No playable picture within 60 seconds. Hold OK to retry."); return }
+        when (val action = recovery.failed(serverIdx, nativeSources.size, canLoadMore = nextNativeProvider < nativeProviders.size)) {
+            is PlaybackRecovery.Action.Source -> {
+                serverIdx = action.index
+                val provider = LiveProviders.provider(nativeSources[serverIdx])
+                if (provider != currentNativeProvider) enterNativeProvider(ch, provider)
+                playMsg("Automatically trying ${nativeSources[serverIdx].label}…")
+                val token = playToken
+                ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
+            }
+            is PlaybackRecovery.Action.MoreSources -> loadMoreNative(ch, action.fresh || nativePassFresh, reason)
+            PlaybackRecovery.Action.Refresh -> {
+                TgServers.invalidate(ch.id, ch.v2)
+                resolveAndStart(ch, fresh = true)
+            }
+            PlaybackRecovery.Action.Unavailable -> fail("$reason. Hold OK to reload or choose another channel.")
         }
-        val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(4_000_000L).build()
-        val p = ExoPlayer.Builder(this, rf).setLoadControl(lc).setTrackSelector(ts).setBandwidthMeter(bw).build()
-        p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
-        trackSel = ts; p.addAnalyticsListener(dropWatcher)
-        p.setMediaSource(ms); p.playWhenReady = true; p.addListener(playerListener)
-        pv.player = p; player = p; p.prepare()
-        armStall(10000)
-        showInfo()
     }
 
-    private val playerListener = object : Player.Listener {
-        override fun onPlaybackStateChanged(s: Int) {
-            when (s) {
-                Player.STATE_READY -> {
-                    spinner.visibility = View.GONE; playMsg(null); disarmStall()
-                    retries = 0; attempts = 0; refreshed = false; rememberRoute()
-                    ui.removeCallbacks(videoCheck); ui.postDelayed(videoCheck, 6000)
+    /** Left / OK switches native sources, not players; a single-source channel simply reloads. */
+    private fun switchServer() {
+        if (drmProbeRunning) return
+        if (nativeSources.size < 2) { reloadStream(); return }
+        playToken++; resolveJob?.cancel(true); recovery.reset()
+        shown.getOrNull(current)?.let { beginNativeSession(it) }
+        releasePlayer()
+        serverIdx = (serverIdx + 1) % nativeSources.size
+        shown.getOrNull(current)?.let { enterNativeProvider(it, LiveProviders.provider(nativeSources[serverIdx])) }
+        playMsg("Switching to ${nativeSources[serverIdx].label}…")
+        startNative()
+    }
+
+    /** Manual reload really bypasses cached signed URLs and re-reads the site's current player configuration. */
+    private fun reloadStream() {
+        if (drmProbeRunning) { showPlaybackDetails(); return }
+        val ch = shown.getOrNull(current) ?: return
+        recovery.reset(); beginNativeSession(ch); TgServers.invalidate(ch.id, ch.v2)
+        resolveAndStart(ch, fresh = true)
+    }
+
+    private fun showNativeSourceMenu() {
+        val ch = shown.getOrNull(current) ?: return
+        if (sourceMenu?.isShowing == true) return
+        val choices = ArrayList<Pair<String, () -> Unit>>()
+        choices.add("Automatic native source" to { selectNativeProvider(null) })
+        if (!ch.v2) choices.add("Play JJTV now (native)" to { selectNativeProvider(LiveProvider.JJTV) })
+        choices.add("Play TG TV now (native)" to { selectNativeProvider(LiveProvider.TG) })
+        choices.add((if (prefs.getBoolean("native_force_tv", false)) "TV compatibility: return to automatic detection" else "TV compatibility: force TV mode (generic boxes)") to {
+            prefs.edit().putBoolean("native_force_tv", !prefs.getBoolean("native_force_tv", false)).apply()
+            selectNativeProvider(requestedNativeProvider?.takeIf { it.first == ch.key }?.second)
+        })
+        if (player != null) choices.add("Picture quality · ${picture?.modeLabel() ?: "Auto"}" to { showPictureMenu() })
+        choices.add("Playback details" to { showPlaybackDetails() })
+        val dialog = AlertDialog.Builder(this).setTitle("Native stream source")
+            .setItems(choices.map { it.first }.toTypedArray()) { _, index -> choices[index].second() }
+            .setNegativeButton("Close", null).create()
+        sourceMenu = dialog
+        dialog.setOnDismissListener { if (sourceMenu === dialog) sourceMenu = null }
+        dialog.show()
+    }
+
+    private fun showPictureMenu() {
+        val controller = picture ?: return
+        val ch = shown.getOrNull(current) ?: return
+        val offered = controller.choices().take(24)
+        val labels = listOf("Auto — adaptive quality", "Stable — hold quality, step down only when needed") + offered.map { it.label }
+        sourceMenu?.dismiss()
+        val dialog = AlertDialog.Builder(this).setTitle("Picture quality · ${controller.modeLabel()}")
+            .setItems(labels.toTypedArray()) { _, index ->
+                if (picture !== controller || shown.getOrNull(current)?.key != ch.key) return@setItems
+                if (index == 0) {
+                    prefs.edit().remove("q_${ch.key}").putBoolean("stable_picture_${ch.key}", false).apply()
+                    val cap = if (television || lowEnd) 720 else 1080
+                    trackSel?.let { selector -> selector.setParameters(selector.buildUponParameters().setMaxVideoSize(cap * 16 / 9, cap)) }
+                    controller.automatic(cap)
+                } else {
+                    prefs.edit().putBoolean("stable_picture_${ch.key}", true).apply()
+                    if (index == 1) controller.stable() else offered.getOrNull(index - 2)?.let(controller::select)
                 }
-                Player.STATE_BUFFERING -> { spinner.visibility = View.VISIBLE; armStall(11000) }
-                Player.STATE_ENDED -> onStall()
+            }.setNegativeButton("Close", null).create()
+        sourceMenu = dialog
+        dialog.setOnDismissListener { if (sourceMenu === dialog) sourceMenu = null }
+        dialog.show()
+    }
+
+    private fun selectNativeProvider(provider: LiveProvider?) {
+        if (layer.visibility != View.VISIBLE) return
+        val ch = shown.getOrNull(current) ?: return
+        if (drmProbeRunning) { showPlaybackDetails(); return }
+        if (ch.v2 && provider == LiveProvider.JJTV) return
+        requestedNativeProvider = provider?.let { ch.key to it }
+        recovery.reset(); beginNativeSession(ch)
+        resolveAndStart(ch, fresh = true)
+    }
+
+    private fun playbackDetailsText(): String = buildString {
+        append("${AppBuildInfo.label(this@MainActivity)}\nPlayback baseline: 4.9.18 native requests\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n")
+        append("${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown ABI"}\n")
+        append("App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n")
+        append("Device UTC: ${java.time.Instant.ofEpochMilli(System.currentTimeMillis())}\n")
+        append("Engine: native Media3 / SurfaceView. WebView and Gecko are not used here.\n")
+        append("TV reported codec-limit fallback: $television (unsupported DRM remains rejected)\n")
+        shown.getOrNull(current)?.let { append("Channel ID: ${it.id.take(32)}${if (it.v2) " (V2)" else ""}\n") }
+        picture?.let { append("\n${it.details()}\n") }
+        append("\n${diagnostics.report()}\n\n$drmProbeStatus\n")
+        append("\nCheck DRM stops playback and tests only this device's local ClearKey service. It does not test a real channel or prove decoded video.")
+    }
+
+    private fun refreshPlaybackDetails() { diagnosticsText?.text = playbackDetailsText() }
+
+    private fun showPlaybackDetails() {
+        if (diagnosticsDialog?.isShowing == true) { refreshPlaybackDetails(); return }
+        val text = TextView(this).apply {
+            text = playbackDetailsText(); textSize = 14f; setTextColor(Color.WHITE)
+            typeface = Typeface.MONOSPACE
+            setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
+        }
+        val scroll = ScrollView(this).apply { addView(text); isFocusable = true }
+        val holder = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.45f).toInt()))
+            addView(Button(this@MainActivity).apply {
+                this.text = "Copy redacted report"
+                setOnClickListener {
+                    (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("AK TV playback details", playbackDetailsText()))
+                    Toast.makeText(this@MainActivity, "Report copied — no URLs or keys", Toast.LENGTH_SHORT).show()
+                }
+            }, LinearLayout.LayoutParams(-1, -2))
+        }
+        val dialog = AlertDialog.Builder(this).setTitle("Native playback details")
+            .setView(holder).setNegativeButton("Close", null).setPositiveButton("Retry", null)
+            .setNeutralButton("Check DRM", null).create()
+        diagnosticsText = text; diagnosticsDialog = dialog
+        dialog.setOnDismissListener { if (diagnosticsDialog === dialog) { diagnosticsDialog = null; diagnosticsText = null } }
+        dialog.setOnShowListener {
+            dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.9f).toInt(), -2)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                if (!drmProbeRunning) { dialog.dismiss(); reloadStream() }
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener { runNativeDrmCheck() }
+        }
+        dialog.show()
+    }
+
+    /** Explicit user action. No website requests, no real channel credentials, no extra session during playback. */
+    private fun runNativeDrmCheck() {
+        if (drmProbeRunning) return
+        endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); stopPreview()
+        spinner.visibility = View.GONE
+        val token = playToken
+        drmProbeRunning = true
+        drmProbeStatus = "ClearKey self-test RUNNING: checking the Android DRM service locally…"
+        playMsg("Playback stopped for the local DRM check. MENU / OK shows details.")
+        refreshPlaybackDetails()
+        val timeout = Runnable {
+            if (drmProbeRunning) {
+                drmProbeStatus = "ClearKey self-test has not returned after 10 seconds. A local platform call may be stuck; this is not a network test. Restart the app/TV before retrying if it stays blocked."
+                refreshPlaybackDetails()
+                if (token == playToken && layer.visibility == View.VISIBLE) playMsg(drmProbeStatus)
             }
         }
-        override fun onRenderedFirstFrame() { ui.removeCallbacks(videoCheck); stalls = 0 }
-        override fun onPlayerError(e: PlaybackException) { disarmStall(); onStreamError(e) }
-    }
-
-    /** Sound but no picture 6 s after "ready" (decoder refused the video, wrong surface...): move on instead of sitting on black. */
-    private val videoCheck = Runnable {
-        val p = player ?: return@Runnable
-        val ch = shown.getOrNull(current) ?: return@Runnable
-        if (layer.visibility != View.VISIBLE || p.playbackState != Player.STATE_READY) return@Runnable
-        if (p.videoSize.width == 0 && p.currentTracks.containsType(C.TRACK_TYPE_VIDEO)) {
-            playMsg("No picture, trying another source…")
-            if (ch.v2) nextServer() else nextSource(ch, "no picture")
+        ui.postDelayed(timeout, 10_000)
+        drmProbeIo.submit {
+            val result = NativeClearKeyProbe.run()
+            runOnUiThread {
+                ui.removeCallbacks(timeout)
+                if (isDestroyed) return@runOnUiThread
+                drmProbeRunning = false; drmProbeStatus = result.describe()
+                refreshPlaybackDetails()
+                if (token == playToken && layer.visibility == View.VISIBLE)
+                    playMsg("$drmProbeStatus\nPress OK / MENU for details; hold OK to retry.")
+            }
         }
     }
 
-    // A stream that stops answering is moved on automatically: next route / server, then a fresh link, then a clear message.
-    private val stallRunnable = Runnable { onStall() }
-    private fun armStall(ms: Long) { ui.removeCallbacks(stallRunnable); ui.postDelayed(stallRunnable, ms) }
-    private fun disarmStall() { ui.removeCallbacks(stallRunnable) }
-    private fun onStall() {
-        val ch = shown.getOrNull(current) ?: return
-        if (layer.visibility != View.VISIBLE || player == null) return
-        if (ch.v2) nextServer()
-        else if (++stalls >= 2) fallbackToTg(ch, "no answer")
-        else nextRoute(ch)
+    private fun fail(message: String) {
+        endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
+        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        ui.removeCallbacks(hideInfo); hideInfo.run()
     }
 
-    private val routeCodes = setOf(401, 403, 404, 410, 451)
-    private fun httpCode(e: Throwable): Int? {
-        var c: Throwable? = e; var n = 0
-        while (c != null && n++ < 8) { if (c is HttpDataSource.InvalidResponseCodeException) return c.responseCode; c = c.cause }
-        return null
+    private fun releasePlayer() {
+        surfaceWait?.let { (holder, callback) -> holder.removeCallback(callback) }; surfaceWait = null
+        playbackHealth = null; activeAttempt = null
+        val old = player; player = null; trackSel = null
+        pv.player = null
+        picture?.let { controller -> old?.removeAnalyticsListener(controller); old?.removeListener(controller) }; picture = null
+        old?.release()
     }
-    private fun onStreamError(e: PlaybackException) {
-        val ch = shown.getOrNull(current) ?: return
-        val code = httpCode(e); lastCode = code
-        if (ch.v2) { nextServer(); return }
-        if (e.errorCode in 6000..6999 || e.errorCode in 4000..4999) { nextSource(ch, e.errorCodeName); return }   // DRM / decoder: other headers won't help, another server might
-        if (code != null && code in routeCodes) { nextRoute(ch); return }
-        if (retries++ < 3) { resolveAndStart(ch); return }          // fresh link, same as before
-        fallbackToTg(ch, e.errorCodeName + (code?.let { " (HTTP $it)" } ?: ""))
-    }
-
-    /** Skip the remaining header tries of this source and move on to the next server. */
-    private fun nextSource(ch: Channel, why: String) {
-        val si = routes.getOrNull(routeIdx)?.first ?: -1
-        val nx = (routeIdx + 1 until routes.size).firstOrNull { routes[it].first != si }
-        if (nx == null) { fallbackToTg(ch, why); return }
-        routeIdx = nx; attempts++
-        playMsg("Trying another server…")
-        val tk = playToken
-        ui.post { if (tk == playToken) startV1() }
-    }
-
-    private fun nextRoute(ch: Channel) {
-        attempts++
-        val tk = playToken
-        if (routeIdx + 1 < routes.size) {
-            routeIdx++
-            playMsg("Trying another route (${routeIdx + 1} of ${routes.size})…")
-            ui.post { if (tk == playToken) startV1() }
-        } else if (!refreshed && (lastCode == null || lastCode == 404 || lastCode == 410)) {
-            refreshed = true; playMsg("Getting a fresh stream link…"); resolveAndStart(ch)
-        } else {
-            fallbackToTg(ch, "refused" + (lastCode?.let { " (HTTP $it)" } ?: ""))
-        }
-    }
-
-    private fun nextServer() {
-        val ch = shown.getOrNull(current) ?: return
-        attempts++
-        val n = v2Servers.size
-        if (attempts > n * 2) { fallbackAlt(ch, "No working server"); return }
-        if (attempts == n) { playMsg("Refreshing servers…"); resolveAndStart(ch); return }   // links are short-lived: ask again
-        serverIdx = (serverIdx + 1) % n
-        playMsg("Trying server ${serverIdx + 1} of $n…")
-        val tk = playToken
-        ui.post { if (tk == playToken) startV2() }
-    }
-
-    /** OK while a V2 channel plays: pick the next server by hand. */
-    private fun switchServer() {
-        if (v2Servers.size < 2) return
-        serverIdx = (serverIdx + 1) % v2Servers.size
-        spinner.visibility = View.VISIBLE; startV2()
-    }
-
-    /** Hold OK / Menu: drop the stream and fetch it again from scratch. */
-    private fun reloadStream() {
-        if (shown.getOrNull(current) == null) return
-        retries = 0
-        play(current)
-        playMsg("Reloading stream…")
-    }
-
-    private fun fail(msg: String) {
-        disarmStall(); spinner.visibility = View.GONE; playMsg(null)
-        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
-    }
-
-    private fun releasePlayer() { ui.removeCallbacks(videoCheck); pv.player = null; player?.release(); player = null; releaseEmbed() }
     private fun closePlayer() {
-        playToken++; disarmStall(); playMsg(null)
-        releasePlayer(); retries = 0; ui.removeCallbacks(hideInfo); resetGuide()
+        sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
+        endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null)
+        releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
+        layer.animate().cancel(); layer.visibility = View.GONE; home.visibility = View.VISIBLE
+        home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
+            if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
+        } }
         if (tab < 2) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
-        layer.animate().cancel(); layer.visibility = View.GONE
     }
 
     private fun shortOk() {
-        val ch = shown.getOrNull(current)
-        if (ch?.v2 == true && v2Servers.size > 1 && infoCard.alpha > 0.5f) switchServer() else showInfo()
+        if (!playbackActive) { showPlaybackDetails(); return }
+        if (nativeSources.size > 1 && infoCard.alpha > 0.5f) switchServer() else showInfo()
     }
 
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (intro.visibility == View.VISIBLE) { if (e.action == KeyEvent.ACTION_DOWN) intro.skip(); return true }
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && guideShown) return guideKey(e) || super.dispatchKeyEvent(e)
-        if (layer.visibility == View.VISIBLE && gs != null && (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER)) {
-            // embedded TG player: tap OK = click the player, hold OK = reload the channel
-            if (e.action == KeyEvent.ACTION_DOWN) {
-                if (e.repeatCount == 0) okLong = false
-                else if (e.repeatCount == 8 && !okLong) { okLong = true; reloadStream() }
-            } else if (e.action == KeyEvent.ACTION_UP && !okLong) { tapEmbed(); showInfo() }
-            return true
-        }
         if (layer.visibility == View.VISIBLE && (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER)) {
-            // tap OK = info (or next server on V2), hold OK = reload the stream
+            // tap OK = info / next native source, hold OK = fetch a fresh stream
             if (e.action == KeyEvent.ACTION_DOWN) {
                 if (e.repeatCount == 0) okLong = false
                 else if (e.repeatCount == 8 && !okLong) { okLong = true; reloadStream() }
@@ -1318,9 +1516,11 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility == View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) when (e.keyCode) {
             KeyEvent.KEYCODE_BACK -> { closePlayer(); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { retries = 0; play(current - 1); return true }
-            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { retries = 0; play(current + 1); return true }
-            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_DPAD_LEFT -> { switchEngine(); return true }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
+            KeyEvent.KEYCODE_MENU -> { showNativeSourceMenu(); return true }
+            KeyEvent.KEYCODE_INFO -> { showPlaybackDetails(); return true }
+            KeyEvent.KEYCODE_DPAD_LEFT -> { switchServer(); return true }
         }
         // Back from a lower row goes back to the top of the page (the hero row) first; Back again leaves the app.
         if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_BACK) {
@@ -1346,30 +1546,34 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        // Up from the first row goes to the open tab in the top bar (Google TV behaviour).
-        if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            val f = currentFocus
-            if (f != null && isInside(f, rowsView)) {
-                val pos = rowsView.findContainingItemView(f)?.let { rowsView.getChildAdapterPosition(it) } ?: -1
-                if (pos == 0) { segs[tab].requestFocus(); return true }
-            }
-        }
         if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) {
-            val f = currentFocus
-            val inBar = f != null && (f === searchBtn || segs.any { it === f })
-            if (f != null && inBar) when (e.keyCode) {
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    // back to the card you came from
+            val focus = currentFocus
+            val inRail = focus != null && (focus === searchBtn || segs.any { it === focus })
+            if (inRail) when (e.keyCode) {
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     val back = lastRowsFocus
-                    if (back != null && back.isAttachedToWindow && isInside(back, rowsView) && back.requestFocus()) return true
-                    rowsView.requestFocus(); return true
+                    if (back?.takeIf { it.isAttachedToWindow && isInside(it, rowsView) }?.requestFocus() != true) rowsView.requestFocus()
+                    return true
                 }
-                KeyEvent.KEYCODE_DPAD_UP -> return true
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    val dir = if (e.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) View.FOCUS_LEFT else View.FOCUS_RIGHT
-                    val next = FocusFinder.getInstance().findNextFocus(window.decorView as ViewGroup, f, dir)
-                    if (next == null || !(next === searchBtn || segs.any { it === next })) return true   // stay inside the bar
+                KeyEvent.KEYCODE_DPAD_LEFT -> return true
+                KeyEvent.KEYCODE_DPAD_UP -> if (focus === segLive) return true
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (focus === searchBtn) return true
+            }
+            if (focus != null && isInside(focus, rowsView)) {
+                val rowView = rowsView.findContainingItemView(focus)
+                val rowIndex = rowView?.let { rowsView.getChildAdapterPosition(it) } ?: -1
+                val rowList = rowView?.findViewById<RecyclerView>(R.id.rowList)
+                val card = rowList?.findContainingItemView(focus)
+                if (e.keyCode == KeyEvent.KEYCODE_DPAD_LEFT && card != null && rowList.getChildAdapterPosition(card) == 0) {
+                    segs[tab].requestFocus(); return true
                 }
+                if (e.keyCode == KeyEvent.KEYCODE_DPAD_UP && rowIndex == 0) {
+                    if (!heroCollapsed && heroChips.childCount > 0) heroChips.getChildAt(0).requestFocus() else segs[tab].requestFocus()
+                    return true
+                }
+            }
+            if (focus != null && isInside(focus, heroChips) && e.keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                rowsView.requestFocus(); return true
             }
         }
         return super.dispatchKeyEvent(e)
@@ -1377,7 +1581,8 @@ class MainActivity : AppCompatActivity() {
     /** While the app is open, quietly re-reads both channel lists every few minutes (never while a channel is playing), so website changes arrive without a restart. */
     private val autoRefresh = object : Runnable {
         override fun run() {
-            if (all.isNotEmpty() && layer.visibility != View.VISIBLE && !searchShown && System.currentTimeMillis() - lastRefresh > 4 * 60_000L) loadChannels()
+            if (layer.visibility != View.VISIBLE && !searchShown && System.currentTimeMillis() - lastRefresh > 4 * 60_000L) loadChannels()
+            TgServers.refreshSite()
             ui.postDelayed(this, 5 * 60_000L)
         }
     }
@@ -1385,16 +1590,29 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
         if (tab >= 2 && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
-        if (all.isNotEmpty() && System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
+        if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
-        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); playToken++; disarmStall(); releasePlayer(); layer.visibility = View.GONE; resetGuide()
+        sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
+        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; layer.keepScreenOn = false; resetGuide()
         if (searchShown) hideSearch(false)
+    }
+
+    override fun onDestroy() {
+        ui.removeCallbacksAndMessages(null); resolveJob?.cancel(true); previewJob?.cancel(true)
+        sourceMenu?.dismiss(); sourceMenu = null
+        diagnosticsDialog?.dismiss(); diagnosticsDialog = null; diagnosticsText = null
+        playbackIo.shutdownNow(); io.shutdownNow(); drmProbeIo.shutdownNow()
+        super.onDestroy()
     }
 
     // ---------- search ----------
     private fun buildKeys() {
-        val kw = (50 * dp).toInt(); val kh = (46 * dp).toInt(); val m = (3 * dp).toInt()
+        val col = findViewById<View>(R.id.searchInputColumn).layoutParams.width
+        val m = (2 * dp).toInt()
+        val kw = ((col - 12 * m) / 6).coerceAtLeast((26 * dp).toInt())
+        val available = resources.displayMetrics.heightPixels - ((if (compact) 126 else 172) * dp).toInt()
+        val kh = ((available - 14 * m) / 7).coerceIn((22 * dp).toInt(), (44 * dp).toInt())
         for (r in listOf("ABCDEF", "GHIJKL", "MNOPQR", "STUVWX", "YZ0123", "456789")) {
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
             for (ch in r) row.addView(keyView(ch.toString(), kw, kh, m) { typeChar(ch.lowercaseChar()) })
@@ -1408,7 +1626,7 @@ class MainActivity : AppCompatActivity() {
         searchKeys.addView(last)
     }
     private fun keyView(label: String, w: Int, h: Int, m: Int, onClick: () -> Unit) = TextView(this).apply {
-        text = label; gravity = Gravity.CENTER; textSize = 15f; typeface = fSemi; setTextColor(Accent.DIM)
+        text = label; gravity = Gravity.CENTER; textSize = if (compact) 12f else 15f; typeface = fSemi; setTextColor(Accent.DIM)
         isFocusable = true; isClickable = true
         background = Ui.focusBg(dp, 12f, rest = Accent.SURFACE)
         layoutParams = LinearLayout.LayoutParams(w, h).apply { setMargins(m, m, m, m) }
@@ -1529,7 +1747,7 @@ class MainActivity : AppCompatActivity() {
     }
     private fun playFromSearch(i: Int) {
         if (i !in results.indices) return
-        shown = results; shownCat = "Search"; retries = 0
+        shown = results; shownCat = "Search"
         closeSearch(); play(i)
     }
 
@@ -1655,7 +1873,7 @@ class MainActivity : AppCompatActivity() {
     private fun playFromGuide(i: Int) {
         val list = guideChannels; val cat = guideCat
         if (i !in list.indices) return
-        shown = list; shownCat = cat; retries = 0
+        shown = list; shownCat = cat
         closeGuide(); play(i)
     }
 
@@ -1740,64 +1958,97 @@ class MainActivity : AppCompatActivity() {
     private fun schedulePreview(c: Channel?) {
         stopPreview()
         // no live preview on the movie tabs, while the hero is folded away, or by default on weak boxes (it runs a second decoder)
-        if (c != null && tab < 2 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd)) ui.postDelayed(previewRunnable, 1200)
+        if (c != null && tab < 2 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
     }
     private fun stopPreview() {
-        ui.removeCallbacks(previewRunnable); previewToken++
-        previewPv.player = null
-        previewPlayer?.let { try { it.release() } catch (_: Exception) {} }; previewPlayer = null
-        // never GONE: a TextureView only gets its surface while laid out, and the first frame is what fades it in
+        ui.removeCallbacks(previewRunnable); previewToken++; previewJob?.cancel(true)
+        releasePreviewPlayer()
+        // A TextureView must remain laid out for the first frame to fade in.
         heroPreview.animate().cancel(); if (heroPreview.alpha > 0f) heroPreview.animate().alpha(0f).setDuration(200).start()
     }
+    private fun releasePreviewPlayer() {
+        previewStall?.let { ui.removeCallbacks(it) }; previewStall = null
+        previewPv.player = null
+        val old = previewPlayer; previewPlayer = null
+        old?.let { try { it.release() } catch (_: Exception) {} }
+    }
+    private fun previewIsCurrent(ch: Channel, token: Int) = token == previewToken && layer.visibility != View.VISIBLE &&
+        !searchShown && tab < 2 && !heroCollapsed && (heroTile as? Tile.Ch)?.c?.key == ch.key
+
     private fun startPreview() {
-        val c = (heroTile as? Tile.Ch)?.c ?: return
+        val ch = (heroTile as? Tile.Ch)?.c ?: return
         if (layer.visibility == View.VISIBLE || searchShown) return
         val token = ++previewToken
-        io.execute {
-            try {
-                var url: String; var type = "hls"; var drm: JSONObject? = null
-                if (c.v2) {
-                    val sv = JSONObject(get("$BASE_V2/${c.id}", 1)).getJSONArray("servers").getJSONObject(0)
-                    url = str(sv, "playable"); type = str(sv, "type").ifEmpty { "hls" }
-                } else {
-                    val s0 = TgServers.fetch(c.id).firstOrNull() ?: return@execute
-                    url = s0.url; drm = s0.drm
-                }
-                if (url.isEmpty()) return@execute
-                runOnUiThread { if (token == previewToken) playPreview(url, type, drm, c.v2) }
-            } catch (_: Exception) {}
+        loadPreviewProvider(ch, token, providerOrder(ch), 0)
+    }
+    private fun loadPreviewProvider(ch: Channel, token: Int, providers: List<LiveProvider>, providerIndex: Int) {
+        if (!previewIsCurrent(ch, token)) return
+        releasePreviewPlayer()
+        val provider = providers.getOrNull(providerIndex) ?: run { stopPreview(); return }
+        previewJob = io.submit {
+            val sources = try { TgServers.fetchFrom(provider, ch.id, v2 = ch.v2) } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                if (!previewIsCurrent(ch, token)) return@runOnUiThread
+                // Put a previously rendered source first without removing the other native candidates.
+                val saved = prefs.getString("source_${ch.key}", null)
+                val ordered = sources.sortedBy { if (sourceKey(it) == saved) 0 else 1 }
+                playPreview(ordered, 0, ch, token, providers, providerIndex)
+            }
         }
     }
-    private fun playPreview(url: String, type: String, drm: JSONObject?, v2: Boolean) {
+    private fun playPreview(sources: List<TgStream>, index: Int, ch: Channel, token: Int,
+                            providers: List<LiveProvider>, providerIndex: Int) {
+        if (!previewIsCurrent(ch, token)) return
+        releasePreviewPlayer()
+        val source = sources.getOrNull(index) ?: run {
+            loadPreviewProvider(ch, token, providers, providerIndex + 1); return
+        }
+        var advancing = false
+        fun next() {
+            if (advancing || !previewIsCurrent(ch, token)) return
+            advancing = true
+            ui.post { if (previewIsCurrent(ch, token)) playPreview(sources, index + 1, ch, token, providers, providerIndex) }
+        }
         try {
-            val data: androidx.media3.datasource.DataSource.Factory = if (v2)
-                DefaultHttpDataSource.Factory().setUserAgent(Streams.CHROME).setAllowCrossProtocolRedirects(true)
-            else { val pi = if (TgServers.isJioPl(url)) Streams.WEBREAL else if (Streams.isJio(url)) 6 else 1; Streams.jarFor(pi); Streams.factory(Streams.PROFILES[pi], url) }
-            val dash = type.equals("dash", true) || url.substringBefore('?').lowercase().endsWith(".mpd") ||
-                (!v2 && !url.substringBefore('?').lowercase().endsWith(".m3u8"))
-            val f: MediaSource.Factory = if (dash) DashMediaSource.Factory(data) else HlsMediaSource.Factory(data)
-            if (drm != null) clearKeyLicense(drm)?.let { lic ->
-                val mgr = DefaultDrmSessionManager.Builder().setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER)
-                    .setMultiSession(true).setPlayClearSamplesWithoutKeys(true).build(LocalMediaDrmCallback(lic))
-                f.setDrmSessionManagerProvider { mgr }
-            }
-            val p = ExoPlayer.Builder(this).build()
+            val profile = NativePlaybackPolicy.profile(television, lowEnd, savedCompatibility(ch, LiveProviders.provider(source)), 720)
+            val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
+                .setLoadControl(NativePlaybackPolicy.buffers(profile))
+                .setTrackSelector(NativePlaybackPolicy.tracks(this, profile, ch.name.contains("Hindi", true))).build()
             p.volume = 0f
-            // a preview never needs more than 720p: lighter on the decoder and the network
-            p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setMaxVideoSize(1280, 720).build()
-            p.setMediaSource(f.createMediaSource(MediaItem.Builder().setUri(url).setLiveConfiguration(liveCfg()).build()))
-            p.addListener(object : Player.Listener {
-                // fade in only when a real picture exists, so a preview can never show as a black box
-                override fun onRenderedFirstFrame() {
-                    if (previewPlayer !== p) return
-                    heroPreview.animate().cancel()
-                    heroPreview.animate().alpha(1f).setDuration(450).start()
+            previewPlayer = p
+            val health = PlaybackHealth(SystemClock.elapsedRealtime(),
+                expectsVideo = !ch.category.equals("Radio", true), firstFrameTimeoutMs = 12_000)
+            val monitor = object : Runnable {
+                override fun run() {
+                    if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
+                    val state = when (p.playbackState) {
+                        Player.STATE_READY -> PlaybackHealth.State.READY
+                        Player.STATE_BUFFERING -> PlaybackHealth.State.BUFFERING
+                        Player.STATE_ENDED -> PlaybackHealth.State.ENDED
+                        else -> PlaybackHealth.State.IDLE
+                    }
+                    if (health.sample(SystemClock.elapsedRealtime(), state, p.isPlaying, p.currentPosition, p.playWhenReady).failure != null) next()
+                    else ui.postDelayed(this, 500)
                 }
-                override fun onPlayerError(e: PlaybackException) { if (previewPlayer === p) stopPreview() }
+            }
+            p.setVideoFrameMetadataListener { _, _, _, _ -> health.videoProgress(SystemClock.elapsedRealtime()) }
+            p.setMediaSource(nativeMediaSource(source))
+            p.addListener(object : Player.Listener {
+                override fun onRenderedFirstFrame() {
+                    if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
+                    health.firstFrame(SystemClock.elapsedRealtime())
+                    rememberNativeSource(ch, source)
+                    heroPreview.animate().cancel(); heroPreview.animate().alpha(1f).setDuration(450).start()
+                }
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (previewPlayer !== p || !previewIsCurrent(ch, token)) return
+                    if (state == Player.STATE_ENDED) next()
+                }
+                override fun onPlayerError(error: PlaybackException) { if (previewPlayer === p) next() }
             })
-            previewPv.player = p
-            previewPlayer = p; p.playWhenReady = true; p.prepare()
-        } catch (_: Exception) { stopPreview() }
+            previewPv.player = p; p.playWhenReady = true; p.prepare()
+            previewStall = monitor; ui.postDelayed(monitor, 500)
+        } catch (_: Exception) { releasePreviewPlayer(); next() }
     }
 
     /** Rebuilds the rows (e.g. a new "Recently watched" entry) without losing the scroll position. */
@@ -1824,6 +2075,7 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
             val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
+            HomeChrome.styleTile(v, t == 1, compact, dp)
             if (t != 1) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }   // posters carry their own card background
             return VH(v)
         }
@@ -1837,7 +2089,7 @@ class MainActivity : AppCompatActivity() {
             when (val t = row.tiles[i]) {
                 is Tile.Ch -> {
                     val bg = v.background as GradientDrawable
-                    v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c.key), 0.26f))
+                    v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c.key), 0.12f))
                     v.findViewById<TextView>(R.id.name).text = t.c.name
                     val logo = v.findViewById<ImageView>(R.id.logo); val mono = v.findViewById<TextView>(R.id.mono)
                     if (t.c.logo.isBlank()) {
@@ -1851,7 +2103,7 @@ class MainActivity : AppCompatActivity() {
                             allowHardware(false)
                             listener(onSuccess = { _, r ->
                                 extractAccent(t.c.key, r.drawable) { c ->
-                                    if (v.tag == t.c.key) bg.setColor(Ui.mix(Accent.SURFACE, c, 0.26f))
+                                    if (v.tag == t.c.key) bg.setColor(Ui.mix(Accent.SURFACE, c, 0.12f))
                                 }
                             })
                         }
@@ -1862,7 +2114,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     v.setOnClickListener {
                         shown = row.tiles.filterIsInstance<Tile.Ch>().map { it.c }; shownCat = row.title
-                        retries = 0; play(shown.indexOfFirst { it.key == t.c.key })
+                        play(shown.indexOfFirst { it.key == t.c.key })
                     }
                     v.setOnLongClickListener { toggleFav(t.c); true }
                 }
@@ -1898,11 +2150,13 @@ class MainActivity : AppCompatActivity() {
             VH(LayoutInflater.from(p.context).inflate(R.layout.item_row, p, false))
         override fun onBindViewHolder(h: VH, i: Int) {
             val v = h.itemView
+            HomeChrome.styleRow(v, compact, dp)
             val row = rows[i]
             val title = v.findViewById<TextView>(R.id.rowTitle); val count = v.findViewById<TextView>(R.id.rowCount)
             title.text = row.title
             val n = row.tiles.count { it is Tile.Ch || it is Tile.Mv }
-            count.text = ""
+            count.text = if (n > 0) n.toString() else ""
+            count.visibility = if (n > 0) View.VISIBLE else View.GONE
             val rv = v.findViewById<RecyclerView>(R.id.rowList)
             if (rv.layoutManager == null) {
                 rv.layoutManager = SnapLayoutManager(this@MainActivity, RecyclerView.HORIZONTAL)

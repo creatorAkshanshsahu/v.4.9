@@ -16,18 +16,18 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.max
 
-/** Palette (Google TV style: neutral dark surfaces, white focus) + colour extraction from channel logos. */
+/** AK TV cinema palette: midnight surfaces, aqua accents and clear white focus + colour extraction from channel logos. */
 object Accent {
-    val ABYSS = 0xFF0E0F12.toInt()
-    val SURFACE = 0xFF25272D.toInt()
-    val SIGNAL = 0xFF8AB4F8.toInt()
-    val ION = 0xFF7FE7FF.toInt()
+    val ABYSS = 0xFF080D14.toInt()
+    val SURFACE = 0xFF17232F.toInt()
+    val SIGNAL = 0xFF32E5CE.toInt()
+    val ION = 0xFF85F6E5.toInt()
     val INDIGO = 0xFF4B3BD6.toInt()
     val DEEP = 0xFF1B1A6B.toInt()
-    val LIVE = 0xFFE8453C.toInt()
-    val TEXT = 0xFFE8EAED.toInt()
-    val DIM = 0xFFBDC1C6.toInt()
-    val FAINT = 0xFF80868B.toInt()
+    val LIVE = 0xFFFF6B73.toInt()
+    val TEXT = 0xFFEFF6FA.toInt()
+    val DIM = 0xFFA6B7C6.toInt()
+    val FAINT = 0xFF6D8296.toInt()
 
     /** Makes any logo colour usable as a tint: saturated, mid-light. Greys fall back to the brand blue. */
     fun normalize(c: Int?): Int {
@@ -74,7 +74,7 @@ object Ui {
      * List-row background driven by the view's own state: white when focused, soft grey when activated
      * (the row that is "playing" / "open"), [rest] otherwise. The framework switches it; no code runs per focus change.
      */
-    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0xFF2B2D33.toInt()) =
+    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0xFF213542.toInt()) =
         StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), pill(dp, Accent.TEXT, radiusDp))
             addState(intArrayOf(android.R.attr.state_activated), pill(dp, active, radiusDp))
