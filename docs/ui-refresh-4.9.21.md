@@ -85,6 +85,7 @@ The user retried build **4.9.21 / code 38 / build 39230231216** on both the Hive
 ## Follow-up build 4.9.22
 
 The paired result above is carried into a new build rather than a new UI. See
-`docs/tv-jjtv-403-4.9.22.md` for the two bounded changes (JJTV-first default for Sony YAY, and one
-delayed retry after a refused request), the unchanged 4.9.18 request/DRM contract, and the
-verification that is still outstanding. Version is now `4.9.22` / code `39`.
+`docs/tv-jjtv-403-4.9.22.md` for the bounded changes (JJTV-first default for Sony YAY, one delayed
+retry after a refused request, and using the provider's other request style after a refusal), the
+unchanged 4.9.18 request/DRM contract, the captured working TV session on channel 165, and the
+verification that is still outstanding. Version is now `4.9.23` / code `40`.

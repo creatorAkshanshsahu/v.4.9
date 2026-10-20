@@ -1197,7 +1197,8 @@ class MainActivity : AppCompatActivity() {
         if (startupBudget.expired(SystemClock.elapsedRealtime()) || providerWindow.expired(SystemClock.elapsedRealtime()) ||
             !authRecovery.retry(provider, code)) return false
         startupBudget.recover(SystemClock.elapsedRealtime()); providerWindow.recover(SystemClock.elapsedRealtime())
-        val previousKey = nativeSources.getOrNull(serverIdx)?.let(::sourceKey)
+        val refusedSource = nativeSources.getOrNull(serverIdx)
+        val previousKey = refusedSource?.let(::sourceKey)
         recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
@@ -1217,7 +1218,12 @@ class MainActivity : AppCompatActivity() {
                         recovery.remapSources(retained.mapIndexed { index, item -> item.index to index }.toMap())
                         val first = retained.size
                         nativeSources = retained.map { it.value } + sources
-                        serverIdx = first + sources.indexOfFirst { sourceKey(it) == previousKey }.coerceAtLeast(0)
+                        // A refused request style is not repeated: try the provider's other
+                        // documented style for the same channel before moving on.
+                        val pick = if (code == 403) RequestProfileFallback.preferredIndex(sources, refusedSource) {
+                            sourceKey(it) == previousKey
+                        } else sources.indexOfFirst { sourceKey(it) == previousKey }.coerceAtLeast(0)
+                        serverIdx = first + pick.coerceIn(0, (sources.size - 1).coerceAtLeast(0))
                         startNative()
                     }
                 }
@@ -1243,6 +1249,7 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility != View.VISIBLE || startupBudget.expired(SystemClock.elapsedRealtime())) return false
         refusalRetried = true
         val provider = currentNativeProvider
+        val refusedSource = nativeSources.getOrNull(serverIdx)
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
         spinner.visibility = View.VISIBLE
@@ -1262,7 +1269,10 @@ class MainActivity : AppCompatActivity() {
                         // A new attempt has its own single credential refresh and provider window.
                         authRecovery.reset()
                         providerWindow.enter(SystemClock.elapsedRealtime())
-                        nativeSources = sources; serverIdx = 0
+                        nativeSources = sources
+                        // Same rule as the credential refresh: do not replay the style that was
+                        // just refused when the provider advertises another one for this channel.
+                        serverIdx = RequestProfileFallback.preferredIndex(sources, refusedSource) { false }
                         startNative()
                     }
                 }
