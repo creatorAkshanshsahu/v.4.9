@@ -14,4 +14,4 @@ The 1.6-second logo reveal uses a small lift-and-settle motion, a restrained col
 
 ## Schedule fallback
 
-The app checks its current TG schedule endpoint first. If it has no programme rows, a bounded XMLTV reader can consult the community JioTV feed documented in [programme-guide-sources.md](programme-guide-sources.md). The fallback provides metadata only; it is never a video source and never changes channel playback or DRM policy. Missing channel data is shown as unavailable, not guessed.
+The community JioTV XMLTV feed is the main schedule source; a bounded reader checks it at launch and on the app's background refresh cadence, then reloads the visible guide when the feed changes. If that feed has no current/upcoming row for a channel, the TG guide endpoint is tried as a secondary source. The feed provides metadata only; it is never a video source and never changes channel playback or DRM policy. Missing channel data is shown as unavailable, not guessed.

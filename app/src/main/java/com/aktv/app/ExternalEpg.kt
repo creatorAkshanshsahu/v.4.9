@@ -19,8 +19,8 @@ import java.util.TimeZone
 import java.util.zip.GZIPInputStream
 
 /**
- * Fallback JioTV XMLTV schedule source. The primary TG guide endpoint is preferred; this feed is
- * schedule metadata only and is never used for channel playback, URLs, tokens, or DRM.
+ * Primary community JioTV XMLTV schedule source. The TG guide endpoint is a fallback only; this feed
+ * is schedule metadata only and is never used for channel playback, URLs, tokens, or DRM.
  * Public XMLTV source: mitthu786/tvepg, updated by its maintainer's daily workflow.
  */
 object ExternalEpg {
@@ -37,29 +37,46 @@ object ExternalEpg {
 
     fun guide(context: Context, channelId: String, nowSec: Long = System.currentTimeMillis() / 1000): Guide? {
         if (channelId.isBlank() || channelId.length > 16 || !channelId.all(Char::isDigit)) return null
-        val schedules = synchronized(lock) {
-            val now = System.currentTimeMillis()
-            val current = index
-            if (current != null && now - loadedAt < REFRESH_MS) return@synchronized current
-            if (now < retryAt) return@synchronized current
-            retryAt = now + RETRY_MS
-            val file = File(context.cacheDir, "epg/jiotv-xmltv.xml.gz")
-            file.parentFile?.mkdirs()
-            val age = now - file.lastModified()
-            if (!file.isFile || age >= REFRESH_MS) {
-                try { download(file) } catch (_: Exception) {
-                    if (!file.isFile || now - file.lastModified() >= OFFLINE_MAX_AGE_MS) return@synchronized current
-                }
-            }
-            try {
-                val parsed = EpgXmlTv.parse(file, nowSec)
-                index = parsed
-                val fileAge = (System.currentTimeMillis() - file.lastModified()).coerceAtLeast(0L)
-                loadedAt = System.currentTimeMillis() - fileAge.coerceAtMost(REFRESH_MS)
-                parsed
-            } catch (_: Exception) { current }
-        } ?: return null
+        val schedules = loadIndex(context, nowSec) ?: return null
         return EpgXmlTv.guide(schedules[channelId].orEmpty(), nowSec)
+    }
+
+    /** Refreshes a due feed on the caller's background executor, without requiring a guide panel to be open. */
+    fun refreshIfDue(context: Context, nowSec: Long = System.currentTimeMillis() / 1000): Boolean {
+        val file = cacheFile(context)
+        val now = System.currentTimeMillis()
+        val due = synchronized(lock) {
+            index == null || now - loadedAt >= REFRESH_MS || !file.isFile || now - file.lastModified() >= REFRESH_MS
+        }
+        if (!due) return false
+        val before = if (file.isFile) file.lastModified() else 0L
+        loadIndex(context, nowSec)
+        return file.isFile && file.lastModified() > before
+    }
+
+    private fun cacheFile(context: Context) = File(context.cacheDir, "epg/jiotv-xmltv.xml.gz")
+
+    private fun loadIndex(context: Context, nowSec: Long): Map<String, List<Programme>>? = synchronized(lock) {
+        val now = System.currentTimeMillis()
+        val current = index
+        val file = cacheFile(context)
+        file.parentFile?.mkdirs()
+        val age = now - file.lastModified()
+        if (current != null && now - loadedAt < REFRESH_MS && file.isFile && age < REFRESH_MS) return@synchronized current
+        if (now < retryAt) return@synchronized current
+        retryAt = now + RETRY_MS
+        if (!file.isFile || age >= REFRESH_MS) {
+            try { download(file) } catch (_: Exception) {
+                if (!file.isFile || now - file.lastModified() >= OFFLINE_MAX_AGE_MS) return@synchronized current
+            }
+        }
+        try {
+            val parsed = EpgXmlTv.parse(file, nowSec)
+            index = parsed
+            val fileAge = (System.currentTimeMillis() - file.lastModified()).coerceAtLeast(0L)
+            loadedAt = System.currentTimeMillis() - fileAge.coerceAtMost(REFRESH_MS)
+            parsed
+        } catch (_: Exception) { current }
     }
 
     private fun download(destination: File) {

@@ -842,9 +842,12 @@ class MainActivity : AppCompatActivity() {
         }
         if (!leader) return
         io.execute {
-            val primary = try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
-            val guide = primary?.takeIf(::guideHasSchedule)
-                ?: ExternalEpg.guide(applicationContext, c.id) ?: primary
+            val community = try { ExternalEpg.guide(applicationContext, c.id) } catch (_: Exception) { null }
+            val tgFallback = if (guideHasSchedule(community)) null
+                else try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
+            val guide = community?.takeIf(::guideHasSchedule)
+                ?: tgFallback?.takeIf(::guideHasSchedule)
+                ?: community ?: tgFallback
                 ?: Guide(null, null, emptyList(), "No schedule currently published")
             Epg.put(c.id, guide)
             val callbacks = synchronized(guideWaiters) { guideWaiters.remove(c.id).orEmpty() }
@@ -1859,16 +1862,35 @@ class MainActivity : AppCompatActivity() {
         }
         return super.dispatchKeyEvent(e)
     }
-    /** While the app is open, quietly re-reads both channel lists every few minutes (never while a channel is playing), so website changes arrive without a restart. */
+    /** Downloads a changed community feed off-main; only refreshes the visible V1 guide after a new file lands. */
+    private fun refreshProgrammeFeed() {
+        io.execute {
+            val changed = ExternalEpg.refreshIfDue(applicationContext)
+            if (changed) ui.post {
+                val ch = if (layer.visibility == View.VISIBLE) shown.getOrNull(current) else (heroTile as? Tile.Ch)?.c
+                if (ch != null && !ch.v2) {
+                    Epg.invalidate(ch.id)
+                    fetchGuide(ch) { g ->
+                        if (layer.visibility == View.VISIBLE && shown.getOrNull(current)?.key == ch.key) fillInfoGuide(g)
+                        if ((heroTile as? Tile.Ch)?.c?.key == ch.key) applyHeroGuide(g)
+                    }
+                }
+            }
+        }
+    }
+
+    /** While the app is open, quietly refreshes channel lists and checks the guide feed on its own cadence. */
     private val autoRefresh = object : Runnable {
         override fun run() {
             if (layer.visibility != View.VISIBLE && !searchShown && System.currentTimeMillis() - lastRefresh > 4 * 60_000L) loadChannels()
             TgServers.refreshSite()
+            refreshProgrammeFeed()
             ui.postDelayed(this, 5 * 60_000L)
         }
     }
     override fun onStart() {
         super.onStart()
+        refreshProgrammeFeed()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
         if (tab >= 2 && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()

@@ -27,6 +27,7 @@ object Epg {
         cache[id]?.takeIf { System.currentTimeMillis() - it.at < TTL }?.g
 
     @Synchronized fun put(id: String, g: Guide) { cache[id] = Hit(System.currentTimeMillis(), g) }
+    @Synchronized fun invalidate(id: String) { cache.remove(id) }
 
     private fun str(o: JSONObject, k: String) = if (o.isNull(k)) "" else o.optString(k, "").trim()
 
