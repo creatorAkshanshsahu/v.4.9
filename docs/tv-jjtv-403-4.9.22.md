@@ -103,8 +103,11 @@ Version is `4.9.23` / code `40`.
 
 ## Build evidence for 4.9.23
 
-- CI build [39392205009](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392205009),
-  job `build` succeeded for both ABIs; APK artifact
-  [12250805492](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392205009/artifacts/12250805492).
+- Code commit `ec9edbf`: CI build
+  [39392205009](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392205009), succeeded.
+- Branch head `cc572a2` (docs only): CI build
+  [39392934557](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392934557), succeeded;
+  APK artifact
+  [12251140366](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/39392934557/artifacts/12251140366).
 - Baseline guard, offline unit tests, TV/phone layout previews and the read-only live checks ran in
   the same build.
