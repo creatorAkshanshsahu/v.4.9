@@ -1,0 +1,22 @@
+{
+  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1",
+  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
+  "sha256": {
+    "app/src/main/java/com/aktv/app/TgProtocol.kt": "abeff56787f99ca1fae5b418a0a66c393218e34bac7dc7613ac02f93efd085ee",
+    "app/src/main/java/com/aktv/app/TgResolver.kt": "e7d1280843ea87bdc35b0c5719f4052ab14e7d402ecd7463a99353128c0af6c1",
+    "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
+    "app/src/main/java/com/aktv/app/TgServers.kt": "0bd1e84f2223a2c6a0256368c3f5de0f30b3d73c90c05c0aafea8082ec27425c",
+    "app/src/main/java/com/aktv/app/JjtvProtocol.kt": "399495f6588165cb12ab1f2afaeab09cb8d54743dc2865f84704b42dc2e651ef",
+    "app/src/main/java/com/aktv/app/JjtvResolver.kt": "3b983b9ff38af374f98a5f254ae6d097e5a80153f5af8dde0c40c8dee0432334",
+    "app/src/main/java/com/aktv/app/JjtvRequestProfiles.kt": "e95e0103df5052e5d3271ee55125f8b633b7e21c6e3c868e4c559aeeb0f4f497",
+    "app/src/main/java/com/aktv/app/StreamHttp.kt": "1981fadffc9b1ec78eed50a0f8ae426c6af6649a35f355b69c479951af3c6b9e",
+    "app/src/main/java/com/aktv/app/StreamRequestPolicy.kt": "73b1736da6362bb7a841381ab3c8bc0442469c7113255e1e4e44e0f7ab149ab9",
+    "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
+    "app/src/main/java/com/aktv/app/ClearKeyDashManifestParser.kt": "3b6ce8a9adeed73195bd55898d00806efa87cf58471736d56e8e76e08ed2bc78",
+    "app/src/main/java/com/aktv/app/HttpReferenceClock.kt": "b8dc8e872957ed6bc9f10726050dfcb0bdd464ebef0db3bc42769fe911ba7479",
+    "app/src/main/java/com/aktv/app/LiveProviders.kt": "79d52aaaa8ba1d4f1481c6e45e922a51c2732d7f0287893895c3d72015957975",
+    "app/src/main/java/com/aktv/app/NativePlaybackPolicy.kt": "880302f75086bbfbaa1f1d17df5eea7a68a6e444556ca392c35ec43836f0ee2f",
+    "app/src/main/java/com/aktv/app/FrostMovies.kt": "8170b49a2c6462050ba7cacea4cd64bea764a8c95af34421ffa4e8d20b88cba7",
+    "app/src/main/java/com/aktv/app/FrostMedia.kt": "0f62c6dc20fe6bfd8e8db03fe70e91857e6a3e100fb66c280a6ae4919e0afcb1"
+  }
+}

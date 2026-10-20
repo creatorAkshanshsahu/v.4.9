@@ -1,0 +1,24 @@
+name: Inspect movie player
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/inspect-movies.yml'
+      - '.github/scripts/inspect-tgfrost-player.cjs'
+      - '.github/scripts/inspect-tgfrost-player.test.cjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  frost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test inspection redaction and URL guards
+        run: node --test .github/scripts/inspect-tgfrost-player.test.cjs
+      - name: Inspect the movie source API without saving credentials or media
+        timeout-minutes: 4
+        run: |
+          node .github/scripts/inspect-tgfrost-player.cjs --api --details
