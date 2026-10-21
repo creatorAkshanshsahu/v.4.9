@@ -62,6 +62,12 @@ jobs:
       - name: Publish native movies layout preview
         if: always()
         run: python3 .github/scripts/report-ui-previews.py home-movies
+      - name: Publish native logo mark preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py brand-mark
+      - name: Publish native entrance preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py entrance
       - name: Upload exact native UI, logo and entrance previews
         if: always()
         uses: actions/upload-artifact@v4
