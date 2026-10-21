@@ -27,6 +27,7 @@ class BrandPreviewTest {
         val controller = Robolectric.buildActivity(Activity::class.java).create()
         try {
             val activity = controller.get().apply { setTheme(R.style.Theme_AKTV) }
+            controller.start().resume().visible()
             val output = File(System.getProperty("aktv.ui.previewDir", "build/reports/ui-preview")).apply { mkdirs() }
             val root = FrameLayout(activity).apply { setBackgroundColor(Accent.ABYSS) }
             val mark = ImageView(activity).apply {
@@ -44,6 +45,7 @@ class BrandPreviewTest {
             val introRoot = FrameLayout(activity).apply { setBackgroundColor(Accent.ABYSS) }
             val intro = AkIntroView(activity)
             introRoot.addView(intro, FrameLayout.LayoutParams(-1, -1))
+            activity.setContentView(introRoot)
             introRoot.measure(ViewSpec.exact(960), ViewSpec.exact(540)); introRoot.layout(0, 0, 960, 540)
             intro.start()
             shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(700))
