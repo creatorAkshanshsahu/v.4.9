@@ -66,7 +66,7 @@ class HomePreviewTest {
             root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.brand_aktv_user)
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF091521.toInt(), 0xFF0C1D2A.toInt(), 0xFF07111B.toInt()))
-            root.findViewById<View>(R.id.heroBackdrop).apply { setImageDrawable(null); visibility = View.GONE; alpha = 0f }
+            root.findViewById<ImageView>(R.id.heroBackdrop).apply { setImageDrawable(null); visibility = View.GONE; alpha = 0f }
             root.findViewById<View>(R.id.heroPreview).visibility = View.GONE
             root.findViewById<View>(R.id.heroGlow).visibility = View.VISIBLE
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
