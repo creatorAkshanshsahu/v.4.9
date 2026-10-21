@@ -64,6 +64,7 @@ class PlayerPreviewTest {
             val root = android.view.LayoutInflater.from(activity).inflate(R.layout.activity_main, null)
             activity.setContentView(root)
             root.findViewById<View>(R.id.home).visibility = View.GONE
+            root.findViewById<View>(R.id.splash).visibility = View.GONE
             val layer = root.findViewById<FrameLayout>(R.id.playerLayer).apply { visibility = View.VISIBLE }
             layer.addView(ImageView(activity).apply {
                 setImageResource(R.drawable.home_sports_art); scaleType = ImageView.ScaleType.CENTER_CROP

@@ -14,6 +14,6 @@ else:
     if len(encoded)>42000:
         print(f'::warning title=Native UI preview::{name} exceeds the bounded preview transport size ({len(encoded)} chars).')
     else:
-        count=(len(encoded)+3799)//3800
+        count=(len(encoded)+6999)//7000
         for index in range(count):
-            print(f'::notice title=Native UI preview {name} {index+1} of {count}::{encoded[index*3800:(index+1)*3800]}')
+            print(f'::notice title=Native UI preview {name} {index+1} of {count}::{encoded[index*7000:(index+1)*7000]}')
