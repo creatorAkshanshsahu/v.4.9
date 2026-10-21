@@ -29,10 +29,8 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private val dp get() = resources.displayMetrics.density
     private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.ic_brand) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.TEXT; textAlign = Paint.Align.CENTER; textSize = 34 * dp; letterSpacing = 0.08f }
+    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.TEXT; textAlign = Paint.Align.CENTER; textSize = 42 * dp; letterSpacing = 0.08f }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
-    private val soundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.ION; textAlign = Paint.Align.CENTER; textSize = 8 * dp; letterSpacing = 0.08f }
-    private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val destination = RectF()
     private val soundTarget = RectF()
     private var progress = 0f
@@ -60,7 +58,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     init { updateAccessibilityLabel() }
 
     private fun updateAccessibilityLabel() {
-        contentDescription = "AK TV intro. Sound ${if (soundEnabled) "on" else "off"}. Activate to skip; long press to toggle sound."
+        contentDescription = "AK TV intro. Sound ${if (soundEnabled) "on" else "off"}. Tap the lower edge to toggle sound; activate elsewhere to skip."
     }
 
     fun start() {
@@ -161,11 +159,6 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         val appear = (progress / 0.30f).coerceIn(0f, 1f)
         val settle = (progress / 0.46f).coerceIn(0f, 1f)
         val logoY = height * if (shortScreen) 0.37f else 0.38f
-        val radius = minOf(width * 0.32f, height * 0.55f)
-        haloPaint.color = Accent.INDIGO
-        haloPaint.alpha = (alpha * 0.10f * settle).toInt()
-        canvas.drawCircle(centerX, logoY, radius, haloPaint)
-
         val scale = 0.96f + 0.04f * settle
         val markWidth = minOf(width * (if (shortScreen) 0.74f else 0.82f), height * 1.40f) * scale
         val markHeight = markWidth * ((mark?.intrinsicHeight ?: 1).toFloat() / (mark?.intrinsicWidth ?: 1).coerceAtLeast(1))
@@ -181,10 +174,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         canvas.drawText("AK TV", centerX, titleY, titlePaint)
 
         hintPaint.alpha = (alpha * 0.74f).toInt()
-        canvas.drawText("Loading…", centerX, height * 0.93f, hintPaint)
-        soundPaint.alpha = (alpha * 0.68f).toInt()
-        val soundLabel = if (soundEnabled) "SOUND ON  ·  tap to mute" else "SOUND OFF  ·  tap to enable"
-        canvas.drawText(soundLabel, centerX, height - 12 * dp, soundPaint)
+        canvas.drawText("Loading...", centerX, height * 0.93f, hintPaint)
         val half = 100 * dp
         soundTarget.set(centerX - half, height - 40 * dp, centerX + half, height.toFloat())
     }

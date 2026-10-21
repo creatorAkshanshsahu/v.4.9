@@ -5,7 +5,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 name = sys.argv[1]
-assert name in ('home-tv', 'home-phone', 'home-movies', 'brand-mark', 'entrance')
+assert name in ('home-tv', 'home-phone', 'home-movies', 'brand-mark', 'entrance', 'vod-player', 'live-player')
 path=Path('app/build/reports/ui-preview')/(name+'.webp')
 if not path.exists():
     print(f'::warning title=Native UI preview::{name} was not produced; no visual assertion is made.')

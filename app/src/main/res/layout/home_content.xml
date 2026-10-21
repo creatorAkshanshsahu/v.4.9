@@ -1,14 +1,8 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
     <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_gravity="top" android:layout_marginStart="116dp">
-        <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent">
-            <ImageView android:id="@+id/heroLogo" android:layout_width="144dp" android:layout_height="144dp"
-                android:layout_gravity="center_vertical|end" android:layout_marginEnd="76dp" android:scaleType="fitCenter"/>
-            <TextView android:id="@+id/heroMono" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical|end" android:layout_marginEnd="84dp" android:textColor="#FFFFFF"
-                android:textSize="68sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false" android:visibility="gone"/>
-        </FrameLayout>
+        android:layout_gravity="top" android:layout_marginStart="144dp">
+        <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent"/>
         <ImageView android:id="@+id/heroBackdrop" android:layout_width="match_parent" android:layout_height="match_parent"
             android:scaleType="centerCrop" android:alpha="0"/>
         <FrameLayout android:id="@+id/heroPreview" android:layout_width="match_parent" android:layout_height="match_parent" android:alpha="0">
@@ -19,9 +13,19 @@
         </FrameLayout>
         <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_left"/>
         <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_bottom"/>
+        <ImageView android:id="@+id/heroLogo" android:layout_width="210dp" android:layout_height="132dp"
+            android:layout_gravity="center_vertical|end" android:layout_marginEnd="56dp" android:scaleType="fitCenter"/>
+        <TextView android:id="@+id/heroMono" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical|end" android:layout_marginEnd="68dp" android:textColor="#FFFFFF"
+            android:textSize="68sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false" android:visibility="gone"/>
+        <TextView android:id="@+id/heroTagline" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="top|end" android:layout_marginTop="72dp" android:layout_marginEnd="34dp"
+            android:gravity="end" android:text="A BRIGHTER\nTOMORROW\nLIVES HERE" android:textColor="@color/text"
+            android:textSize="9sp" android:fontFamily="@font/sora_semibold" android:letterSpacing="0.26"
+            android:lineSpacingExtra="2dp" android:includeFontPadding="false"/>
     </FrameLayout>
     <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_marginStart="116dp" android:orientation="vertical">
+        android:layout_marginStart="144dp" android:orientation="vertical">
         <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="84dp"
             android:paddingStart="28dp" android:paddingEnd="30dp" android:orientation="horizontal" android:gravity="center_vertical"
             android:background="@drawable/home_top_scrim">
@@ -83,7 +87,7 @@
             android:layout_weight="1" android:paddingTop="16dp" android:paddingBottom="30dp" android:clipToPadding="false" android:clipChildren="false"
             android:overScrollMode="never" android:requiresFadingEdge="none" android:fadeScrollbars="false"/>
     </LinearLayout>
-    <LinearLayout android:id="@+id/navRail" android:layout_width="116dp" android:layout_height="match_parent"
+    <LinearLayout android:id="@+id/navRail" android:layout_width="144dp" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
         android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
         <ImageView android:id="@+id/brandMark" android:layout_width="38dp" android:layout_height="38dp" android:src="@drawable/ic_brand"

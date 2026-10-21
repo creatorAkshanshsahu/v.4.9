@@ -15,8 +15,9 @@ internal object HomeChrome {
     fun metrics(width: Int, height: Int, dp: Float, movies: Boolean): Metrics {
         val compact = height / dp < 420
         val phone = width / dp < 600 || (compact && width / dp < 900)
-        val rail = if (phone) 0 else ((if (compact) 90 else 116) * dp).toInt()
-        val header = ((if (compact) 54 else 80) * dp).toInt()
+        val rail = if (phone) 0 else ((if (compact) 116 else 144) * dp).toInt()
+        // The selected TV design begins directly in the cinematic hero; phone keeps a compact title bar.
+        val header = if (phone) ((if (compact) 54 else 80) * dp).toInt() else 0
         val heroRatio = if (phone && compact) { if (movies) 0.24f else 0.28f } else if (movies) 0.32f else 0.40f
         val hero = (height * heroRatio).toInt()
         return Metrics(rail, header, hero, ((if (compact) 20 else 28) * dp).toInt(), compact, phone)
@@ -53,8 +54,10 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.navVersion).visibility = if (screenHeight / dp < 380) View.GONE else View.VISIBLE
         (root.findViewById<View>(R.id.content).layoutParams as FrameLayout.LayoutParams).marginStart = m.rail
         root.findViewById<View>(R.id.topBar).apply {
+            visibility = if (m.header == 0) View.GONE else View.VISIBLE
             layoutParams.height = m.header; setPadding(m.margin, 0, m.margin, 0)
         }
+        root.findViewById<View>(R.id.heroTagline).visibility = if (m.phone) View.GONE else View.VISIBLE
         root.findViewById<TextView>(R.id.sectionTitle).textSize = if (m.compact) 21f else 27f
         root.findViewById<TextView>(R.id.sectionKicker).textSize = if (m.compact) 8f else 9f
         root.findViewById<View>(R.id.librarySummary).visibility = if (screenWidth / dp < 800) View.GONE else View.VISIBLE
@@ -81,9 +84,13 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.heroDesc).maxLines = if (m.compact || !movies) 1 else 2
         root.findViewById<View>(R.id.heroChips).let { (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 10 else 16) }
         root.findViewById<View>(R.id.heroLogo).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply { width = px(if (m.compact) 104 else 176); height = width; marginEnd = px(if (m.compact) 24 else 56) }
+            (layoutParams as FrameLayout.LayoutParams).apply {
+                width = px(if (m.compact) 128 else 210); height = px(if (m.compact) 80 else 132)
+                marginEnd = px(if (m.compact) 24 else 56)
+            }
         }
         root.findViewById<View>(R.id.heroMono).let { (it.layoutParams as FrameLayout.LayoutParams).marginEnd = px(if (m.compact) 36 else 68) }
+        root.findViewById<View>(R.id.heroTagline).let { (it.layoutParams as FrameLayout.LayoutParams).topMargin = px(if (m.compact) 46 else 72) }
         root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 16), 0, px(24))
         (root.findViewById<View>(R.id.status).layoutParams as LinearLayout.LayoutParams).marginStart = m.margin
         root.requestLayout()
@@ -102,8 +109,8 @@ internal object HomeChrome {
         val lp = tile.layoutParams as ViewGroup.MarginLayoutParams
         lp.setMargins((6 * dp).toInt(), (4 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt())
         if (!poster) {
-            lp.width = ((if (compact) 166 else 218) * dp).toInt()
-            lp.height = ((if (compact) 94 else 126) * dp).toInt()
+            lp.width = ((if (compact) 142 else 158) * dp).toInt()
+            lp.height = ((if (compact) 80 else 96) * dp).toInt()
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 14f
         } else {

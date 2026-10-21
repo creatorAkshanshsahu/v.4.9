@@ -155,13 +155,13 @@ class MainActivity : AppCompatActivity() {
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
     private lateinit var heroText: View; private lateinit var heroDot: View; private lateinit var heroBadge: TextView
-    private lateinit var heroTitle: TextView; private lateinit var heroChips: LinearLayout
+    private lateinit var heroTitle: TextView; private lateinit var heroChips: LinearLayout; private lateinit var heroTagline: View
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
     private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Accent.ABYSS, Accent.ABYSS)) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
-    private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View
+    private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
     private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
     private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
@@ -205,12 +205,13 @@ class MainActivity : AppCompatActivity() {
         phoneSegs = listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
-        heroTitle = findViewById(R.id.heroTitle); heroChips = findViewById(R.id.heroChips)
+        heroTitle = findViewById(R.id.heroTitle); heroChips = findViewById(R.id.heroChips); heroTagline = findViewById(R.id.heroTagline)
         heroOrb = findViewById(R.id.heroOrb); heroLogo = findViewById(R.id.heroLogo); heroMono = findViewById(R.id.heroMono)
         heroProg = findViewById(R.id.heroProg); heroProgress = findViewById(R.id.heroProgress)
         heroDesc = findViewById(R.id.heroDesc); heroNext = findViewById(R.id.heroNext)
         infoCard = findViewById(R.id.infoCard); infoLogo = findViewById(R.id.infoLogo); infoName = findViewById(R.id.infoName)
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
+        playerBrand = findViewById(R.id.playerBrand)
         infoMono = findViewById(R.id.infoMono); infoNow = findViewById(R.id.infoNow); infoProgress = findViewById(R.id.infoProgress)
         infoDesc = findViewById(R.id.infoDesc); infoScheduleNext = findViewById(R.id.infoScheduleNext)
         infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus); infoActions = findViewById(R.id.infoActions)
@@ -260,34 +261,45 @@ class MainActivity : AppCompatActivity() {
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
         infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xF00B101A.toInt(), 0xE10E1422.toInt())).apply {
-            cornerRadius = 22 * dp
-            setStroke((1 * dp).toInt().coerceAtLeast(1), Accent.ION)
+            intArrayOf(0xE5080B11.toInt(), 0xD90D121A.toInt())).apply {
+            cornerRadius = 16 * dp
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
         }
         infoCard.elevation = 10 * dp
         findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
-            setStroke((1 * dp).toInt().coerceAtLeast(1), Accent.ION)
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
         }
-        if (resources.configuration.screenWidthDp < 600) {
+        val playerDock = findViewById<View>(R.id.playerInfoDock)
+        val phoneWidth = resources.configuration.screenWidthDp < 600
+        val dockLp = playerDock.layoutParams as FrameLayout.LayoutParams
+        if (phoneWidth) {
+            val margin = (16 * dp).toInt()
+            dockLp.width = (resources.displayMetrics.widthPixels - 2 * margin).coerceAtLeast(1)
+            dockLp.setMargins(margin, 0, margin, margin); dockLp.marginStart = margin; dockLp.marginEnd = margin
+            playerDock.layoutParams = dockLp
             val card = infoCard as LinearLayout
             card.orientation = LinearLayout.VERTICAL; card.minimumWidth = 0
-            val margin = (16 * dp).toInt()
-            val cardWidth = (resources.displayMetrics.widthPixels - 2 * margin).coerceAtLeast(1)
             card.setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
-            (card.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
-                lp.width = cardWidth; lp.gravity = Gravity.BOTTOM or Gravity.START
-                lp.setMargins(margin, margin, margin, margin); card.layoutParams = lp
+            (card.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.height = LinearLayout.LayoutParams.WRAP_CONTENT; lp.weight = 0f
+                card.layoutParams = lp
             }
             findViewById<View>(R.id.infoLogoBox).visibility = View.GONE
             (card.getChildAt(1).layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
                 lp.marginStart = 0; lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.weight = 0f
                 card.getChildAt(1).layoutParams = lp
             }
-            infoName.maxWidth = cardWidth - (28 * dp).toInt()
+            infoName.maxWidth = dockLp.width - (28 * dp).toInt()
             listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
                 action.textSize = 9f; action.setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), 0)
                 (action.layoutParams as? LinearLayout.LayoutParams)?.let { lp -> lp.marginEnd = (4 * dp).toInt(); action.layoutParams = lp }
             }
+        } else {
+            dockLp.width = (resources.displayMetrics.widthPixels * 0.84f).toInt()
+            dockLp.setMargins((40 * dp).toInt(), 0, 0, (28 * dp).toInt())
+            dockLp.marginStart = (40 * dp).toInt(); dockLp.marginEnd = 0
+            playerDock.layoutParams = dockLp
+            findViewById<View>(R.id.infoHint).visibility = View.GONE
         }
         findViewById<TextView>(R.id.infoHint).text = SpannableStringBuilder().apply {
             key(this, "▲ ▼", "Channel"); append("     "); key(this, "▶", "All channels"); append("     ")
@@ -399,6 +411,18 @@ class MainActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (7 * dp).toInt() }
     }
 
+    private fun showHomeChannelDetails(channel: Channel) {
+        val guide = Epg.cached(channel.id)
+        val text = buildString {
+            append(channel.category)
+            if (channel.v2) append("  ·  Always on")
+            guide?.now?.let { append("\n\nNOW  ·  ${it.title}") }
+            guide?.next?.let { append("\nNEXT  ·  ${it.title}") }
+            if (guide?.now == null && guide?.next == null) append("\n\nProgramme details will appear when the guide has a listing.")
+        }
+        AlertDialog.Builder(this).setTitle(channel.name).setMessage(text).setPositiveButton("Done", null).show()
+    }
+
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
@@ -487,6 +511,17 @@ class MainActivity : AppCompatActivity() {
         return false
     }
     private fun accentOf(key: String) = accents[key] ?: Accent.SIGNAL
+    private fun channelArtwork(channel: Channel): Int {
+        val label = "${channel.category} ${channel.name}".lowercase()
+        return when {
+            listOf("sport", "cricket", "football", "match").any { label.contains(it) } -> R.drawable.home_sports_art
+            listOf("kids", "child", "yay", "cartoon", "family").any { label.contains(it) } -> R.drawable.home_family_art
+            listOf("music", "hits", "song", "concert").any { label.contains(it) } -> R.drawable.home_music_art
+            listOf("reality", "nature", "travel", "document", "wildlife").any { label.contains(it) } -> R.drawable.home_nature_art
+            listOf("news", "business", "world").any { label.contains(it) } -> R.drawable.home_hero_cinematic
+            else -> 0
+        }
+    }
     private fun extractAccent(key: String, d: android.graphics.drawable.Drawable, cb: (Int) -> Unit) {
         accents[key]?.let { cb(it); return }
         Accent.from(d) { c -> accents[key] = c; cb(c) }
@@ -787,9 +822,17 @@ class MainActivity : AppCompatActivity() {
             listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.let { it.background.ifEmpty { it.poster } } == url) heroBackdrop.animate().alpha(1f).setDuration(260).start() })
         }
     }
+    /** Local cinematic still fills the hero until a genuine muted Media3 preview renders its first frame. */
+    private fun showCinematicFallback() {
+        heroBackdrop.animate().cancel(); heroOrb.animate().cancel()
+        heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+        heroBackdrop.alpha = 1f; heroOrb.alpha = 0f
+    }
     private fun fillHero(t: Tile?) {
         heroChips.removeAllViews()
-        if (t !is Tile.Mv) showBackdrop(null)
+        if (t is Tile.Ch || (t == null && tab < 2)) showCinematicFallback()
+        else if (t !is Tile.Mv) showBackdrop(null)
+        heroTagline.visibility = if (tab < 2 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
         schedulePreview((t as? Tile.Ch)?.c)
         when (t) {
             is Tile.Ch -> {
@@ -800,13 +843,11 @@ class MainActivity : AppCompatActivity() {
                 (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
-                heroChips.addView(chip("▶   Watch live", true).apply { setOnClickListener {
+                heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
                     shown = (if (t.c.v2) allV2 else all).ifEmpty { listOf(t.c) }; shownCat = t.c.category
                     play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
                 } })
-                heroChips.addView(chip(if (t.c.key in favs) "♥  Saved" else "+  My favorites").apply {
-                    setOnClickListener { toggleFav(t.c); heroChips.getChildAt(1)?.requestFocus() }
-                })
+                heroChips.addView(chip("ⓘ   Details").apply { setOnClickListener { showHomeChannelDetails(t.c) } })
                 if (t.c.logo.isBlank()) {
                     heroLogo.visibility = View.GONE; heroMono.visibility = View.VISIBLE
                     heroMono.text = initials(t.c.name); heroMono.textSize = if (heroMono.text.length > 1) 62f else 84f
@@ -940,6 +981,7 @@ class MainActivity : AppCompatActivity() {
         infoCard.animate().alpha(0f).translationY(14 * dp).setDuration(450).withEndAction { infoActions.visibility = View.GONE }.start()
         playerScrim.animate().alpha(0f).setDuration(450).start()
         playerClock.animate().alpha(0f).setDuration(450).start()
+        playerBrand.animate().alpha(0f).setDuration(450).start()
     }
     private fun showInfo() {
         ui.removeCallbacks(hideInfo)
@@ -947,6 +989,7 @@ class MainActivity : AppCompatActivity() {
         infoCard.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
         playerScrim.animate().alpha(1f).setDuration(260).start()
         playerClock.animate().alpha(1f).setDuration(260).start()
+        playerBrand.animate().alpha(1f).setDuration(260).start()
         ui.removeCallbacks(guideProgressTick); ui.postDelayed(guideProgressTick, 60_000)
         ui.postDelayed(hideInfo, 5000)
     }
@@ -2423,6 +2466,11 @@ class MainActivity : AppCompatActivity() {
                 is Tile.Ch -> {
                     val bg = v.background as GradientDrawable
                     v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c.key), 0.12f))
+                    v.findViewById<ImageView>(R.id.channelArt).apply {
+                        val artwork = channelArtwork(t.c)
+                        if (artwork == 0) { setImageDrawable(null); visibility = View.GONE }
+                        else { setImageResource(artwork); visibility = View.VISIBLE }
+                    }
                     v.findViewById<TextView>(R.id.name).text = t.c.name
                     val nowCaption = v.findViewById<TextView>(R.id.nowCaption)
                     nowCaption.tag = t.c.key

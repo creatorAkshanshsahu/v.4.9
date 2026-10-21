@@ -36,6 +36,8 @@ import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
+import coil.imageLoader
+import coil.request.ImageRequest
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
@@ -50,6 +52,12 @@ class MoviePlayerActivity : Activity() {
                 .putExtra("tmdb", title.tmdb).putExtra("type", if (title.isSeries) "tv" else "movie")
                 .putExtra("season", if (title.isSeries) season else 0).putExtra("episode", if (title.isSeries) episode else 0)
                 .putExtra("name", title.name)
+                .putExtra("genres", title.genres.take(4).joinToString("  ·  "))
+                .putExtra("year", title.year.take(8))
+                .putExtra("overview", title.description.take(500))
+                .putExtra("backdrop", title.background.ifBlank { title.poster })
+                .putExtra("episodeName", episodes.firstOrNull { it.season == season && it.episode == episode }?.name.orEmpty().take(160))
+                .putExtra("episodeOverview", episodes.firstOrNull { it.season == season && it.episode == episode }?.overview.orEmpty().take(400))
                 .putExtra("episodes", (if (title.isSeries) episodes else emptyList()).take(2000)
                     .flatMap { listOf(it.season, it.episode) }.toIntArray())
     }
@@ -63,6 +71,10 @@ class MoviePlayerActivity : Activity() {
     private val lowMemory by lazy { (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true }
     private lateinit var title: FrostTitle
     private var titleName = ""
+    private var currentEpisodeName = ""
+    private var currentDescription = ""
+    private var genres = ""
+    private var year = ""
     private var initialized = false
     private var foreground = false
     private var generation = 0
@@ -95,6 +107,8 @@ class MoviePlayerActivity : Activity() {
     private lateinit var view: PlayerView
     private lateinit var overlay: FrameLayout
     private lateinit var heading: TextView
+    private lateinit var episodeLine: TextView
+    private lateinit var description: TextView
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
     private lateinit var nextButton: TextView
@@ -112,6 +126,11 @@ class MoviePlayerActivity : Activity() {
             finish(); return
         }
         titleName = intent.getStringExtra("name").orEmpty().take(180)
+        currentEpisodeName = intent.getStringExtra("episodeName").orEmpty().take(160)
+        genres = intent.getStringExtra("genres").orEmpty().take(120)
+        year = intent.getStringExtra("year").orEmpty().take(8)
+        currentDescription = (if (title.isSeries) intent.getStringExtra("episodeOverview") else intent.getStringExtra("overview"))
+            .orEmpty().take(400)
         episodes = VodProgress.episodes(intent.getIntArrayExtra("episodes"))
         desiredPlay = saved?.getBoolean("play", true) ?: true
         restoreProgress()
@@ -133,51 +152,84 @@ class MoviePlayerActivity : Activity() {
             setShowNextButton(false); setShowPreviousButton(false)
             setKeepContentOnPlayerReset(false)
             setShutterBackgroundColor(Accent.ABYSS)
+            useArtwork = true
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        overlay = FrameLayout(this)
-        val topPanel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(px(36), px(28), px(36), px(18))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF5080B14.toInt(), 0xC80A1020.toInt(), 0x700A1020.toInt(), Color.TRANSPARENT))
+        intent.getStringExtra("backdrop").orEmpty().takeIf { it.isNotBlank() }?.let { artwork ->
+            imageLoader.enqueue(ImageRequest.Builder(this).data(artwork)
+                .target(onSuccess = { drawable ->
+                    if (!isFinishing) {
+                        view.setDefaultArtwork(drawable)
+                        view.useArtwork = true
+                    }
+                }).build())
         }
-        val identity = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val brand = ImageView(this).apply {
-            setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "AK TV"; layoutParams = LinearLayout.LayoutParams(px(46), px(46))
-        }
-        identity.addView(brand)
-        val identityText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(14), 0, 0, 0) }
-        identityText.addView(TextView(this).apply {
-            text = if (title.isSeries) "AK SERIES  ·  NOW PLAYING" else "AK CINEMA  ·  NOW PLAYING"
-            textSize = 10f; letterSpacing = 0.16f; setTextColor(if (title.isSeries) Accent.INDIGO else Accent.GOLD); setTypeface(null, Typeface.BOLD)
-        })
-        heading = TextView(this).apply {
-            textSize = 27f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
-            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0x99000000.toInt())
-        }
-        identityText.addView(heading); identity.addView(identityText, LinearLayout.LayoutParams(0, -2, 1f))
-        topPanel.addView(identity)
-        topPanel.addView(View(this).apply {
-            background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(if (title.isSeries) Accent.INDIGO else Accent.GOLD, Accent.ION, Color.TRANSPARENT))
-        }, LinearLayout.LayoutParams(px(150), px(2)).apply { topMargin = px(15) })
-        status = TextView(this).apply {
-            textSize = 12f; setTextColor(Accent.DIM); maxLines = 2
-            setPadding(px(12), px(8), px(12), px(8))
-            background = GradientDrawable().apply {
-                cornerRadius = px(14).toFloat(); setColor(0xAA101827.toInt())
-                setStroke(px(1), 0x44FFFFFF)
-            }
-        }
-        topPanel.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(10) })
-        overlay.addView(topPanel, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
 
+        overlay = FrameLayout(this)
+        overlay.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xE80A0D13.toInt(), 0xA50A0D13.toInt(), 0x240A0D13, Color.TRANSPARENT))
+        }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(0xF6080B14.toInt(), 0xC80A1020.toInt(), Color.TRANSPARENT))
-        }, FrameLayout.LayoutParams(-1, px(250), Gravity.BOTTOM))
+                intArrayOf(0xEF080B10.toInt(), 0xB5080B10.toInt(), 0x24080B10, Color.TRANSPARENT))
+        }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
+
+        val brand = ImageView(this).apply {
+            setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "AK TV"; alpha = 0.94f
+        }
+        overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {
+            leftMargin = px(42); topMargin = px(30)
+        })
+        val clock = android.widget.TextClock(this).apply {
+            format12Hour = "h:mm"; format24Hour = "HH:mm"
+            textSize = 16f; setTextColor(Accent.TEXT)
+            setShadowLayer(px(10).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
+        }
+        overlay.addView(clock, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+            rightMargin = px(40); topMargin = px(34)
+        })
+
+        val info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, px(8))
+        }
+        info.addView(TextView(this).apply {
+            text = if (title.isSeries) "AK SERIES  /  NOW PLAYING" else "AK CINEMA  /  NOW PLAYING"
+            textSize = 10f; letterSpacing = 0.17f
+            setTextColor(if (title.isSeries) Accent.INDIGO else Accent.GOLD)
+            setTypeface(null, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(9) })
+        heading = TextView(this).apply {
+            textSize = 34f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
+            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(heading, LinearLayout.LayoutParams(-1, -2))
+        episodeLine = TextView(this).apply {
+            textSize = 13f; letterSpacing = 0.02f; setTextColor(0xFFD6DCE5.toInt()); maxLines = 1
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(episodeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(7) })
+        description = TextView(this).apply {
+            textSize = 14f; setTextColor(0xFFB6C0CD.toInt()); maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(description, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(8) })
+        status = TextView(this).apply {
+            textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
+            setPadding(px(12), px(7), px(12), px(7))
+            background = GradientDrawable().apply {
+                cornerRadius = px(14).toFloat(); setColor(0xB9101721.toInt())
+                setStroke(px(1), 0x38FFFFFF)
+            }
+        }
+        info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
+        val maxInfoWidth = (resources.displayMetrics.widthPixels - px(90)).coerceAtLeast(px(260)).coerceAtMost(px(860))
+        overlay.addView(info, FrameLayout.LayoutParams(maxInfoWidth, -2, Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(42); bottomMargin = px(190)
+        })
+
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(button("Back") { finish() })
         row.addView(button("Sources") { showSources() })
@@ -194,7 +246,7 @@ class MoviePlayerActivity : Activity() {
             isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
         }
         overlay.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
-            leftMargin = px(32); rightMargin = px(32); bottomMargin = px(102)
+            leftMargin = px(36); rightMargin = px(36); bottomMargin = px(104)
         })
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         spinner = ProgressBar(this).apply {
@@ -233,7 +285,13 @@ class MoviePlayerActivity : Activity() {
     }
 
     private fun updateTitle() {
-        heading.text = titleName.ifBlank { "TMDB ${title.id}" } + if (title.isSeries) " · S${title.season} E${title.episode}" else ""
+        heading.text = titleName.ifBlank { "TMDB ${title.id}" }
+        episodeLine.text = if (title.isSeries) {
+            "SEASON ${title.season}  ·  EPISODE ${title.episode}" + currentEpisodeName.takeIf { it.isNotBlank() }?.let { "  ·  $it" }.orEmpty()
+        } else listOf(year, genres).filter { it.isNotBlank() }.joinToString("  ·  ")
+        episodeLine.visibility = if (episodeLine.text.isBlank()) View.GONE else View.VISIBLE
+        description.text = currentDescription
+        description.visibility = if (currentDescription.isBlank()) View.GONE else View.VISIBLE
         episodesButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
         episodesButton.isEnabled = true
         nextButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
@@ -499,6 +557,7 @@ class MoviePlayerActivity : Activity() {
     private fun changeEpisode(next: FrostTitle) {
         captureProgress(); generation++; lookup?.cancel(true); resolver.cancel(); releasePlayer()
         title = next; currentSource = null; sources = emptyList(); frame = false; desiredPlay = true
+        currentEpisodeName = ""; currentDescription = ""
         prefs.edit().putInt("last_season_${title.catalogKey}", title.season).putInt("last_ep_${title.catalogKey}", title.episode).apply()
         restoreProgress(); updateTitle(); begin(provider)
     }

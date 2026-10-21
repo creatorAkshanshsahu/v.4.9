@@ -43,9 +43,25 @@
             app:shutter_background_color="@android:color/transparent"/>
         <View android:id="@+id/playerScrim" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="@drawable/scrim_player" android:alpha="0"/>
-        <LinearLayout android:id="@+id/infoCard" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp" android:layout_marginBottom="34dp" android:orientation="horizontal"
-            android:gravity="center_vertical" android:minWidth="420dp" android:paddingStart="18dp" android:paddingEnd="24dp"
+        <LinearLayout android:id="@+id/playerBrand" android:layout_width="112dp" android:layout_height="wrap_content"
+            android:layout_gravity="top|start" android:layout_marginStart="40dp" android:layout_marginTop="26dp"
+            android:orientation="vertical" android:gravity="center_horizontal" android:alpha="0" android:contentDescription="AK TV">
+            <ImageView android:layout_width="72dp" android:layout_height="46dp" android:src="@drawable/ic_brand" android:scaleType="fitCenter"/>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
+                android:textColor="@color/text" android:textSize="11sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.18"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"
+            android:layout_marginBottom="28dp" android:orientation="vertical">
+            <LinearLayout android:id="@+id/infoActions" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="center_vertical|end" android:visibility="gone">
+                <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>
+                <TextView android:id="@+id/infoSourceAction" style="@style/Widget.AKTV.PlayerAction" android:text="SOURCE"/>
+                <TextView android:id="@+id/infoQualityAction" style="@style/Widget.AKTV.PlayerAction" android:text="PICTURE QUALITY"/>
+                <TextView android:id="@+id/infoRetryAction" style="@style/Widget.AKTV.PlayerAction" android:text="RETRY"/>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/infoCard" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:minWidth="420dp" android:paddingStart="18dp" android:paddingEnd="24dp"
             android:paddingTop="16dp" android:paddingBottom="16dp" android:alpha="0">
             <FrameLayout android:id="@+id/infoLogoBox" android:layout_width="64dp" android:layout_height="64dp">
                 <ImageView android:id="@+id/infoLogo" android:layout_width="42dp" android:layout_height="42dp"
@@ -83,15 +99,9 @@
                 <TextView android:id="@+id/infoNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text_faint" android:textSize="11sp" android:visibility="gone"/>
-                <LinearLayout android:id="@+id/infoActions" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:orientation="horizontal" android:gravity="center_vertical|end" android:visibility="gone">
-                    <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>
-                    <TextView android:id="@+id/infoSourceAction" style="@style/Widget.AKTV.PlayerAction" android:text="SOURCE"/>
-                    <TextView android:id="@+id/infoQualityAction" style="@style/Widget.AKTV.PlayerAction" android:text="PICTURE QUALITY"/>
-                    <TextView android:id="@+id/infoRetryAction" style="@style/Widget.AKTV.PlayerAction" android:text="RETRY"/>
-                </LinearLayout>
                 <TextView android:id="@+id/infoHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="7dp" android:textColor="@color/text_faint" android:textSize="11sp"/>
+            </LinearLayout>
             </LinearLayout>
         </LinearLayout>
         <TextClock android:id="@+id/playerClock" android:layout_width="wrap_content" android:layout_height="wrap_content"

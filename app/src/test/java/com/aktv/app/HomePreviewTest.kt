@@ -61,8 +61,12 @@ class HomePreviewTest {
             root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.ic_brand)
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF06121C.toInt(), 0xFF0E4459.toInt(), 0xFF17265C.toInt(), 0xFF080C17.toInt()))
+            root.findViewById<ImageView>(R.id.heroBackdrop).apply {
+                setImageResource(R.drawable.home_hero_cinematic); alpha = 1f
+            }
+            root.findViewById<View>(R.id.heroPreview).visibility = View.GONE
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
-            val heroActions = if (movies) listOf("▶   Explore title") else listOf("▶   Watch live", "+   My favorites")
+            val heroActions = if (movies) listOf("▶   Details") else listOf("▶   Play Live", "ⓘ   Details")
             heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
                     text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)
@@ -107,7 +111,7 @@ class HomePreviewTest {
                         override fun onBindViewHolder(item: VH, index: Int) {
                             val tile = item.itemView
                             HomeChrome.styleTile(tile, movies, compact, 1f)
-                            val colors = listOf(0xFF244D56.toInt(), 0xFF40385A.toInt(), 0xFF5A4532.toInt(), 0xFF294950.toInt())
+                            val colors = listOf(0xFF244D56.toInt(), 0xFF40385A.toInt(), 0xFF5A4532.toInt(), 0xFF294950.toInt(), 0xFF4A2E54.toInt())
                             if (movies) {
                                 val titles = listOf("The Last Horizon", "Night Signal", "Paper Skies", "Velocity")
                                 tile.background = Ui.pill(1f, Color.TRANSPARENT, 14f).apply {
@@ -117,18 +121,26 @@ class HomePreviewTest {
                                     text = titles[index % 4]; textSize = if (compact) 13f else 18f; setTextColor(Color.WHITE)
                                     background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[index % 4], 0xFF09131E.toInt()))
                                 }
+                                tile.findViewById<ImageView>(R.id.poster).setImageResource(listOf(
+                                    R.drawable.home_hero_cinematic, R.drawable.home_nature_art,
+                                    R.drawable.home_sports_art, R.drawable.home_family_art)[index % 4])
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
                                 tile.findViewById<TextView>(R.id.posterMeta).text = "Sample artwork"
                             } else {
-                                tile.background = Ui.pill(1f, Ui.mix(Accent.SURFACE, colors[index % 4], 0.35f), 14f).apply {
+                                tile.background = Ui.pill(1f, Ui.mix(Accent.SURFACE, colors[index % 5], 0.35f), 14f).apply {
                                     if (position == 0 && index == 0) setStroke(3, Accent.SIGNAL)
+                                }
+                                tile.findViewById<ImageView>(R.id.channelArt).apply {
+                                    setImageResource(listOf(R.drawable.home_hero_cinematic, R.drawable.home_sports_art,
+                                        R.drawable.home_nature_art, R.drawable.home_family_art, R.drawable.home_music_art)[index % 5])
+                                    visibility = View.VISIBLE
                                 }
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
-                                    visibility = View.VISIBLE; text = listOf("SS", "YAY", "ZEE", "N18")[index % 4]
+                                    visibility = View.VISIBLE; text = "AK"
                                     setTextColor(0xFFB0F1E8.toInt()); textSize = if (compact) 18f else 23f
                                 }
-                                tile.findViewById<TextView>(R.id.name).text = listOf("Star Sports 1 Hindi HD", "Sony YAY Hindi", "Zee Cinema HD", "News18 India")[index % 4]
+                                tile.findViewById<TextView>(R.id.name).text = listOf("AK News", "AK Sport", "AK Reality", "AK Kids", "AK Hits")[index % 5]
                             }
                         }
                     }

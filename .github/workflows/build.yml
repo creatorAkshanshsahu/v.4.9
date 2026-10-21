@@ -68,7 +68,13 @@ jobs:
       - name: Publish native entrance preview
         if: always()
         run: python3 .github/scripts/report-ui-previews.py entrance
-      - name: Upload exact native UI, logo and entrance previews
+      - name: Publish native VOD player preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py vod-player
+      - name: Publish native live player preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py live-player
+      - name: Upload native home, entrance and player previews
         if: always()
         uses: actions/upload-artifact@v4
         with:
