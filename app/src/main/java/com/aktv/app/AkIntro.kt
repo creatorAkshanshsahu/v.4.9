@@ -30,7 +30,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.ic_brand) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.TEXT; textAlign = Paint.Align.CENTER; textSize = 34 * dp; letterSpacing = 0.08f }
-    private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.FAINT; textAlign = Paint.Align.CENTER; textSize = 9 * dp }
+    private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
     private val soundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.ION; textAlign = Paint.Align.CENTER; textSize = 8 * dp; letterSpacing = 0.08f }
     private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val destination = RectF()
@@ -161,7 +161,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         val appear = (progress / 0.30f).coerceIn(0f, 1f)
         val settle = (progress / 0.46f).coerceIn(0f, 1f)
         val logoY = height * if (shortScreen) 0.37f else 0.38f
-        val radius = minOf(width * 0.42f, height * 0.74f)
+        val radius = minOf(width * 0.32f, height * 0.55f)
         haloPaint.color = Accent.INDIGO
         haloPaint.alpha = (alpha * 0.10f * settle).toInt()
         canvas.drawCircle(centerX, logoY, radius, haloPaint)
