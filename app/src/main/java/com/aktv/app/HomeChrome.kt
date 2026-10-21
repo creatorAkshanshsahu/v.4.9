@@ -91,6 +91,16 @@ internal object HomeChrome {
                 marginEnd = px(if (m.compact) 24 else 56)
             }
         }
+        val heroLogoLp = root.findViewById<View>(R.id.heroLogo).layoutParams as FrameLayout.LayoutParams
+        root.findViewById<TextView>(R.id.heroLogoCaption).apply {
+            (layoutParams as FrameLayout.LayoutParams).apply {
+                width = heroLogoLp.width; height = px(22)
+                gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                topMargin = heroLogoLp.topMargin + heroLogoLp.height
+                marginEnd = heroLogoLp.marginEnd
+            }
+            textSize = if (m.compact) 9f else 12f
+        }
         root.findViewById<View>(R.id.heroMono).let {
             (it.layoutParams as FrameLayout.LayoutParams).apply {
                 gravity = android.view.Gravity.TOP or android.view.Gravity.END

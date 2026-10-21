@@ -16,6 +16,10 @@
         </FrameLayout>
         <ImageView android:id="@+id/heroLogo" android:layout_width="210dp" android:layout_height="132dp"
             android:layout_gravity="top|end" android:layout_marginTop="42dp" android:layout_marginEnd="56dp" android:scaleType="fitCenter"/>
+        <TextView android:id="@+id/heroLogoCaption" android:layout_width="170dp" android:layout_height="wrap_content"
+            android:layout_gravity="top|end" android:layout_marginTop="150dp" android:layout_marginEnd="56dp"
+            android:gravity="center" android:text="AK NEWS" android:textColor="@color/text" android:textSize="12sp"
+            android:fontFamily="@font/sora_semibold" android:letterSpacing="0.18" android:visibility="gone"/>
         <TextView android:id="@+id/heroMono" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="top|end" android:layout_marginTop="42dp" android:layout_marginEnd="68dp" android:textColor="#FFFFFF"
             android:textSize="68sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false" android:visibility="gone"/>

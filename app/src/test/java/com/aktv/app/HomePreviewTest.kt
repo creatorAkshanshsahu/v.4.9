@@ -63,7 +63,8 @@ class HomePreviewTest {
                 text = if (movies) "FEATURED MOVIE" else "●  LIVE NOW"
                 setTextColor(if (movies) Accent.GOLD else Accent.SIGNAL)
             }
-            root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.brand_aktv_user)
+            root.findViewById<ImageView>(R.id.heroLogo).setImageResource(if (movies) R.drawable.brand_aktv_user else R.drawable.brand_ak_mark)
+            root.findViewById<TextView>(R.id.heroLogoCaption).visibility = if (movies) View.GONE else View.VISIBLE
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF091521.toInt(), 0xFF0C1D2A.toInt(), 0xFF07111B.toInt()))
             root.findViewById<ImageView>(R.id.heroBackdrop).apply { setImageDrawable(null); visibility = View.GONE; alpha = 0f }
