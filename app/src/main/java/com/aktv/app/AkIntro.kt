@@ -8,7 +8,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.media.AudioAttributes
 import android.view.accessibility.AccessibilityEvent
@@ -24,12 +23,9 @@ import android.view.animation.DecelerateInterpolator
 class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     var onReveal: (() -> Unit)? = null
     var onDone: (() -> Unit)? = null
-    var wordmark: Typeface? = null
-        set(value) { field = value; titlePaint.typeface = value }
     private val dp get() = resources.displayMetrics.density
-    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.ic_brand) }.getOrNull()
+    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.brand_aktv_user) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.TEXT; textAlign = Paint.Align.CENTER; textSize = 42 * dp; letterSpacing = 0.08f }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
     private val destination = RectF()
     private val soundTarget = RectF()
@@ -160,7 +156,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         val settle = (progress / 0.46f).coerceIn(0f, 1f)
         val logoY = height * if (shortScreen) 0.37f else 0.38f
         val scale = 0.96f + 0.04f * settle
-        val markWidth = minOf(width * (if (shortScreen) 0.74f else 0.82f), height * 1.40f) * scale
+        val markWidth = minOf(width * (if (shortScreen) 0.68f else 0.58f), height * 0.76f) * scale
         val markHeight = markWidth * ((mark?.intrinsicHeight ?: 1).toFloat() / (mark?.intrinsicWidth ?: 1).coerceAtLeast(1))
         destination.set(centerX - markWidth / 2, logoY - markHeight / 2, centerX + markWidth / 2, logoY + markHeight / 2)
         mark?.let {
@@ -168,10 +164,6 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             it.setBounds(destination.left.toInt(), destination.top.toInt(), destination.right.toInt(), destination.bottom.toInt())
             it.draw(canvas)
         }
-
-        titlePaint.alpha = (alpha * ((progress - 0.12f) / 0.36f).coerceIn(0f, 1f)).toInt()
-        val titleY = maxOf(destination.bottom + 38 * dp, height * if (shortScreen) 0.74f else 0.77f)
-        canvas.drawText("AK TV", centerX, titleY, titlePaint)
 
         hintPaint.alpha = (alpha * 0.74f).toInt()
         canvas.drawText("Loading...", centerX, height * 0.93f, hintPaint)

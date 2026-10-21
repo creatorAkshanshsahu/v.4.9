@@ -32,9 +32,10 @@ internal object HomeChrome {
         rail.layoutParams.width = m.rail
         rail.setPadding(px(if (m.compact) 7 else 10), px(if (m.compact) 10 else 20), px(if (m.compact) 7 else 10), px(10))
         root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply {
-            width = px(if (m.compact) 64 else 92); height = px(if (m.compact) 40 else 58)
+            width = px(if (m.compact) 76 else 100); height = px(if (m.compact) 66 else 86)
         }
-        (root.findViewById<TextView>(R.id.akText).layoutParams as LinearLayout.LayoutParams).bottomMargin = px(if (m.compact) 6 else 10)
+        root.findViewById<TextView>(R.id.akText).visibility = View.GONE
+        root.findViewById<View>(R.id.navProfile).visibility = if (m.phone || screenHeight / dp < 400) View.GONE else View.VISIBLE
         root.findViewById<TextView>(R.id.railTagline).apply {
             textSize = if (m.compact) 5.5f else 6.5f
             visibility = if (m.compact && screenHeight / dp < 380) View.GONE else View.VISIBLE
@@ -51,7 +52,7 @@ internal object HomeChrome {
                 textSize = if (shortScreen) 9f else if (m.compact) 10f else 11f
             }
         }
-        root.findViewById<TextView>(R.id.navVersion).visibility = if (screenHeight / dp < 380) View.GONE else View.VISIBLE
+        root.findViewById<TextView>(R.id.navVersion).visibility = View.GONE
         (root.findViewById<View>(R.id.content).layoutParams as FrameLayout.LayoutParams).marginStart = m.rail
         root.findViewById<View>(R.id.topBar).apply {
             visibility = if (m.header == 0) View.GONE else View.VISIBLE
@@ -62,8 +63,7 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.sectionKicker).textSize = if (m.compact) 8f else 9f
         root.findViewById<View>(R.id.librarySummary).visibility = if (screenWidth / dp < 800) View.GONE else View.VISIBLE
         root.findViewById<View>(R.id.heroMedia).apply {
-            // The selected art is an edge-to-edge backdrop behind the title bar and the first shelf,
-            // rather than a floating thumbnail card. Keep the shelf reservation below unchanged.
+            // Extend the native gradient/glow field behind the hero only; the content rows remain independent native cards.
             (layoutParams as FrameLayout.LayoutParams).apply {
                 val backdropFraction = when { m.phone && !m.compact -> 0.56f; m.compact -> 0.72f; else -> 0.78f }
                 height = maxOf((screenHeight * backdropFraction).toInt(), m.header + m.hero)
@@ -75,23 +75,35 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.heroArea).layoutParams.height = m.hero
         root.findViewById<View>(R.id.heroText).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                width = ((screenWidth - m.rail - m.margin * 2) * 0.70f).toInt().coerceAtLeast(px(220))
+                width = ((screenWidth - m.rail - m.margin * 2) * 0.58f).toInt().coerceAtLeast(px(220))
                 marginStart = m.margin + px(if (m.compact) 16 else 24)
                 bottomMargin = px(if (m.compact) 13 else 22)
             }
         }
         root.findViewById<TextView>(R.id.heroTitle).apply { textSize = if (m.compact) 24f else if (movies) 34f else 38f; maxLines = if (m.compact) 1 else 2 }
-        root.findViewById<TextView>(R.id.heroDesc).maxLines = if (m.compact || !movies) 1 else 2
+        root.findViewById<TextView>(R.id.heroDesc).maxLines = if (m.compact) 1 else 2
         root.findViewById<View>(R.id.heroChips).let { (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 10 else 16) }
         root.findViewById<View>(R.id.heroLogo).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                width = px(if (m.compact) 128 else 210); height = px(if (m.compact) 80 else 132)
+                width = px(if (m.compact) 118 else 170); height = px(if (m.compact) 76 else 108)
+                gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                topMargin = m.header + ((m.hero - height).coerceAtLeast(0) / 2) + px(24)
                 marginEnd = px(if (m.compact) 24 else 56)
             }
         }
-        root.findViewById<View>(R.id.heroMono).let { (it.layoutParams as FrameLayout.LayoutParams).marginEnd = px(if (m.compact) 36 else 68) }
-        root.findViewById<View>(R.id.heroTagline).let { (it.layoutParams as FrameLayout.LayoutParams).topMargin = px(if (m.compact) 46 else 72) }
-        root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 16), 0, px(24))
+        root.findViewById<View>(R.id.heroMono).let {
+            (it.layoutParams as FrameLayout.LayoutParams).apply {
+                gravity = android.view.Gravity.TOP or android.view.Gravity.END
+                topMargin = m.header + ((m.hero - px(if (m.compact) 76 else 108)).coerceAtLeast(0) / 2) + px(24)
+                marginEnd = px(if (m.compact) 36 else 68)
+            }
+        }
+        root.findViewById<View>(R.id.heroTagline).let { view ->
+            (view.layoutParams as FrameLayout.LayoutParams).topMargin = px(if (m.compact) 46 else if (screenHeight / dp < 650) 42 else 68)
+            (view as TextView).textSize = if (m.compact) 8f else 11f
+        }
+        root.findViewById<TextView>(R.id.heroSubheading).textSize = if (m.compact) 14f else 20f
+        root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 6 else 8), 0, px(18))
         (root.findViewById<View>(R.id.status).layoutParams as LinearLayout.LayoutParams).marginStart = m.margin
         root.requestLayout()
         return m
@@ -102,15 +114,18 @@ internal object HomeChrome {
         title.textSize = if (compact) 15f else 19f
         (title.parent as View).let { (it.layoutParams as ViewGroup.MarginLayoutParams).marginStart = ((if (compact) 20 else 28) * dp).toInt() }
         val rv = row.findViewById<RecyclerView>(R.id.rowList)
-        rv.setPadding(((if (compact) 14 else 20) * dp).toInt(), (8 * dp).toInt(), (40 * dp).toInt(), (12 * dp).toInt())
+        rv.setPadding(((if (compact) 14 else 20) * dp).toInt(), (8 * dp).toInt(), (40 * dp).toInt(), (8 * dp).toInt())
     }
 
-    fun styleTile(tile: View, poster: Boolean, compact: Boolean, dp: Float) {
+    fun styleTile(tile: View, poster: Boolean, compact: Boolean, dp: Float, landscape: Boolean = false) {
         val lp = tile.layoutParams as ViewGroup.MarginLayoutParams
         lp.setMargins((6 * dp).toInt(), (4 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt())
-        if (!poster) {
+        if (landscape) {
+            lp.width = ((if (compact) 150 else 170) * dp).toInt()
+            lp.height = ((if (compact) 84 else 96) * dp).toInt()
+        } else if (!poster) {
             lp.width = ((if (compact) 142 else 158) * dp).toInt()
-            lp.height = ((if (compact) 80 else 96) * dp).toInt()
+            lp.height = ((if (compact) 76 else 90) * dp).toInt()
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 14f
         } else {

@@ -3,20 +3,21 @@
     <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="match_parent"
         android:layout_gravity="top" android:layout_marginStart="144dp">
         <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent"/>
+        <View android:id="@+id/heroGlow" android:layout_width="480dp" android:layout_height="480dp"
+            android:layout_gravity="top|end" android:layout_marginTop="-150dp" android:layout_marginEnd="100dp"
+            android:background="@drawable/home_glow"/>
         <ImageView android:id="@+id/heroBackdrop" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:scaleType="centerCrop" android:alpha="0"/>
-        <FrameLayout android:id="@+id/heroPreview" android:layout_width="match_parent" android:layout_height="match_parent" android:alpha="0">
+            android:scaleType="centerCrop" android:visibility="gone" android:alpha="0"/>
+        <FrameLayout android:id="@+id/heroPreview" android:layout_width="match_parent" android:layout_height="match_parent" android:alpha="0" android:visibility="gone">
             <androidx.media3.ui.PlayerView android:id="@+id/heroPreviewPv" android:layout_width="match_parent"
                 android:layout_height="match_parent" android:focusable="false" app:use_controller="false"
                 app:resize_mode="zoom" app:surface_type="texture_view" app:use_artwork="false"
                 app:shutter_background_color="@android:color/transparent"/>
         </FrameLayout>
-        <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_left"/>
-        <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_bottom"/>
         <ImageView android:id="@+id/heroLogo" android:layout_width="210dp" android:layout_height="132dp"
-            android:layout_gravity="center_vertical|end" android:layout_marginEnd="56dp" android:scaleType="fitCenter"/>
+            android:layout_gravity="top|end" android:layout_marginTop="42dp" android:layout_marginEnd="56dp" android:scaleType="fitCenter"/>
         <TextView android:id="@+id/heroMono" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical|end" android:layout_marginEnd="68dp" android:textColor="#FFFFFF"
+            android:layout_gravity="top|end" android:layout_marginTop="42dp" android:layout_marginEnd="68dp" android:textColor="#FFFFFF"
             android:textSize="68sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false" android:visibility="gone"/>
         <TextView android:id="@+id/heroTagline" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="top|end" android:layout_marginTop="72dp" android:layout_marginEnd="34dp"
@@ -47,9 +48,9 @@
             android:overScrollMode="never" android:scrollbars="none">
             <LinearLayout android:id="@+id/phoneNav" android:layout_width="wrap_content" android:layout_height="match_parent"
                 android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:id="@+id/phoneBrand" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginEnd="8dp" android:text="AK TV" android:textColor="@color/text"
-                    android:textSize="12sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.08"/>
+                <ImageView android:id="@+id/phoneBrand" android:layout_width="48dp" android:layout_height="42dp"
+                    android:layout_marginEnd="8dp" android:src="@drawable/brand_aktv_user" android:scaleType="fitCenter"
+                    android:contentDescription="AK TV logo"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
                 <TextView android:id="@+id/phoneV2" style="@style/Widget.AKTV.PhonePill" android:text="Always on"/>
                 <TextView android:id="@+id/phoneMovies" style="@style/Widget.AKTV.PhonePill" android:text="Movies"/>
@@ -69,6 +70,9 @@
                 <TextView android:id="@+id/heroTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="12dp" android:maxLines="2" android:ellipsize="end" android:textColor="@color/text"
                     android:textSize="32sp" android:fontFamily="@font/sora_bold" android:lineSpacingMultiplier="1.03" android:includeFontPadding="false"/>
+                <TextView android:id="@+id/heroSubheading" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:text="A clearer view of what’s next."
+                    android:textColor="@color/text" android:textSize="18sp" android:fontFamily="@font/sora_semibold"/>
                 <TextView android:id="@+id/heroProg" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_marginTop="10dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text" android:textSize="12sp" android:visibility="gone"/>
                 <ProgressBar android:id="@+id/heroProgress" style="?android:attr/progressBarStyleHorizontal"
@@ -90,16 +94,16 @@
     <LinearLayout android:id="@+id/navRail" android:layout_width="144dp" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
         android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
-        <ImageView android:id="@+id/brandMark" android:layout_width="38dp" android:layout_height="38dp" android:src="@drawable/ic_brand"
-            android:scaleType="fitCenter" android:contentDescription="AK TV"/>
+        <ImageView android:id="@+id/brandMark" android:layout_width="96dp" android:layout_height="82dp" android:src="@drawable/brand_aktv_user"
+            android:scaleType="fitCenter" android:contentDescription="AK TV logo"/>
         <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
-            android:layout_marginTop="4dp" android:layout_marginBottom="6dp" android:textSize="11sp" android:letterSpacing="0.11"
+            android:visibility="gone" android:layout_marginTop="0dp" android:layout_marginBottom="0dp" android:textSize="11sp" android:letterSpacing="0.11"
             android:textColor="@color/text" android:fontFamily="@font/sora_bold"/>
         <TextView android:id="@+id/railTagline" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_marginBottom="20dp" android:gravity="center" android:text="BIGGER STORIES\nBRIGHTER YOU"
             android:textColor="@color/text_faint" android:textSize="6.5sp" android:letterSpacing="0.14"
             android:lineSpacingExtra="1dp" android:fontFamily="@font/sora_regular" android:includeFontPadding="false"/>
-        <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live TV" android:drawableTop="@drawable/ic_nav_live"
+        <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live" android:drawableTop="@drawable/ic_nav_live"
             android:nextFocusDown="@id/segV2" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/segV2" style="@style/Widget.AKTV.RailItem" android:text="Always on" android:drawableTop="@drawable/ic_nav_v2"
             android:nextFocusUp="@id/segLive" android:nextFocusDown="@id/segSites" android:nextFocusRight="@id/rows"/>
@@ -110,7 +114,20 @@
         <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
             android:nextFocusUp="@id/segSeries" android:nextFocusRight="@id/rows"/>
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
+        <LinearLayout android:id="@+id/navProfile" android:layout_width="match_parent" android:layout_height="58dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="2dp" android:paddingEnd="2dp">
+            <TextView android:id="@+id/profileAvatar" android:layout_width="34dp" android:layout_height="34dp" android:gravity="center"
+                android:background="@drawable/profile_avatar" android:text="A" android:textColor="@color/text"
+                android:textSize="14sp" android:fontFamily="@font/sora_bold"/>
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:layout_marginStart="8dp" android:orientation="vertical">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Good evening"
+                    android:textColor="@color/text_faint" android:textSize="8sp" android:maxLines="1" android:ellipsize="end"/>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Guest"
+                    android:textColor="@color/text" android:textSize="11sp" android:fontFamily="@font/sora_semibold"/>
+            </LinearLayout>
+        </LinearLayout>
         <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.31"
-            android:layout_marginTop="10dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
+            android:visibility="gone" android:layout_marginTop="0dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
     </LinearLayout>
 </FrameLayout>

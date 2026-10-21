@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         data class Mv(val m: Movies.Title) : Tile()
         object Hint : Tile()
     }
-    class Row(val title: String, var tiles: List<Tile>)
+    class Row(val title: String, var tiles: List<Tile>, val landscape: Boolean = false)
 
     // movie & series shelves (filled the first time the tab opens)
     private val vodRows = arrayOf(listOf<Row>(), listOf<Row>()); private val vodLoading = booleanArrayOf(false, false)   // [0] Movies, [1] Series
@@ -89,6 +89,7 @@ class MainActivity : AppCompatActivity() {
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var shown = listOf<Channel>()
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
+    private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
     private var favs = setOf<String>(); private var heroTile: Tile? = null
     private val accents = HashMap<String, Int>()
     private var tab = 0; private var current = -1
@@ -155,11 +156,11 @@ class MainActivity : AppCompatActivity() {
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
     private lateinit var heroText: View; private lateinit var heroDot: View; private lateinit var heroBadge: TextView
-    private lateinit var heroTitle: TextView; private lateinit var heroChips: LinearLayout; private lateinit var heroTagline: View
+    private lateinit var heroTitle: TextView; private lateinit var heroSubheading: TextView; private lateinit var heroChips: LinearLayout; private lateinit var heroTagline: View
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
-    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Accent.ABYSS, Accent.ABYSS)) }
+    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF091521.toInt(), 0xFF0C1D2A.toInt(), 0xFF07111B.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
@@ -205,7 +206,8 @@ class MainActivity : AppCompatActivity() {
         phoneSegs = listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
-        heroTitle = findViewById(R.id.heroTitle); heroChips = findViewById(R.id.heroChips); heroTagline = findViewById(R.id.heroTagline)
+        heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
+        heroChips = findViewById(R.id.heroChips); heroTagline = findViewById(R.id.heroTagline)
         heroOrb = findViewById(R.id.heroOrb); heroLogo = findViewById(R.id.heroLogo); heroMono = findViewById(R.id.heroMono)
         heroProg = findViewById(R.id.heroProg); heroProgress = findViewById(R.id.heroProgress)
         heroDesc = findViewById(R.id.heroDesc); heroNext = findViewById(R.id.heroNext)
@@ -378,7 +380,6 @@ class MainActivity : AppCompatActivity() {
         styleSegs(); fillHero(null); loadChannels()
 
         // A short, skippable reveal. No hidden movie-catalogue warm-up competing with live decoding.
-        intro.wordmark = fSemi
         home.alpha = 0f; home.translationY = 0f
         intro.onReveal = { home.alpha = 1f }
         intro.onDone = {
@@ -388,6 +389,7 @@ class MainActivity : AppCompatActivity() {
         }
         Movies.diskDir = File(filesDir, "tmdb").apply { mkdirs() }
         Movies.timingListener = { event -> android.util.Log.i("AKTV-VOD", "${event.stage} ${event.elapsedMs}ms cache=${event.cacheHit}") }
+        loadHomeTrending()
         // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
         findViewById<TextView>(R.id.navVersion).text = appVersion
@@ -618,6 +620,23 @@ class MainActivity : AppCompatActivity() {
         status.text = msg; status.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
     }
 
+    /** Populate the home-only trending strip from the existing TMDB catalogue without blocking the intro or live list. */
+    private fun loadHomeTrending() {
+        if (trendingLoading || trendingTitles.isNotEmpty()) return
+        trendingLoading = true
+        io.execute {
+            val loaded = try { Movies.shelf(Movies.MOVIE_SHELVES.first()).take(20) } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                trendingLoading = false
+                trendingFailed = loaded.isEmpty()
+                if (!isFinishing && !isDestroyed) {
+                    if (loaded.isNotEmpty()) trendingTitles = loaded
+                    if (tab == 0) refreshRowsKeepFocus(requestFocus = false)
+                }
+            }
+        }
+    }
+
     /** Shows the saved lists instantly, then re-reads both update links so new / changed channels arrive on their own. */
     private fun loadChannels() {
         lastRefresh = System.currentTimeMillis()
@@ -663,6 +682,31 @@ class MainActivity : AppCompatActivity() {
         val keys = listOf(c.key) + prefs.getString("recent_ch", "")!!.split(",").filter { it.isNotEmpty() && it != c.key }
         prefs.edit().putString("recent_ch", keys.take(20).joinToString(",")).apply()
     }
+    private fun featuredChannels(channels: List<Channel>): List<Channel> = channels.sortedWith(
+        compareBy<Channel> {
+            val label = "${it.name} ${it.category}".lowercase()
+            when {
+                "news" in label -> 0
+                listOf("sport", "cricket", "football", "tennis").any { it in label } -> 1
+                listOf("entertain", "movie", "drama", "serial").any { it in label } -> 2
+                listOf("kids", "child", "cartoon").any { it in label } -> 3
+                "music" in label -> 4
+                else -> 5
+            }
+        }.thenBy { it.name.lowercase() }
+    ).take(24)
+
+    private fun liveRows(channels: List<Channel>, alwaysOn: Boolean = false): List<Row> {
+        val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
+        return buildList {
+            if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
+            if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
+            add(Row(FAV, favTiles()))
+            addAll(recentRow())
+            addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+        }
+    }
+
     private fun continueRow(): List<Row> {
         val type = if (tab == 3) "series" else "movie"
         val l = Movies.recent(prefs).filter { it.type == type }.map { Tile.Mv(it) }
@@ -733,16 +777,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshRows() {
         rows = when (tab) {
-            0 -> listOf(Row(FAV, favTiles())) + recentRow() + all.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
-            1 -> listOf(Row(FAV, favTiles())) + recentRow() + allV2.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
+            0 -> liveRows(all)
+            1 -> liveRows(allV2, alwaysOn = true)
             else -> { loadVod(tab); continueRow() + vodRows[tab - 2] }
         }
         setHeroCollapsed(false)
         inner.clear()
         rowAdapter.notifyDataSetChanged()
         val first: Tile? = when (tab) {
-            0 -> pool().firstOrNull()?.let { Tile.Ch(it) }
-            1 -> pool().firstOrNull()?.let { Tile.Ch(it) }
+            0, 1 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
             else -> rows.firstOrNull()?.tiles?.firstOrNull()
         }
         setHero(first, immediate = true)
@@ -753,11 +796,12 @@ class MainActivity : AppCompatActivity() {
         val s = favs.toMutableSet(); val added = s.add(c.key); if (!added) s.remove(c.key)
         favs = s; prefs.edit().putStringSet("favs", s).apply()
         Toast.makeText(this, if (added) "Added to favorites" else "Removed from favorites", Toast.LENGTH_SHORT).show()
-        for ((ri, ad) in inner) if (ri > 0) {
+        for ((ri, ad) in inner) {
             val idx = rows.getOrNull(ri)?.tiles?.indexOfFirst { it is Tile.Ch && it.c.key == c.key } ?: -1
             if (idx >= 0) ad.notifyItemChanged(idx, "fav")
         }
-        if (rows.firstOrNull()?.title == FAV) { rows[0].tiles = favTiles(); rowAdapter.notifyItemChanged(0) }
+        val favRow = rows.indexOfFirst { it.title == FAV }
+        if (favRow >= 0) { rows[favRow].tiles = favTiles(); rowAdapter.notifyItemChanged(favRow) }
         (heroTile as? Tile.Ch)?.let { if (it.c.key == c.key) fillHero(it) }
     }
 
@@ -809,31 +853,28 @@ class MainActivity : AppCompatActivity() {
             heroText.animate().alpha(1f).translationX(0f).setDuration(300).setInterpolator(DecelerateInterpolator(2f)).start()
         }.start()
     }
-    /** Tints the still hero panel (shown until the live preview is ready) with the channel's colour. */
+    /** Tints the native, image-free hero gradient with the selected channel's accent. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(Accent.ABYSS, c, 0.24f), Ui.mix(Accent.ABYSS, partner, 0.12f))
+        orbBg.colors = intArrayOf(Ui.mix(0xFF091521.toInt(), partner, 0.12f), Ui.mix(0xFF0C1D2A.toInt(), c, 0.16f), 0xFF07111B.toInt())
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
-    private fun showBackdrop(url: String?) {
-        if (url.isNullOrEmpty()) { heroBackdrop.animate().alpha(0f).setDuration(300).start(); heroOrb.animate().alpha(1f).setDuration(250).start(); return }
-        heroOrb.animate().alpha(0f).setDuration(200).start()
-        heroBackdrop.load(url) {
-            crossfade(180)
-            listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.let { it.background.ifEmpty { it.poster } } == url) heroBackdrop.animate().alpha(1f).setDuration(260).start() })
-        }
-    }
-    /** Local cinematic still fills the hero until a genuine muted Media3 preview renders its first frame. */
+    /** Keep the reference's atmospheric hero native: gradient, typography and accents, never a backdrop image/video. */
     private fun showCinematicFallback() {
         heroBackdrop.animate().cancel(); heroOrb.animate().cancel()
-        heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
-        heroBackdrop.alpha = 1f; heroOrb.alpha = 0f
+        heroBackdrop.setImageDrawable(null); heroBackdrop.alpha = 0f; heroOrb.alpha = 1f
+        heroPreview.visibility = View.GONE
+        stopPreview()
     }
     private fun fillHero(t: Tile?) {
         heroChips.removeAllViews()
-        if (t is Tile.Ch || (t == null && tab < 2)) showCinematicFallback()
-        else if (t !is Tile.Mv) showBackdrop(null)
+        heroBadge.setPadding((9 * dp).toInt(), (3 * dp).toInt(), (9 * dp).toInt(), (3 * dp).toInt())
+        heroBadge.setTextColor(Accent.TEXT)
+        heroBadge.background = Ui.pill(dp, 0x2424D3D0, 16f).apply {
+            setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
+        }
+        showCinematicFallback()
         heroTagline.visibility = if (tab < 2 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
-        schedulePreview((t as? Tile.Ch)?.c)
+        heroSubheading.text = if (tab < 2) "A clearer view of what’s next." else "Find your next story."
         when (t) {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
@@ -872,6 +913,7 @@ class MainActivity : AppCompatActivity() {
                     setTextColor(accent); backgroundTintList = ColorStateList.valueOf(accent)
                 }
                 heroTitle.text = t.m.name
+                heroSubheading.text = if (t.m.isSeries) "Stories that keep going." else "Your next movie night starts here."
                 heroBadge.text = if (t.m.isSeries) "SERIES  /  ON DEMAND" else "MOVIE  /  ON DEMAND"
                 heroChips.addView(chip("▶   Details", true).apply { setOnClickListener {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)
@@ -882,7 +924,7 @@ class MainActivity : AppCompatActivity() {
                 if (t.m.logo.isNotBlank()) heroLogo.load(t.m.logo) {
                     crossfade(180); listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.imdb == t.m.imdb) heroLogo.animate().alpha(1f).setDuration(220).start() })
                 } else {
-                    heroLogo.setImageResource(R.drawable.ic_brand)
+                    heroLogo.setImageResource(R.drawable.brand_aktv_user)
                     heroLogo.animate().alpha(0.92f).setDuration(220).start()
                 }
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
@@ -890,11 +932,11 @@ class MainActivity : AppCompatActivity() {
                 heroDesc.visibility = if (!compact && t.m.description.isNotBlank()) View.VISIBLE else View.GONE
                 ui.removeCallbacks(heroGuideRunnable)
                 glowHero(accent, if (t.m.isSeries) 0xFF493A8A.toInt() else 0xFF815331.toInt())
-                showBackdrop(t.m.background.ifEmpty { t.m.poster })
             }
             else -> {
-                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "Your world. On screen."
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.ic_brand)
+                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
+                heroSubheading.text = "A clearer view of what’s next."
+                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.brand_aktv_user)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
         }
@@ -959,8 +1001,13 @@ class MainActivity : AppCompatActivity() {
         heroProg.visibility = if (n != null) View.VISIBLE else View.GONE
         heroProgress.visibility = heroProg.visibility
         if (n != null) { heroProg.text = progLine("NOW", n); heroProgress.progress = (Epg.progress(n) * 1000).toInt() }
-        val d = n?.desc.orEmpty()
-        heroDesc.text = d; heroDesc.visibility = if (compact || d.isEmpty()) View.GONE else View.VISIBLE
+        val channel = (heroTile as? Tile.Ch)?.c
+        val channelLabel = "${channel?.name.orEmpty()} ${channel?.category.orEmpty()}".lowercase()
+        val fallback = if ("news" in channelLabel) "Live. Global. Independent. Breaking news, bigger perspectives."
+            else "Live TV, curated for your next moment."
+        val d = n?.desc?.takeIf { it.isNotBlank() } ?: fallback
+        heroDesc.text = d
+        heroDesc.visibility = if (compact || tab >= 2) View.GONE else View.VISIBLE
         heroNext.visibility = if (nx != null && !compact) View.VISIBLE else View.GONE
         if (nx != null) heroNext.text = progLine("NEXT", nx, range = false)
     }
@@ -2428,31 +2475,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Rebuilds the rows (e.g. a new "Recently watched" entry) without losing the scroll position. */
-    private fun refreshRowsKeepFocus() {
+    private fun refreshRowsKeepFocus(requestFocus: Boolean = true) {
         val lm = rowsView.layoutManager as LinearLayoutManager
         val pos = lm.findFirstVisibleItemPosition()
         val top = lm.findViewByPosition(pos)?.top ?: 0
         val old = rows.map { it.title }
         rows = when (tab) {
-            0 -> listOf(Row(FAV, favTiles())) + recentRow() + all.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
-            1 -> listOf(Row(FAV, favTiles())) + recentRow() + allV2.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
+            0 -> liveRows(all)
+            1 -> liveRows(allV2, alwaysOn = true)
             else -> continueRow() + vodRows[tab - 2]
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()
         val shift = rows.size - old.size
         if (pos >= 0) lm.scrollToPositionWithOffset((pos + if (pos > 0) shift else 0).coerceAtLeast(0), top)
-        rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
+        if (requestFocus) rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
     }
 
     // ---------- adapters ----------
     private inner class TileAdapter(val row: Row) : RecyclerView.Adapter<VH>() {
         override fun getItemCount() = row.tiles.size
-        override fun getItemViewType(i: Int) = when (row.tiles[i]) { is Tile.Ch -> 0; is Tile.Mv -> 1; else -> 2 }
+        override fun getItemViewType(i: Int) = when {
+            row.landscape && row.tiles[i] is Tile.Mv -> 3
+            row.tiles[i] is Tile.Ch -> 0
+            row.tiles[i] is Tile.Mv -> 1
+            else -> 2
+        }
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
-            val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; else -> R.layout.item_hint }
+            val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
-            HomeChrome.styleTile(v, t == 1, compact, dp)
-            if (t != 1) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }   // posters carry their own card background
+            HomeChrome.styleTile(v, poster = t == 1, landscape = t == 3, compact = compact, dp = dp)
+            if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }
             return VH(v)
         }
         override fun onBindViewHolder(h: VH, i: Int, payloads: MutableList<Any>) {
@@ -2509,16 +2561,27 @@ class MainActivity : AppCompatActivity() {
                     v.setOnLongClickListener { toggleFav(t.c); true }
                 }
                 is Tile.Mv -> {
-                    val img = v.findViewById<ImageView>(R.id.poster)
-                    v.findViewById<TextView>(R.id.posterName).text = t.m.name
-                    img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
-                    v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
-                    v.findViewById<TextView>(R.id.posterMeta).text =
-                        (listOf(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
-                            .filterNotNull()).joinToString("  ·  ")
-                    v.findViewById<TextView>(R.id.posterRank).apply {
-                        visibility = if (i < 10 && row.title.startsWith("Trending", true)) View.VISIBLE else View.GONE
-                        text = (i + 1).toString()
+                    if (row.landscape) {
+                        v.findViewById<ImageView>(R.id.trendingImage).load(t.m.background.ifEmpty { t.m.poster }) {
+                            crossfade(180); size(660, 426); placeholder(null)
+                        }
+                        v.findViewById<TextView>(R.id.trendingTitle).text = t.m.name
+                        v.findViewById<TextView>(R.id.trendingMeta).text =
+                            (listOf(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
+                                .filterNotNull()).joinToString("  ·  ")
+                        v.findViewById<TextView>(R.id.trendingRank).text = "${(i + 1).toString().padStart(2, '0')}  TRENDING"
+                    } else {
+                        val img = v.findViewById<ImageView>(R.id.poster)
+                        v.findViewById<TextView>(R.id.posterName).text = t.m.name
+                        img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
+                        v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
+                        v.findViewById<TextView>(R.id.posterMeta).text =
+                            (listOf(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
+                                .filterNotNull()).joinToString("  ·  ")
+                        v.findViewById<TextView>(R.id.posterRank).apply {
+                            visibility = if (i < 10 && row.title.startsWith("Trending", true)) View.VISIBLE else View.GONE
+                            text = (i + 1).toString()
+                        }
                     }
                     v.setOnFocusChangeListener { x, f ->
                         focusAnim(x, f)
@@ -2533,12 +2596,18 @@ class MainActivity : AppCompatActivity() {
                         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                     }
                 }
-                else -> {}
+                else -> {
+                    v.findViewById<TextView>(R.id.hintText).text = when {
+                        row.title.equals("Trending on AK", true) && trendingFailed -> "Trending titles will appear when the catalogue is available."
+                        row.title.equals("Trending on AK", true) -> "Loading titles from the native catalogue…"
+                        else -> "Hold OK on any channel to keep it here"
+                    }
+                }
             }
         }
     }
 
-    private val tilePool = RecyclerView.RecycledViewPool().apply { setMaxRecycledViews(0, 40); setMaxRecycledViews(1, 40) }
+    private val tilePool = RecyclerView.RecycledViewPool().apply { setMaxRecycledViews(0, 40); setMaxRecycledViews(1, 40); setMaxRecycledViews(3, 24) }
     private val rowAdapter = object : RecyclerView.Adapter<VH>() {
         override fun getItemCount() = rows.size
         override fun onCreateViewHolder(p: ViewGroup, t: Int) =

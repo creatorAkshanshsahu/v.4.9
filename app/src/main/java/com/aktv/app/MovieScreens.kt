@@ -142,9 +142,10 @@ class DetailActivity : Activity() {
             setBackgroundColor(0xE6080B14.toInt())
         }
         toolbar.addView(button("‹  Back", false) { finish() })
-        toolbar.addView(ImageView(this).apply { setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER },
-            LinearLayout.LayoutParams((42 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (20 * dp).toInt() })
-        toolbar.addView(tv(12f, Accent.TEXT, fSemi).apply { text = "  AK TV"; letterSpacing = 0.08f })
+        toolbar.addView(ImageView(this).apply {
+            setImageResource(R.drawable.brand_aktv_user); scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "AK TV"
+        }, LinearLayout.LayoutParams((64 * dp).toInt(), (52 * dp).toInt()).apply { marginStart = (18 * dp).toInt() })
         root.addView(toolbar, FrameLayout.LayoutParams(-1, (60 * dp).toInt(), Gravity.TOP))
         setContentView(root)
 

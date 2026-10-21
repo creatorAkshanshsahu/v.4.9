@@ -35,8 +35,11 @@ class HomeChromeTest {
         assertTrue(content.left >= rail.right)
         val media = root.findViewById<View>(R.id.heroMedia)
         assertTrue(media.left >= rail.right); assertTrue(media.right <= root.width)
-        assertEquals("spotlight art begins at the top edge", 0, media.top)
-        assertTrue("cinematic backdrop extends beyond the reserved hero shelf", media.height > root.findViewById<View>(R.id.heroArea).height)
+        assertEquals("native gradient field begins at the top edge", 0, media.top)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.heroBackdrop).visibility)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.heroPreview).visibility)
+        assertTrue("native gradient field extends beyond the reserved hero shelf", media.height > root.findViewById<View>(R.id.heroArea).height)
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navProfile).visibility)
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)

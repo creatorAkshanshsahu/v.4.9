@@ -150,7 +150,7 @@ class MoviePlayerActivity : Activity() {
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
         val brand = ImageView(this).apply {
-            setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.brand_aktv_user); scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "AK TV"; alpha = 0.94f
         }
         overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {

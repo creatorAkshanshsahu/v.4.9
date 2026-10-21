@@ -86,7 +86,7 @@ class PlayerPreviewTest {
                 intArrayOf(0xE5080B11.toInt(), 0xD90D121A.toInt())).apply {
                 cornerRadius = 16f; setStroke(1, 0x44FFFFFF)
             }
-            layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.ic_brand)
+            layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.brand_aktv_user)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
             layer.findViewById<TextView>(R.id.infoName).text = "AK Sport HD"
             layer.findViewById<TextView>(R.id.infoNow).apply {
