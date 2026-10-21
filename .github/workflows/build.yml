@@ -56,12 +56,6 @@ jobs:
       - name: Publish native TV layout preview
         if: always()
         run: python3 .github/scripts/report-ui-previews.py home-tv
-      - name: Publish native phone layout preview
-        if: always()
-        run: python3 .github/scripts/report-ui-previews.py home-phone
-      - name: Publish native movies layout preview
-        if: always()
-        run: python3 .github/scripts/report-ui-previews.py home-movies
       - name: Publish native logo mark preview
         if: always()
         run: python3 .github/scripts/report-ui-previews.py brand-mark
