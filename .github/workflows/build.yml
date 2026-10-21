@@ -62,6 +62,14 @@ jobs:
       - name: Publish native movies layout preview
         if: always()
         run: python3 .github/scripts/report-ui-previews.py home-movies
+      - name: Upload exact native UI, logo and entrance previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-native-ui-previews
+          path: app/build/reports/ui-preview/*.webp
+          if-no-files-found: error
+          retention-days: 14
       - name: Check current TG, JJTV and Frost native configuration
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true

@@ -42,39 +42,52 @@ class HomePreviewTest {
             val compact = height < 420
             HomeChrome.apply(root, width, height, 1f, movies)
             root.findViewById<TextView>(R.id.sectionTitle).text = if (movies) "Movies" else "Live TV"
-            root.findViewById<TextView>(R.id.sectionKicker).text = if (movies) "FIND YOUR NEXT FAVORITE" else "YOUR FRONT ROW"
+            root.findViewById<TextView>(R.id.sectionKicker).apply {
+                text = if (movies) "YOUR NEXT MOVIE NIGHT" else "LIVE, RIGHT NOW"
+                setTextColor(if (movies) Accent.GOLD else Accent.SIGNAL)
+            }
             root.findViewById<TextView>(R.id.librarySummary).text = "SAMPLE CONTENT · UI PREVIEW"
             root.findViewById<TextView>(R.id.homeClock).text = "8:45 PM"
-            root.findViewById<TextView>(R.id.heroTitle).text = if (movies) "Make it a movie night." else "Star Sports 1 Hindi HD"
-            root.findViewById<TextView>(R.id.heroBadge).text = if (movies) "MOVIES  /  SERIES" else "SPORTS  /  HINDI"
-            root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "Explore the stories you love. All in one place." else "Your front-row seat to the channels you love."
+            root.findViewById<TextView>(R.id.heroTitle).text = if (movies) "The Last Horizon" else "AK News"
+            root.findViewById<TextView>(R.id.heroBadge).text = if (movies) "MOVIE  /  ON DEMAND" else "NEWS  /  LIVE"
+            root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "A story for the long way home." else "A clearer view of what’s next. Live from around the world."
             root.findViewById<View>(R.id.status).visibility = View.GONE
-            if (movies) root.findViewById<View>(R.id.heroDesc).visibility = View.GONE
-            root.findViewById<View>(R.id.heroDot).visibility = if (movies) View.GONE else View.VISIBLE
+            root.findViewById<View>(R.id.heroDesc).visibility = View.VISIBLE
+            root.findViewById<TextView>(R.id.heroDot).apply {
+                visibility = View.VISIBLE
+                text = if (movies) "FEATURED MOVIE" else "●  LIVE NOW"
+                setTextColor(if (movies) Accent.GOLD else Accent.SIGNAL)
+            }
             root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.ic_brand)
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF273E7A.toInt(), 0xFF273253.toInt(), 0xFF10182B.toInt()))
+                intArrayOf(0xFF063C49.toInt(), 0xFF111D2D.toInt(), 0xFF070A12.toInt()))
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
             val heroActions = if (movies) listOf("▶   Explore title") else listOf("▶   Watch live", "+   My favorites")
             heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
                     text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)
                     setPadding(16, if (compact) 7 else 10, 18, if (compact) 7 else 10)
-                    background = Ui.pill(1f, if (index == 0) Accent.SIGNAL else 0xB31C2740.toInt(), 10f)
+                    background = Ui.pill(1f, if (index == 0) Color.WHITE else 0xB30A111B.toInt(), 12f).apply {
+                        setStroke(if (index == 0) 0 else 1, if (index == 0) Color.TRANSPARENT else Accent.SIGNAL)
+                    }
                 }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 8 })
             }
             for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0xFF202A52.toInt() else Color.TRANSPARENT, 12f)
-                view.setTextColor(if (selected) Accent.SIGNAL else Accent.DIM)
+                view.background = Ui.pill(1f, if (selected) 0x2427E4DF else Color.TRANSPARENT, 12f).apply {
+                    if (selected) setStroke(2, Accent.SIGNAL)
+                }
+                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
                 view.compoundDrawableTintList = android.content.res.ColorStateList.valueOf(if (selected) Accent.SIGNAL else Accent.DIM)
             }
             for (id in listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0xFF202A52.toInt() else Color.TRANSPARENT, 20f)
-                view.setTextColor(if (selected) Accent.SIGNAL else Accent.DIM)
+                view.background = Ui.pill(1f, if (selected) 0x2427E4DF else Color.TRANSPARENT, 20f).apply {
+                    if (selected) setStroke(2, Accent.SIGNAL)
+                }
+                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
             }
             val rows = root.findViewById<RecyclerView>(R.id.rows)
             rows.layoutManager = LinearLayoutManager(activity)
@@ -83,8 +96,8 @@ class HomePreviewTest {
                 override fun onCreateViewHolder(parent: ViewGroup, type: Int) = VH(LayoutInflater.from(activity).inflate(R.layout.item_row, parent, false))
                 override fun onBindViewHolder(holder: VH, position: Int) {
                     HomeChrome.styleRow(holder.itemView, compact, 1f)
-                    holder.itemView.findViewById<TextView>(R.id.rowTitle).text = if (movies) listOf("An evening of discovery", "Popular stories", "Keep watching")[position]
-                        else listOf("Your favorites", "Sports & entertainment", "Around the world")[position]
+                    holder.itemView.findViewById<TextView>(R.id.rowTitle).text = if (movies) listOf("Trending on AK", "Popular stories", "Keep watching")[position]
+                        else listOf("Live Channels", "Trending on AK", "Around the world")[position]
                     val list = holder.itemView.findViewById<RecyclerView>(R.id.rowList)
                     list.layoutManager = LinearLayoutManager(activity, RecyclerView.HORIZONTAL, false)
                     list.adapter = object : RecyclerView.Adapter<VH>() {
@@ -97,6 +110,9 @@ class HomePreviewTest {
                             val colors = listOf(0xFF244D56.toInt(), 0xFF40385A.toInt(), 0xFF5A4532.toInt(), 0xFF294950.toInt())
                             if (movies) {
                                 val titles = listOf("The Last Horizon", "Night Signal", "Paper Skies", "Velocity")
+                                tile.background = Ui.pill(1f, Color.TRANSPARENT, 14f).apply {
+                                    if (position == 0 && index == 0) setStroke(3, Accent.SIGNAL)
+                                }
                                 tile.findViewById<TextView>(R.id.posterName).apply {
                                     text = titles[index % 4]; textSize = if (compact) 13f else 18f; setTextColor(Color.WHITE)
                                     background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[index % 4], 0xFF09131E.toInt()))
@@ -104,7 +120,9 @@ class HomePreviewTest {
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
                                 tile.findViewById<TextView>(R.id.posterMeta).text = "Sample artwork"
                             } else {
-                                tile.background = Ui.pill(1f, Ui.mix(Accent.SURFACE, colors[index % 4], 0.35f), 14f)
+                                tile.background = Ui.pill(1f, Ui.mix(Accent.SURFACE, colors[index % 4], 0.35f), 14f).apply {
+                                    if (position == 0 && index == 0) setStroke(3, Accent.SIGNAL)
+                                }
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE; text = listOf("SS", "YAY", "ZEE", "N18")[index % 4]
