@@ -2,8 +2,6 @@
     android:layout_width="216dp" android:layout_height="122dp" android:layout_margin="10dp"
     android:focusable="true" android:clickable="true" android:clipToOutline="true"
     android:foreground="@drawable/focus_ring">
-    <ImageView android:id="@+id/channelArt" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:scaleType="centerCrop" android:alpha="0.92" android:visibility="gone" android:importantForAccessibility="no"/>
     <ImageView android:id="@+id/logo" android:layout_width="62dp" android:layout_height="62dp"
         android:layout_gravity="center" android:layout_marginBottom="14dp" android:scaleType="fitCenter"/>
     <TextView android:id="@+id/mono" android:layout_width="56dp" android:layout_height="56dp"

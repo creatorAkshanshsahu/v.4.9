@@ -513,17 +513,6 @@ class MainActivity : AppCompatActivity() {
         return false
     }
     private fun accentOf(key: String) = accents[key] ?: Accent.SIGNAL
-    private fun channelArtwork(channel: Channel): Int {
-        val label = "${channel.category} ${channel.name}".lowercase()
-        return when {
-            listOf("sport", "cricket", "football", "match").any { label.contains(it) } -> R.drawable.home_sports_art
-            listOf("kids", "child", "yay", "cartoon", "family").any { label.contains(it) } -> R.drawable.home_family_art
-            listOf("music", "hits", "song", "concert").any { label.contains(it) } -> R.drawable.home_music_art
-            listOf("reality", "nature", "travel", "document", "wildlife").any { label.contains(it) } -> R.drawable.home_nature_art
-            listOf("news", "business", "world").any { label.contains(it) } -> R.drawable.home_hero_cinematic
-            else -> 0
-        }
-    }
     private fun extractAccent(key: String, d: android.graphics.drawable.Drawable, cb: (Int) -> Unit) {
         accents[key]?.let { cb(it); return }
         Accent.from(d) { c -> accents[key] = c; cb(c) }
@@ -2518,11 +2507,6 @@ class MainActivity : AppCompatActivity() {
                 is Tile.Ch -> {
                     val bg = v.background as GradientDrawable
                     v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c.key), 0.12f))
-                    v.findViewById<ImageView>(R.id.channelArt).apply {
-                        val artwork = channelArtwork(t.c)
-                        if (artwork == 0) { setImageDrawable(null); visibility = View.GONE }
-                        else { setImageResource(artwork); visibility = View.VISIBLE }
-                    }
                     v.findViewById<TextView>(R.id.name).text = t.c.name
                     val nowCaption = v.findViewById<TextView>(R.id.nowCaption)
                     nowCaption.tag = t.c.key

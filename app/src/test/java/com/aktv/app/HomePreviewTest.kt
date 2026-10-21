@@ -140,18 +140,18 @@ class HomePreviewTest {
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
                                 tile.findViewById<TextView>(R.id.posterMeta).text = "Sample artwork"
                             } else {
-                                tile.background = Ui.pill(1f, Ui.mix(Accent.SURFACE, colors[index % 5], 0.35f), 14f).apply {
+                                val cardColor = colors[index % 5]
+                                tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                                    intArrayOf(cardColor, Ui.mix(cardColor, Accent.ABYSS, 0.48f))).apply {
+                                    cornerRadius = 14f
                                     if (position == 0 && index == 0) setStroke(3, Accent.SIGNAL)
                                 }
-                                tile.findViewById<ImageView>(R.id.channelArt).apply {
-                                    setImageResource(listOf(R.drawable.home_hero_cinematic, R.drawable.home_sports_art,
-                                        R.drawable.home_nature_art, R.drawable.home_family_art, R.drawable.home_music_art)[index % 5])
-                                    visibility = View.VISIBLE
-                                }
+                                tile.clipToOutline = true
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE; text = "AK"
                                     setTextColor(0xFFB0F1E8.toInt()); textSize = if (compact) 18f else 23f
+                                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
                                 }
                                 tile.findViewById<TextView>(R.id.name).text = listOf("AK News", "AK Sport", "AK Reality", "AK Kids", "AK Hits")[index % 5]
                                 tile.findViewById<TextView>(R.id.nowCaption).text = listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
