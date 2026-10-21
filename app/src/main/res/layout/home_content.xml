@@ -1,7 +1,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
     <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_gravity="top" android:layout_marginStart="100dp">
+        android:layout_gravity="top" android:layout_marginStart="116dp">
         <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent">
             <ImageView android:id="@+id/heroLogo" android:layout_width="144dp" android:layout_height="144dp"
                 android:layout_gravity="center_vertical|end" android:layout_marginEnd="76dp" android:scaleType="fitCenter"/>
@@ -21,7 +21,7 @@
         <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_bottom"/>
     </FrameLayout>
     <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_marginStart="100dp" android:orientation="vertical">
+        android:layout_marginStart="116dp" android:orientation="vertical">
         <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="84dp"
             android:paddingStart="28dp" android:paddingEnd="30dp" android:orientation="horizontal" android:gravity="center_vertical"
             android:background="@drawable/home_top_scrim">
@@ -83,7 +83,7 @@
             android:layout_weight="1" android:paddingTop="16dp" android:paddingBottom="30dp" android:clipToPadding="false" android:clipChildren="false"
             android:overScrollMode="never" android:requiresFadingEdge="none" android:fadeScrollbars="false"/>
     </LinearLayout>
-    <LinearLayout android:id="@+id/navRail" android:layout_width="100dp" android:layout_height="match_parent"
+    <LinearLayout android:id="@+id/navRail" android:layout_width="116dp" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
         android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
         <ImageView android:id="@+id/brandMark" android:layout_width="38dp" android:layout_height="38dp" android:src="@drawable/ic_brand"
@@ -102,7 +102,7 @@
         <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
             android:nextFocusUp="@id/segSeries" android:nextFocusRight="@id/rows"/>
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
-        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.27"
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.28"
             android:layout_marginTop="10dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
     </LinearLayout>
 </FrameLayout>

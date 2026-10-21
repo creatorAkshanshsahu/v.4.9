@@ -224,8 +224,8 @@ class MainActivity : AppCompatActivity() {
             action.background = Ui.pill(dp, 0xB31C2432.toInt(), 18f)
             action.setOnFocusChangeListener { v, focused ->
                 val text = v as TextView
-                text.background = Ui.pill(dp, if (focused) Accent.LIVE else 0xB31C2432.toInt(), 18f).apply {
-                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) 0xFFFFB3C0.toInt() else 0x55FFFFFF)
+                text.background = Ui.pill(dp, if (focused) Accent.ION else 0xB30A111B.toInt(), 18f).apply {
+                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) Accent.TEXT else 0x55FFFFFF)
                 }
                 text.setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
                 v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f)
@@ -262,11 +262,11 @@ class MainActivity : AppCompatActivity() {
         infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
             intArrayOf(0xF00B101A.toInt(), 0xE10E1422.toInt())).apply {
             cornerRadius = 22 * dp
-            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x99FF5D7A.toInt())
+            setStroke((1 * dp).toInt().coerceAtLeast(1), Accent.ION)
         }
         infoCard.elevation = 10 * dp
         findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
-            setStroke((1 * dp).toInt().coerceAtLeast(1), Accent.LIVE)
+            setStroke((1 * dp).toInt().coerceAtLeast(1), Accent.ION)
         }
         if (resources.configuration.screenWidthDp < 600) {
             val card = infoCard as LinearLayout
@@ -279,7 +279,10 @@ class MainActivity : AppCompatActivity() {
                 lp.setMargins(margin, margin, margin, margin); card.layoutParams = lp
             }
             findViewById<View>(R.id.infoLogoBox).visibility = View.GONE
-            (card.getChildAt(1).layoutParams as? LinearLayout.LayoutParams)?.let { lp -> lp.marginStart = 0; card.getChildAt(1).layoutParams = lp }
+            (card.getChildAt(1).layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.marginStart = 0; lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.weight = 0f
+                card.getChildAt(1).layoutParams = lp
+            }
             infoName.maxWidth = cardWidth - (28 * dp).toInt()
             listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
                 action.textSize = 9f; action.setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), 0)
@@ -401,13 +404,13 @@ class MainActivity : AppCompatActivity() {
         isFocusable = true; isClickable = true
         setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
         val accent = sectionAccent()
-        val bg = Ui.pill(dp, if (primary) accent else 0xB31C2740.toInt(), 10f)
+        val bg = Ui.pill(dp, if (primary) Color.WHITE else 0xB30A111B.toInt(), 12f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (focused || primary) accent else 0xB31C2740.toInt())
+            bg.setColor(if (primary) Color.WHITE else if (focused) Ui.mix(Accent.ABYSS, accent, 0.32f) else 0xB30A111B.toInt())
             bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, accent)
-            setTextColor(if (focused || primary) Accent.ABYSS else Accent.TEXT)
+            setTextColor(if (primary || focused) Accent.ABYSS else Accent.TEXT)
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
@@ -421,14 +424,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.home).requestLayout()
     }
 
-    private fun sectionAccent() = when (tab) { 0 -> Accent.LIVE; 1 -> Accent.ION; 2 -> Accent.GOLD; else -> Accent.INDIGO }
+    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2 -> Accent.GOLD; else -> Accent.INDIGO }
 
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
         val accent = sectionAccent()
-        bg.setColor(when { focused -> accent; active -> Ui.mix(Accent.ABYSS, accent, 0.24f); else -> Color.TRANSPARENT })
-        val fg = when { focused -> Accent.ABYSS; active -> accent; else -> Accent.DIM }
+        bg.setColor(when { focused -> Ui.mix(Accent.ABYSS, accent, 0.23f); active -> Ui.mix(Accent.ABYSS, accent, 0.12f); else -> Color.TRANSPARENT })
+        val fg = when { focused -> Accent.TEXT; active -> accent; else -> Accent.DIM }
         tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
-        bg.setStroke(if (active && !focused) (1 * dp).toInt().coerceAtLeast(1) else 0, Ui.mix(accent, Color.WHITE, 0.12f))
+        bg.setStroke((if (focused) 2 * dp else if (active) 1 * dp else 0f).toInt(), if (focused || active) accent else Color.TRANSPARENT)
     }
     private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
 

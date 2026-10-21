@@ -93,7 +93,7 @@ class MoviePlayerActivity : Activity() {
     private var lastFailure = ""
 
     private lateinit var view: PlayerView
-    private lateinit var overlay: LinearLayout
+    private lateinit var overlay: FrameLayout
     private lateinit var heading: TextView
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
@@ -126,7 +126,7 @@ class MoviePlayerActivity : Activity() {
         val root = FrameLayout(this).apply { setBackgroundColor(Accent.ABYSS) }
         view = PlayerView(this).apply {
             useController = true
-            controllerShowTimeoutMs = 5000
+            controllerShowTimeoutMs = 7000
             controllerAutoShow = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             setShowSubtitleButton(true)
@@ -135,42 +135,49 @@ class MoviePlayerActivity : Activity() {
             setShutterBackgroundColor(Accent.ABYSS)
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        overlay = LinearLayout(this).apply {
+        overlay = FrameLayout(this)
+        val topPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(px(34), px(28), px(34), px(30))
+            setPadding(px(36), px(28), px(36), px(18))
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF5080B14.toInt(), 0xD30A1020.toInt(), 0x960A1020.toInt(), Color.TRANSPARENT))
+                intArrayOf(0xF5080B14.toInt(), 0xC80A1020.toInt(), 0x700A1020.toInt(), Color.TRANSPARENT))
         }
         val identity = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val brand = ImageView(this).apply {
             setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "AK TV"; layoutParams = LinearLayout.LayoutParams(px(42), px(42))
+            contentDescription = "AK TV"; layoutParams = LinearLayout.LayoutParams(px(46), px(46))
         }
         identity.addView(brand)
-        val identityText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(12), 0, 0, 0) }
+        val identityText = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(px(14), 0, 0, 0) }
         identityText.addView(TextView(this).apply {
-            text = if (title.isSeries) "AK ORIGINALS  ·  SERIES" else "AK CINEMA  ·  MOVIE"
-            textSize = 10f; letterSpacing = 0.15f; setTextColor(if (title.isSeries) Accent.INDIGO else Accent.GOLD); setTypeface(null, Typeface.BOLD)
+            text = if (title.isSeries) "AK SERIES  ·  NOW PLAYING" else "AK CINEMA  ·  NOW PLAYING"
+            textSize = 10f; letterSpacing = 0.16f; setTextColor(if (title.isSeries) Accent.INDIGO else Accent.GOLD); setTypeface(null, Typeface.BOLD)
         })
         heading = TextView(this).apply {
             textSize = 27f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
             setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0x99000000.toInt())
         }
         identityText.addView(heading); identity.addView(identityText, LinearLayout.LayoutParams(0, -2, 1f))
-        overlay.addView(identity)
-        overlay.addView(View(this).apply {
+        topPanel.addView(identity)
+        topPanel.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
                 intArrayOf(if (title.isSeries) Accent.INDIGO else Accent.GOLD, Accent.ION, Color.TRANSPARENT))
-        }, LinearLayout.LayoutParams(px(170), px(2)).apply { topMargin = px(15) })
+        }, LinearLayout.LayoutParams(px(150), px(2)).apply { topMargin = px(15) })
         status = TextView(this).apply {
-            textSize = 12f; setTextColor(Accent.DIM); maxLines = 3
+            textSize = 12f; setTextColor(Accent.DIM); maxLines = 2
             setPadding(px(12), px(8), px(12), px(8))
             background = GradientDrawable().apply {
-                cornerRadius = px(12).toFloat(); setColor(0xAA101827.toInt())
+                cornerRadius = px(14).toFloat(); setColor(0xAA101827.toInt())
                 setStroke(px(1), 0x44FFFFFF)
             }
         }
-        overlay.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(10); bottomMargin = px(12) })
+        topPanel.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(10) })
+        overlay.addView(topPanel, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+
+        overlay.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+                intArrayOf(0xF6080B14.toInt(), 0xC80A1020.toInt(), Color.TRANSPARENT))
+        }, FrameLayout.LayoutParams(-1, px(250), Gravity.BOTTOM))
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(button("Back") { finish() })
         row.addView(button("Sources") { showSources() })
@@ -183,9 +190,13 @@ class MoviePlayerActivity : Activity() {
         }.also(row::addView)
         row.addView(button("Retry") { desiredPlay = true; begin(provider) })
         row.addView(button("Details") { showDetails() })
-        val scroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row) }
-        overlay.addView(scroll, LinearLayout.LayoutParams(-1, -2))
-        root.addView(overlay, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
+        val scroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
+        }
+        overlay.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = px(32); rightMargin = px(32); bottomMargin = px(102)
+        })
+        root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         spinner = ProgressBar(this).apply {
             indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.INDIGO else Accent.GOLD)
         }

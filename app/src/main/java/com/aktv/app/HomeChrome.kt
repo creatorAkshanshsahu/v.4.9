@@ -15,7 +15,7 @@ internal object HomeChrome {
     fun metrics(width: Int, height: Int, dp: Float, movies: Boolean): Metrics {
         val compact = height / dp < 420
         val phone = width / dp < 600 || (compact && width / dp < 900)
-        val rail = if (phone) 0 else ((if (compact) 82 else 100) * dp).toInt()
+        val rail = if (phone) 0 else ((if (compact) 90 else 116) * dp).toInt()
         val header = ((if (compact) 54 else 80) * dp).toInt()
         val heroRatio = if (phone && compact) { if (movies) 0.24f else 0.28f } else if (movies) 0.32f else 0.40f
         val hero = (height * heroRatio).toInt()
@@ -30,7 +30,9 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.phoneNavScroll).visibility = if (m.phone) View.VISIBLE else View.GONE
         rail.layoutParams.width = m.rail
         rail.setPadding(px(if (m.compact) 7 else 10), px(if (m.compact) 10 else 20), px(if (m.compact) 7 else 10), px(10))
-        root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply { width = px(if (m.compact) 48 else 56); height = px(if (m.compact) 24 else 34) }
+        root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply {
+            width = px(if (m.compact) 44 else 52); height = width
+        }
         (root.findViewById<TextView>(R.id.akText).layoutParams as LinearLayout.LayoutParams).bottomMargin = px(if (m.compact) 10 else 22)
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             root.findViewById<TextView>(id).apply {
@@ -66,16 +68,16 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.heroArea).layoutParams.height = m.hero
         root.findViewById<View>(R.id.heroText).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                width = ((screenWidth - m.rail - m.margin * 2) * 0.64f).toInt().coerceAtLeast(px(220))
+                width = ((screenWidth - m.rail - m.margin * 2) * 0.70f).toInt().coerceAtLeast(px(220))
                 marginStart = m.margin + px(if (m.compact) 16 else 24)
                 bottomMargin = px(if (m.compact) 13 else 22)
             }
         }
-        root.findViewById<TextView>(R.id.heroTitle).apply { textSize = if (m.compact) 23f else if (movies) 28f else 32f; maxLines = if (m.compact) 1 else 2 }
+        root.findViewById<TextView>(R.id.heroTitle).apply { textSize = if (m.compact) 24f else if (movies) 34f else 38f; maxLines = if (m.compact) 1 else 2 }
         root.findViewById<TextView>(R.id.heroDesc).maxLines = if (m.compact || !movies) 1 else 2
         root.findViewById<View>(R.id.heroChips).let { (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 10 else 16) }
         root.findViewById<View>(R.id.heroLogo).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply { width = px(if (m.compact) 82 else 140); height = width; marginEnd = px(if (m.compact) 30 else 64) }
+            (layoutParams as FrameLayout.LayoutParams).apply { width = px(if (m.compact) 104 else 176); height = width; marginEnd = px(if (m.compact) 24 else 56) }
         }
         root.findViewById<View>(R.id.heroMono).let { (it.layoutParams as FrameLayout.LayoutParams).marginEnd = px(if (m.compact) 36 else 68) }
         root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 16), 0, px(24))
@@ -96,12 +98,12 @@ internal object HomeChrome {
         val lp = tile.layoutParams as ViewGroup.MarginLayoutParams
         lp.setMargins((6 * dp).toInt(), (4 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt())
         if (!poster) {
-            lp.width = ((if (compact) 156 else 198) * dp).toInt()
-            lp.height = ((if (compact) 86 else 112) * dp).toInt()
-            tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 42 else 58) * dp).toInt(); height = width }
-            tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
+            lp.width = ((if (compact) 166 else 218) * dp).toInt()
+            lp.height = ((if (compact) 94 else 126) * dp).toInt()
+            tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
+            tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 14f
         } else {
-            val width = ((if (compact) 108 else 148) * dp).toInt()
+            val width = ((if (compact) 114 else 156) * dp).toInt()
             lp.width = width
             val contentWidth = (width - (24 * dp).toInt()).coerceAtLeast((72 * dp).toInt())
             tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = contentWidth
