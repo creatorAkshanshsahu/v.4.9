@@ -60,7 +60,7 @@ class HomePreviewTest {
             }
             root.findViewById<ImageView>(R.id.heroLogo).setImageResource(R.drawable.ic_brand)
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF063C49.toInt(), 0xFF111D2D.toInt(), 0xFF070A12.toInt()))
+                intArrayOf(0xFF06121C.toInt(), 0xFF0E4459.toInt(), 0xFF17265C.toInt(), 0xFF080C17.toInt()))
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
             val heroActions = if (movies) listOf("▶   Explore title") else listOf("▶   Watch live", "+   My favorites")
             heroActions.forEachIndexed { index, label ->

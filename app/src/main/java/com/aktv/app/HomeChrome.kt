@@ -31,9 +31,13 @@ internal object HomeChrome {
         rail.layoutParams.width = m.rail
         rail.setPadding(px(if (m.compact) 7 else 10), px(if (m.compact) 10 else 20), px(if (m.compact) 7 else 10), px(10))
         root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply {
-            width = px(if (m.compact) 44 else 52); height = width
+            width = px(if (m.compact) 64 else 92); height = px(if (m.compact) 40 else 58)
         }
-        (root.findViewById<TextView>(R.id.akText).layoutParams as LinearLayout.LayoutParams).bottomMargin = px(if (m.compact) 10 else 22)
+        (root.findViewById<TextView>(R.id.akText).layoutParams as LinearLayout.LayoutParams).bottomMargin = px(if (m.compact) 6 else 10)
+        root.findViewById<TextView>(R.id.railTagline).apply {
+            textSize = if (m.compact) 5.5f else 6.5f
+            visibility = if (m.compact && screenHeight / dp < 380) View.GONE else View.VISIBLE
+        }
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             root.findViewById<TextView>(id).apply {
                 val shortScreen = screenHeight / dp < 350

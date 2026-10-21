@@ -89,8 +89,12 @@
         <ImageView android:id="@+id/brandMark" android:layout_width="38dp" android:layout_height="38dp" android:src="@drawable/ic_brand"
             android:scaleType="fitCenter" android:contentDescription="AK TV"/>
         <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
-            android:layout_marginTop="4dp" android:layout_marginBottom="22dp" android:textSize="11sp" android:letterSpacing="0.11"
+            android:layout_marginTop="4dp" android:layout_marginBottom="6dp" android:textSize="11sp" android:letterSpacing="0.11"
             android:textColor="@color/text" android:fontFamily="@font/sora_bold"/>
+        <TextView android:id="@+id/railTagline" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp" android:gravity="center" android:text="BIGGER STORIES\nBRIGHTER YOU"
+            android:textColor="@color/text_faint" android:textSize="6.5sp" android:letterSpacing="0.14"
+            android:lineSpacingExtra="1dp" android:fontFamily="@font/sora_regular" android:includeFontPadding="false"/>
         <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live TV" android:drawableTop="@drawable/ic_nav_live"
             android:nextFocusDown="@id/segV2" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/segV2" style="@style/Widget.AKTV.RailItem" android:text="Always on" android:drawableTop="@drawable/ic_nav_v2"
@@ -102,7 +106,7 @@
         <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
             android:nextFocusUp="@id/segSeries" android:nextFocusRight="@id/rows"/>
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
-        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.29"
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.30"
             android:layout_marginTop="10dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
     </LinearLayout>
 </FrameLayout>

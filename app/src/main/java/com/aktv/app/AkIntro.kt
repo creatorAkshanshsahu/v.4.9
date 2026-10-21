@@ -25,14 +25,11 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     var onReveal: (() -> Unit)? = null
     var onDone: (() -> Unit)? = null
     var wordmark: Typeface? = null
-        set(value) { field = value; titlePaint.typeface = value; subtitlePaint.typeface = value }
+        set(value) { field = value; titlePaint.typeface = value }
     private val dp get() = resources.displayMetrics.density
     private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.ic_brand) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND; strokeWidth = 2 * dp }
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND; strokeWidth = 5 * dp }
-    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.TEXT; textAlign = Paint.Align.CENTER; textSize = 23 * dp; letterSpacing = 0.10f }
-    private val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 9 * dp; letterSpacing = 0.10f }
+    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.TEXT; textAlign = Paint.Align.CENTER; textSize = 34 * dp; letterSpacing = 0.08f }
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.FAINT; textAlign = Paint.Align.CENTER; textSize = 9 * dp }
     private val soundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.ION; textAlign = Paint.Align.CENTER; textSize = 8 * dp; letterSpacing = 0.08f }
     private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -163,14 +160,14 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         val shortScreen = height < 420 * dp
         val appear = (progress / 0.30f).coerceIn(0f, 1f)
         val settle = (progress / 0.46f).coerceIn(0f, 1f)
-        val logoY = height * if (shortScreen) 0.34f else 0.36f
-        val radius = minOf(width * 0.30f, (if (shortScreen) 172 else 240) * dp)
+        val logoY = height * if (shortScreen) 0.37f else 0.38f
+        val radius = minOf(width * 0.42f, height * 0.74f)
         haloPaint.color = Accent.INDIGO
-        haloPaint.alpha = (alpha * 0.12f * settle).toInt()
+        haloPaint.alpha = (alpha * 0.10f * settle).toInt()
         canvas.drawCircle(centerX, logoY, radius, haloPaint)
 
-        val scale = 0.90f + 0.10f * settle
-        val markWidth = minOf(width * 0.32f, (if (shortScreen) 164 else 220) * dp) * scale
+        val scale = 0.96f + 0.04f * settle
+        val markWidth = minOf(width * (if (shortScreen) 0.74f else 0.82f), height * 1.40f) * scale
         val markHeight = markWidth * ((mark?.intrinsicHeight ?: 1).toFloat() / (mark?.intrinsicWidth ?: 1).coerceAtLeast(1))
         destination.set(centerX - markWidth / 2, logoY - markHeight / 2, centerX + markWidth / 2, logoY + markHeight / 2)
         mark?.let {
@@ -180,24 +177,15 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         }
 
         titlePaint.alpha = (alpha * ((progress - 0.12f) / 0.36f).coerceIn(0f, 1f)).toInt()
-        canvas.drawText("AK TV", centerX, destination.bottom + (if (shortScreen) 31 else 42) * dp, titlePaint)
-        subtitlePaint.alpha = (alpha * ((progress - 0.25f) / 0.35f).coerceIn(0f, 1f)).toInt()
-        canvas.drawText("YOUR SCREEN. YOUR STORIES.", centerX, destination.bottom + (if (shortScreen) 53 else 65) * dp, subtitlePaint)
+        val titleY = maxOf(destination.bottom + 38 * dp, height * if (shortScreen) 0.74f else 0.77f)
+        canvas.drawText("AK TV", centerX, titleY, titlePaint)
 
-        val linePhase = ((progress - 0.18f) / 0.52f).coerceIn(0f, 1f)
-        val span = minOf(width * 0.14f, 92 * dp) * linePhase
-        val beamY = destination.bottom + (if (shortScreen) 75 else 88) * dp
-        glowPaint.color = Accent.INDIGO; glowPaint.alpha = (alpha * 0.22f * linePhase).toInt()
-        canvas.drawLine(centerX - span, beamY, centerX + span, beamY, glowPaint)
-        linePaint.color = Accent.ION; linePaint.alpha = (alpha * 0.9f * linePhase).toInt()
-        canvas.drawLine(centerX - span, beamY, centerX + span, beamY, linePaint)
-
-        hintPaint.alpha = (alpha * 0.70f).toInt()
-        canvas.drawText("Loading your front row…  ·  press any key to skip", centerX, height - 48 * dp, hintPaint)
-        soundPaint.alpha = (alpha * 0.84f).toInt()
+        hintPaint.alpha = (alpha * 0.74f).toInt()
+        canvas.drawText("Loading…", centerX, height * 0.93f, hintPaint)
+        soundPaint.alpha = (alpha * 0.68f).toInt()
         val soundLabel = if (soundEnabled) "SOUND ON  ·  tap to mute" else "SOUND OFF  ·  tap to enable"
-        canvas.drawText(soundLabel, centerX, height - 22 * dp, soundPaint)
+        canvas.drawText(soundLabel, centerX, height - 12 * dp, soundPaint)
         val half = 100 * dp
-        soundTarget.set(centerX - half, height - 42 * dp, centerX + half, height.toFloat())
+        soundTarget.set(centerX - half, height - 40 * dp, centerX + half, height.toFloat())
     }
 }

@@ -33,11 +33,11 @@ class BrandPreviewTest {
                 setImageResource(R.drawable.ic_brand); scaleType = ImageView.ScaleType.FIT_CENTER
                 contentDescription = "AK TV logo preview"
             }
-            root.addView(mark, FrameLayout.LayoutParams(310, 310, Gravity.CENTER).apply { bottomMargin = 54 })
+            root.addView(mark, FrameLayout.LayoutParams(760, 475, Gravity.CENTER).apply { bottomMargin = 100 })
             root.addView(TextView(activity).apply {
-                text = "AK TV"; textSize = 28f; setTextColor(Color.WHITE); typeface = android.graphics.Typeface.DEFAULT_BOLD
+                text = "AK TV"; textSize = 36f; setTextColor(Color.WHITE); typeface = android.graphics.Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
-            }, FrameLayout.LayoutParams(-1, 52, Gravity.CENTER).apply { topMargin = 160 })
+            }, FrameLayout.LayoutParams(-1, 56, Gravity.CENTER).apply { topMargin = 320 })
             capture(root, 960, 540, File(output, "brand-mark.webp"))
 
             activity.getSharedPreferences("aktv", Context.MODE_PRIVATE).edit().putBoolean("intro_sound_enabled", false).commit()
