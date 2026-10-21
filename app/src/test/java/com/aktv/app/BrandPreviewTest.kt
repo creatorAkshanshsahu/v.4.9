@@ -49,8 +49,10 @@ class BrandPreviewTest {
             introRoot.measure(ViewSpec.exact(960), ViewSpec.exact(540)); introRoot.layout(0, 0, 960, 540)
             intro.start()
             shadowOf(android.os.Looper.getMainLooper()).idleFor(Duration.ofMillis(700))
-            capture(introRoot, 960, 540, File(output, "entrance.webp"))
+            // Pin a known in-flight frame: Robolectric's animation scale may otherwise jump to completion.
             intro.skip()
+            AkIntroView::class.java.getDeclaredField("progress").apply { isAccessible = true }.setFloat(intro, 0.55f)
+            capture(introRoot, 960, 540, File(output, "entrance.webp"))
         } finally { controller.destroy() }
     }
 
