@@ -148,7 +148,7 @@ class HomePreviewTest {
             }
             root.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
             root.layout(0, 0, width, height)
-            val previewWidth = 640
+            val previewWidth = 600
             val previewHeight = (previewWidth * height.toFloat() / width).toInt().coerceAtLeast(1)
             val bitmap = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap); canvas.scale(previewWidth / width.toFloat(), previewHeight / height.toFloat()); root.draw(canvas)
