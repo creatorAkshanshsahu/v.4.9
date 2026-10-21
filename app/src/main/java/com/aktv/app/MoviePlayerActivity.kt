@@ -36,8 +36,6 @@ import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
-import coil.imageLoader
-import coil.request.ImageRequest
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
@@ -52,12 +50,6 @@ class MoviePlayerActivity : Activity() {
                 .putExtra("tmdb", title.tmdb).putExtra("type", if (title.isSeries) "tv" else "movie")
                 .putExtra("season", if (title.isSeries) season else 0).putExtra("episode", if (title.isSeries) episode else 0)
                 .putExtra("name", title.name)
-                .putExtra("genres", title.genres.take(4).joinToString("  ·  "))
-                .putExtra("year", title.year.take(8))
-                .putExtra("overview", title.description.take(500))
-                .putExtra("backdrop", title.background.ifBlank { title.poster })
-                .putExtra("episodeName", episodes.firstOrNull { it.season == season && it.episode == episode }?.name.orEmpty().take(160))
-                .putExtra("episodeOverview", episodes.firstOrNull { it.season == season && it.episode == episode }?.overview.orEmpty().take(400))
                 .putExtra("episodes", (if (title.isSeries) episodes else emptyList()).take(2000)
                     .flatMap { listOf(it.season, it.episode) }.toIntArray())
     }
@@ -71,10 +63,6 @@ class MoviePlayerActivity : Activity() {
     private val lowMemory by lazy { (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true }
     private lateinit var title: FrostTitle
     private var titleName = ""
-    private var currentEpisodeName = ""
-    private var currentDescription = ""
-    private var genres = ""
-    private var year = ""
     private var initialized = false
     private var foreground = false
     private var generation = 0
@@ -108,7 +96,6 @@ class MoviePlayerActivity : Activity() {
     private lateinit var overlay: FrameLayout
     private lateinit var heading: TextView
     private lateinit var episodeLine: TextView
-    private lateinit var description: TextView
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
     private lateinit var nextButton: TextView
@@ -126,11 +113,6 @@ class MoviePlayerActivity : Activity() {
             finish(); return
         }
         titleName = intent.getStringExtra("name").orEmpty().take(180)
-        currentEpisodeName = intent.getStringExtra("episodeName").orEmpty().take(160)
-        genres = intent.getStringExtra("genres").orEmpty().take(120)
-        year = intent.getStringExtra("year").orEmpty().take(8)
-        currentDescription = (if (title.isSeries) intent.getStringExtra("episodeOverview") else intent.getStringExtra("overview"))
-            .orEmpty().take(400)
         episodes = VodProgress.episodes(intent.getIntArrayExtra("episodes"))
         desiredPlay = saved?.getBoolean("play", true) ?: true
         restoreProgress()
@@ -152,18 +134,10 @@ class MoviePlayerActivity : Activity() {
             setShowNextButton(false); setShowPreviousButton(false)
             setKeepContentOnPlayerReset(false)
             setShutterBackgroundColor(Accent.ABYSS)
+            setDefaultArtwork(getDrawable(R.drawable.home_hero_cinematic))
             useArtwork = true
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        intent.getStringExtra("backdrop").orEmpty().takeIf { it.isNotBlank() }?.let { artwork ->
-            imageLoader.enqueue(ImageRequest.Builder(this).data(artwork)
-                .target(onSuccess = { drawable ->
-                    if (!isFinishing) {
-                        view.setDefaultArtwork(drawable)
-                        view.useArtwork = true
-                    }
-                }).build())
-        }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
@@ -211,11 +185,6 @@ class MoviePlayerActivity : Activity() {
             setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
         }
         info.addView(episodeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(7) })
-        description = TextView(this).apply {
-            textSize = 14f; setTextColor(0xFFB6C0CD.toInt()); maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
-            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
-        }
-        info.addView(description, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(8) })
         status = TextView(this).apply {
             textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
@@ -286,12 +255,8 @@ class MoviePlayerActivity : Activity() {
 
     private fun updateTitle() {
         heading.text = titleName.ifBlank { "TMDB ${title.id}" }
-        episodeLine.text = if (title.isSeries) {
-            "SEASON ${title.season}  ·  EPISODE ${title.episode}" + currentEpisodeName.takeIf { it.isNotBlank() }?.let { "  ·  $it" }.orEmpty()
-        } else listOf(year, genres).filter { it.isNotBlank() }.joinToString("  ·  ")
-        episodeLine.visibility = if (episodeLine.text.isBlank()) View.GONE else View.VISIBLE
-        description.text = currentDescription
-        description.visibility = if (currentDescription.isBlank()) View.GONE else View.VISIBLE
+        episodeLine.text = if (title.isSeries) "SEASON ${title.season}  ·  EPISODE ${title.episode}" else ""
+        episodeLine.visibility = if (title.isSeries) View.VISIBLE else View.GONE
         episodesButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
         episodesButton.isEnabled = true
         nextButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
@@ -557,7 +522,6 @@ class MoviePlayerActivity : Activity() {
     private fun changeEpisode(next: FrostTitle) {
         captureProgress(); generation++; lookup?.cancel(true); resolver.cancel(); releasePlayer()
         title = next; currentSource = null; sources = emptyList(); frame = false; desiredPlay = true
-        currentEpisodeName = ""; currentDescription = ""
         prefs.edit().putInt("last_season_${title.catalogKey}", title.season).putInt("last_ep_${title.catalogKey}", title.episode).apply()
         restoreProgress(); updateTitle(); begin(provider)
     }

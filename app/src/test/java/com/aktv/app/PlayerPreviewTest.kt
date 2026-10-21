@@ -39,8 +39,6 @@ class PlayerPreviewTest {
         val app = RuntimeEnvironment.getApplication()
         val intent = Intent(app, MoviePlayerActivity::class.java)
             .putExtra("tmdb", 1288069).putExtra("type", "movie").putExtra("name", "The Last Horizon")
-            .putExtra("year", "2025").putExtra("genres", "Adventure  ·  Drama")
-            .putExtra("overview", "A family follows a fading signal across a vast and unfamiliar world.")
         val controller = Robolectric.buildActivity(MoviePlayerActivity::class.java, intent).create()
         try {
             val activity = controller.get().apply { setTheme(R.style.Theme_AKTV) }
@@ -119,9 +117,11 @@ class PlayerPreviewTest {
         view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
         view.layout(0, 0, width, height)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        view.draw(Canvas(bitmap))
-        file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.WEBP, 84, it)) }
+        val previewWidth = 640
+        val previewHeight = (previewWidth * height.toFloat() / width).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(previewWidth, previewHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap); canvas.scale(previewWidth / width.toFloat(), previewHeight / height.toFloat()); view.draw(canvas)
+        file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.WEBP, 76, it)) }
         bitmap.recycle()
     }
 }
