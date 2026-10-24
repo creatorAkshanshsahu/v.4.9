@@ -2,143 +2,15 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
 
-    <FrameLayout android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent">
-
-        <!-- hero card: rounded panel under the top bar; live preview / backdrop fills it and fades to the left scrim -->
-        <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="260dp"
-            android:layout_gravity="top" android:layout_marginStart="48dp" android:layout_marginEnd="48dp"
-            android:layout_marginTop="72dp">
-            <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent">
-                <ImageView android:id="@+id/heroLogo" android:layout_width="132dp" android:layout_height="132dp"
-                    android:layout_gravity="center_vertical|end" android:layout_marginEnd="110dp" android:scaleType="fitCenter"/>
-                <TextView android:id="@+id/heroMono" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_gravity="center_vertical|end" android:layout_marginEnd="110dp" android:textColor="#FFFFFF"
-                    android:textSize="84sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false"
-                    android:visibility="gone"/>
-            </FrameLayout>
-            <ImageView android:id="@+id/heroBackdrop" android:layout_width="match_parent" android:layout_height="match_parent"
-                android:scaleType="centerCrop" android:alpha="0"/>
-            <FrameLayout android:id="@+id/heroPreview" android:layout_width="match_parent" android:layout_height="match_parent"
-                android:alpha="0">
-                <androidx.media3.ui.PlayerView android:id="@+id/heroPreviewPv" android:layout_width="match_parent"
-                    android:layout_height="match_parent" android:focusable="false" app:use_controller="false"
-                    app:resize_mode="zoom" app:surface_type="texture_view" app:use_artwork="false"
-                    app:shutter_background_color="@android:color/transparent"/>
-            </FrameLayout>
-            <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_left"/>
-            <View android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/scrim_bottom"/>
-        </FrameLayout>
-
-        <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:orientation="vertical">
-
-            <!-- top bar: logo | the four section pills (take the free middle space, never overlap) | search + clock -->
-            <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="72dp"
-                android:layout_marginStart="48dp" android:layout_marginEnd="48dp" android:orientation="horizontal"
-                android:gravity="center_vertical">
-                <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
-                    android:orientation="horizontal" android:gravity="center_vertical">
-                    <ImageView android:layout_width="44dp" android:layout_height="34dp" android:src="@drawable/ic_mark_blue"
-                        android:scaleType="fitCenter"/>
-                    <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp" android:text="TV" android:textColor="@color/text" android:textSize="24sp"
-                        android:fontFamily="@font/sora_bold" android:maxLines="1" android:includeFontPadding="false"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:layout_marginStart="12dp" android:layout_marginEnd="12dp"
-                    android:orientation="horizontal" android:gravity="center">
-                    <TextView android:id="@+id/segLive" android:layout_width="wrap_content" android:layout_height="44dp"
-                        android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:text="Live TV"
-                        android:focusable="true" android:clickable="true" android:maxLines="1" android:gravity="center_vertical"
-                        android:drawableStart="@drawable/ic_nav_live" android:drawablePadding="8dp"
-                        android:paddingStart="16dp" android:paddingEnd="18dp" android:textSize="13sp"
-                        android:fontFamily="@font/sora_semibold"/>
-                    <TextView android:id="@+id/segV2" android:layout_width="wrap_content" android:layout_height="44dp"
-                        android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:text="24/7"
-                        android:focusable="true" android:clickable="true" android:maxLines="1" android:gravity="center_vertical"
-                        android:drawableStart="@drawable/ic_nav_v2" android:drawablePadding="8dp"
-                        android:paddingStart="16dp" android:paddingEnd="18dp" android:textSize="13sp"
-                        android:fontFamily="@font/sora_semibold"/>
-                    <TextView android:id="@+id/segSites" android:layout_width="wrap_content" android:layout_height="44dp"
-                        android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:text="Movies"
-                        android:focusable="true" android:clickable="true" android:maxLines="1" android:gravity="center_vertical"
-                        android:drawableStart="@drawable/ic_nav_movies" android:drawablePadding="8dp"
-                        android:paddingStart="16dp" android:paddingEnd="18dp" android:textSize="13sp"
-                        android:fontFamily="@font/sora_semibold"/>
-                    <TextView android:id="@+id/segSeries" android:layout_width="wrap_content" android:layout_height="44dp"
-                        android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:text="Series"
-                        android:focusable="true" android:clickable="true" android:maxLines="1" android:gravity="center_vertical"
-                        android:drawableStart="@drawable/ic_nav_movies" android:drawablePadding="8dp"
-                        android:paddingStart="16dp" android:paddingEnd="18dp" android:textSize="13sp"
-                        android:fontFamily="@font/sora_semibold"/>
-                </LinearLayout>
-                <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
-                    android:orientation="horizontal" android:gravity="center_vertical|end">
-                    <TextView android:id="@+id/searchBtn" android:layout_width="wrap_content" android:layout_height="44dp"
-                        android:layout_marginStart="4dp" android:layout_marginEnd="4dp" android:text="Search Channels"
-                        android:focusable="true" android:clickable="true" android:maxLines="1" android:gravity="center_vertical"
-                        android:drawableStart="@drawable/ic_nav_search" android:drawablePadding="8dp"
-                        android:paddingStart="16dp" android:paddingEnd="18dp" android:textSize="13sp"
-                        android:fontFamily="@font/sora_semibold"/>
-                    <TextClock android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginStart="14dp" android:format12Hour="h:mm a" android:format24Hour="HH:mm" android:maxLines="1"
-                        android:textColor="@color/text" android:textSize="15sp" android:fontFamily="@font/sora_semibold"/>
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- hero text: driven by whatever is focused; sits inside the card -->
-            <FrameLayout android:id="@+id/heroArea" android:layout_width="match_parent" android:layout_height="260dp">
-                <LinearLayout android:id="@+id/heroText" android:layout_width="440dp" android:layout_height="wrap_content"
-                    android:layout_marginStart="88dp" android:layout_marginBottom="22dp" android:layout_gravity="start|bottom"
-                    android:orientation="vertical">
-                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:orientation="horizontal" android:gravity="center_vertical">
-                        <TextView android:id="@+id/heroDot" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:text="●  LIVE" android:background="@drawable/live_pill" android:textColor="#FFFFFF"
-                            android:textSize="11sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.06"
-                            android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="5dp" android:paddingBottom="5dp"/>
-                        <TextView android:id="@+id/heroBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                            android:layout_marginStart="12dp" android:maxLines="1" android:ellipsize="end"
-                            android:textColor="@color/text_dim" android:textSize="12sp" android:fontFamily="@font/sora_semibold"
-                            android:letterSpacing="0.04"/>
-                    </LinearLayout>
-                    <TextView android:id="@+id/heroTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp" android:maxLines="2" android:ellipsize="end" android:textColor="@color/text"
-                        android:textSize="34sp" android:fontFamily="@font/sora_bold" android:includeFontPadding="false"/>
-                    <TextView android:id="@+id/heroProg" android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text"
-                        android:textSize="14sp" android:visibility="gone"/>
-                    <ProgressBar android:id="@+id/heroProgress" style="?android:attr/progressBarStyleHorizontal"
-                        android:layout_width="220dp" android:layout_height="3dp" android:minHeight="3dp" android:maxHeight="3dp"
-                        android:layout_marginTop="6dp" android:max="1000" android:visibility="gone"/>
-                    <TextView android:id="@+id/heroDesc" android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:textColor="@color/text_dim"
-                        android:textSize="14sp" android:visibility="gone"/>
-                    <TextView android:id="@+id/heroNext" android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:layout_marginTop="3dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text_dim"
-                        android:textSize="12sp" android:visibility="gone"/>
-                    <LinearLayout android:id="@+id/heroChips" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp" android:orientation="horizontal"/>
-                </LinearLayout>
-            </FrameLayout>
-
-            <TextView android:id="@+id/status" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="48dp" android:textColor="@color/text_dim" android:textSize="13sp"/>
-
-            <androidx.recyclerview.widget.RecyclerView android:id="@+id/rows" android:layout_width="match_parent"
-                android:layout_height="0dp" android:layout_weight="1" android:paddingTop="10dp"
-                android:paddingBottom="120dp" android:clipToPadding="false" android:clipChildren="false"
-                android:overScrollMode="never" android:requiresFadingEdge="none" android:fadeScrollbars="false"/>
-        </LinearLayout>
-    </FrameLayout>
+    <include layout="@layout/home_content"/>
 
     <!-- search: on-screen keyboard on the left, live results on the right -->
     <FrameLayout android:id="@+id/searchLayer" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#F20E0F12" android:visibility="gone" android:clickable="true">
+        android:background="#FA080B14" android:visibility="gone" android:clickable="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
-            android:layout_marginStart="56dp" android:layout_marginEnd="56dp" android:layout_marginTop="36dp"
+            android:id="@+id/searchBody" android:layout_marginStart="28dp" android:layout_marginEnd="28dp" android:layout_marginTop="24dp"
             android:layout_marginBottom="36dp" android:orientation="horizontal">
-            <LinearLayout android:layout_width="420dp" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:id="@+id/searchInputColumn" android:layout_width="340dp" android:layout_height="match_parent" android:orientation="vertical">
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Search"
                     android:textColor="@color/text" android:textSize="26sp" android:fontFamily="@font/sora_bold"/>
                 <TextView android:id="@+id/searchQuery" android:layout_width="match_parent" android:layout_height="56dp"
@@ -149,7 +21,7 @@
                     android:orientation="vertical"/>
             </LinearLayout>
             <LinearLayout android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
-                android:layout_marginStart="44dp" android:orientation="vertical">
+                android:layout_marginStart="24dp" android:orientation="vertical">
                 <TextView android:id="@+id/searchCount" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:paddingBottom="10dp" android:paddingTop="10dp" android:textColor="@color/text_faint" android:textSize="13sp"
                     android:fontFamily="@font/sora_semibold"/>
@@ -171,9 +43,23 @@
             app:shutter_background_color="@android:color/transparent"/>
         <View android:id="@+id/playerScrim" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="@drawable/scrim_player" android:alpha="0"/>
-        <LinearLayout android:id="@+id/infoCard" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_gravity="bottom|start" android:layout_margin="40dp" android:orientation="horizontal"
-            android:gravity="center_vertical" android:minWidth="420dp" android:paddingStart="16dp" android:paddingEnd="30dp"
+        <LinearLayout android:id="@+id/playerBrand" android:layout_width="104dp" android:layout_height="90dp"
+            android:layout_gravity="top|start" android:layout_marginStart="40dp" android:layout_marginTop="22dp"
+            android:orientation="vertical" android:gravity="center" android:alpha="0" android:contentDescription="AK TV">
+            <ImageView android:layout_width="100dp" android:layout_height="86dp" android:src="@drawable/brand_aktv_user" android:scaleType="fitCenter"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"
+            android:layout_marginBottom="28dp" android:orientation="vertical">
+            <LinearLayout android:id="@+id/infoActions" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="center_vertical|end" android:visibility="gone">
+                <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>
+                <TextView android:id="@+id/infoSourceAction" style="@style/Widget.AKTV.PlayerAction" android:text="SOURCE"/>
+                <TextView android:id="@+id/infoQualityAction" style="@style/Widget.AKTV.PlayerAction" android:text="PICTURE QUALITY"/>
+                <TextView android:id="@+id/infoRetryAction" style="@style/Widget.AKTV.PlayerAction" android:text="RETRY"/>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/infoCard" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical" android:minWidth="420dp" android:paddingStart="18dp" android:paddingEnd="24dp"
             android:paddingTop="16dp" android:paddingBottom="16dp" android:alpha="0">
             <FrameLayout android:id="@+id/infoLogoBox" android:layout_width="64dp" android:layout_height="64dp">
                 <ImageView android:id="@+id/infoLogo" android:layout_width="42dp" android:layout_height="42dp"
@@ -182,7 +68,7 @@
                     android:gravity="center" android:textSize="20sp" android:fontFamily="@font/sora_bold"
                     android:includeFontPadding="false" android:visibility="gone"/>
             </FrameLayout>
-            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                 android:layout_marginStart="18dp" android:orientation="vertical">
                 <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:orientation="horizontal" android:gravity="center_vertical">
@@ -194,28 +80,66 @@
                         android:layout_marginStart="10dp" android:textColor="@color/text_dim" android:textSize="13sp"/>
                 </LinearLayout>
                 <TextView android:id="@+id/infoName" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="620dp"
+                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text" android:textSize="24sp" android:fontFamily="@font/sora_semibold"/>
                 <TextView android:id="@+id/infoNow" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="620dp"
+                    android:layout_marginTop="8dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text" android:textSize="15sp" android:visibility="gone"/>
                 <ProgressBar android:id="@+id/infoProgress" style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="280dp" android:layout_height="3dp" android:minHeight="3dp" android:maxHeight="3dp"
+                    android:layout_width="match_parent" android:layout_height="3dp" android:minHeight="3dp" android:maxHeight="3dp"
                     android:layout_marginTop="7dp" android:max="1000" android:visibility="gone"/>
                 <TextView android:id="@+id/infoDesc" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:maxWidth="620dp"
+                    android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:maxWidth="1100dp"
+                    android:textColor="@color/text_dim" android:textSize="12sp" android:visibility="gone"/>
+                <TextView android:id="@+id/infoScheduleNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text_dim" android:textSize="12sp" android:visibility="gone"/>
                 <TextView android:id="@+id/infoNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="620dp"
-                    android:textColor="@color/text_dim" android:textSize="12sp" android:visibility="gone"/>
+                    android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
+                    android:textColor="@color/text_faint" android:textSize="11sp" android:visibility="gone"/>
                 <TextView android:id="@+id/infoHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp" android:textColor="@color/text_faint" android:textSize="12sp"/>
+                    android:layout_marginTop="7dp" android:textColor="@color/text_faint" android:textSize="11sp"/>
+            </LinearLayout>
             </LinearLayout>
         </LinearLayout>
         <TextClock android:id="@+id/playerClock" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="top|end" android:layout_margin="36dp" android:format12Hour="h:mm" android:format24Hour="HH:mm"
             android:textColor="@color/text" android:textSize="20sp" android:fontFamily="@font/sora_regular" android:alpha="0"
             android:shadowColor="#99000000" android:shadowRadius="12"/>
+        <!-- programme guide: dedicated EPG panel, separate from the channel-zap drawer -->
+        <View android:id="@+id/programmeGuideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:background="#BA050813" android:visibility="gone" android:clickable="true" android:focusable="false"/>
+        <LinearLayout android:id="@+id/programmeGuidePanel" android:layout_width="440dp" android:layout_height="match_parent"
+            android:layout_gravity="end" android:layout_margin="16dp" android:orientation="vertical" android:padding="24dp"
+            android:background="@drawable/guide_panel" android:visibility="gone" android:clickable="true" android:focusable="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical"
+                android:orientation="horizontal">
+                <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV  /  LIVE"
+                        android:textColor="@color/ion" android:textSize="10sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.12"/>
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                        android:text="Programme guide" android:textColor="@color/text" android:textSize="24sp" android:fontFamily="@font/sora_bold"/>
+                </LinearLayout>
+                <TextView android:id="@+id/programmeGuideClose" android:layout_width="48dp" android:layout_height="42dp" android:gravity="center"
+                    android:text="✕" android:textColor="@color/text_dim" android:textSize="16sp" android:background="@drawable/player_action"
+                    android:focusable="true" android:clickable="true" android:contentDescription="Close programme guide"/>
+            </LinearLayout>
+            <TextView android:id="@+id/programmeGuideChannel" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="18dp" android:textColor="@color/text" android:textSize="16sp" android:fontFamily="@font/sora_semibold"
+                android:maxLines="2" android:ellipsize="end"/>
+            <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="12dp"
+                android:background="#28FFFFFF"/>
+            <TextView android:id="@+id/programmeGuideStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textColor="@color/text_dim" android:textSize="13sp" android:lineSpacingExtra="3dp"/>
+            <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+                android:layout_marginTop="8dp" android:fillViewport="false" android:overScrollMode="never">
+                <LinearLayout android:id="@+id/programmeGuideEntries" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:orientation="vertical"/>
+            </ScrollView>
+            <TextView android:id="@+id/programmeGuideCredit" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginTop="12dp" android:textColor="@color/text_faint" android:textSize="10sp" android:lineSpacingExtra="2dp"/>
+        </LinearLayout>
+
         <!-- channel guide: Right opens, Left goes back -->
         <View android:id="@+id/guideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="@drawable/scrim_guide" android:visibility="gone"/>
@@ -250,9 +174,10 @@
             </LinearLayout>
         </LinearLayout>
         <ProgressBar android:id="@+id/spinner" android:layout_width="56dp" android:layout_height="56dp"
-            android:layout_gravity="center" android:indeterminateTint="@color/ion"/>
+            android:layout_gravity="center" android:indeterminateTint="@color/ion" android:visibility="gone"/>
         <TextView android:id="@+id/playStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_gravity="center" android:layout_marginTop="124dp" android:textColor="@color/text_dim"
+            android:layout_gravity="top|center_horizontal" android:layout_marginTop="28dp" android:textColor="@color/text_dim"
+            android:gravity="center" android:maxWidth="700dp" android:paddingStart="24dp" android:paddingEnd="24dp"
             android:textSize="14sp" android:visibility="gone"/>
     </FrameLayout>
 

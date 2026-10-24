@@ -2,9 +2,41 @@ name: Build APK
 on:
   push:
     branches: [ main, master ]
+  pull_request:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Build APKs or inspect the live TG player contract
+        type: choice
+        options: [build, inspect]
+        default: build
 jobs:
+  inspect:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'inspect')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test bounded trace reports and credential-health redaction
+        run: |
+          node --test .github/scripts/compact-tg-trace.test.cjs
+          python3 -B .github/scripts/inspect-jjtv-player.test.py
+      - name: Inspect live player metadata without saving credentials
+        run: python3 .github/scripts/inspect-tg-player.py
+      - name: Inspect the user-provided JJTV native stream contract
+        run: python3 .github/scripts/inspect-jjtv-player.py
+      - name: Trace the website's real browser playback requests
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          npm install --prefix "$RUNNER_TEMP/tg-browser" --no-save --ignore-scripts playwright@1.56.0
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/tg-browser/node_modules/playwright" node .github/scripts/trace-tg-browser.cjs
   build:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode != 'inspect'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -12,13 +44,72 @@ jobs:
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v3
         with: { gradle-version: 8.9 }
-      - run: gradle assembleArm32Release assembleArm64Release --stacktrace
+      - name: Verify the working playback contracts during UI rebuild
+        run: python3 .github/scripts/check-playback-baseline.py
+      - name: Test stream resolution and build both APKs
+        run: |
+          set -o pipefail
+          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+      - name: Report deterministic tests for both APK variants
+        if: always()
+        run: python3 .github/scripts/report-unit-tests.py
+      - name: Publish native TV layout preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py home-tv
+      - name: Publish native logo mark preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py brand-mark
+      - name: Publish native entrance preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py entrance
+      - name: Publish native VOD player preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py vod-player
+      - name: Publish native live player preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py live-player
+      - name: Upload native home, entrance and player previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-native-ui-previews
+          path: app/build/reports/ui-preview/*.webp
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check current TG, JJTV and Frost native configuration
+        # Upstream/geographic outages must not make deterministic unit tests flaky.
+        continue-on-error: true
+        timeout-minutes: 5
+        run: gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' --tests 'com.aktv.app.FrostLiveContractTest' -PliveTg=true -PliveFrost=true --console=plain
+      - name: Report live native checks without credentials
+        if: always()
+        run: python3 .github/scripts/report-live-player.py
+      - name: Report native movie source checks without credentials
+        if: always()
+        run: python3 .github/scripts/report-frost-player.py
+      - name: Report build errors
+        if: failure()
+        run: python3 .github/scripts/report-build-errors.py
       - name: Rename APKs
         run: |
           mkdir -p out
           cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
           cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+      - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
+        run: |
+          python3 .github/scripts/verify-apk-archives.test.py
+          python3 .github/scripts/verify-apk-archives.py out
       - uses: actions/upload-artifact@v4
         with:
           name: AK-TV-apks
-          path: out/*.apk
+          path: |
+            out/*.apk
+            out/SHA256SUMS
+            out/apk-validation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-arm32-install
+          path: |
+            out/AK-TV-arm32.apk
+            out/SHA256SUMS
+            out/apk-validation.json

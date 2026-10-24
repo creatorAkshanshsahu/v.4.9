@@ -9,16 +9,19 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.view.*
 import android.view.animation.DecelerateInterpolator
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.*
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.res.ResourcesCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import org.json.JSONObject
-import org.mozilla.geckoview.*
 import java.util.concurrent.Executors
 
 /** Netflix / Apple TV style details page: backdrop, logo, facts, Play, and for series the seasons and episodes. */
@@ -27,8 +30,9 @@ class DetailActivity : Activity() {
         fun open(c: Context, t: Movies.Title) {
             c.startActivity(Intent(c, DetailActivity::class.java).putExtra("type", t.type).putExtra("imdb", t.imdb)
                 .putExtra("tmdb", t.tmdb).putExtra("name", t.name).putExtra("poster", t.poster).putExtra("bg", t.background)
-                .putExtra("logo", t.logo).putExtra("year", t.year).putExtra("rating", t.rating)
-                .putExtra("desc", t.description).putExtra("genres", t.genres.joinToString("|")))
+                .putExtra("logo", t.logo).putExtra("year", t.year).putExtra("rating", t.rating).putExtra("runtime", t.runtime)
+                .putExtra("desc", t.description).putExtra("genres", t.genres.joinToString("|"))
+                .putExtra("cast", t.cast.joinToString("|").take(900)).putExtra("trailerKey", t.trailerKey))
         }
     }
 
@@ -39,14 +43,17 @@ class DetailActivity : Activity() {
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
-    private val RED = Accent.SIGNAL
+    private val pageAccent get() = if (title.isSeries) Accent.INDIGO else Accent.GOLD
 
     private lateinit var title: Movies.Title
     private var episodes = listOf<Movies.Episode>(); private var seasons = listOf<Int>(); private var season = 1
     private lateinit var backdrop: ImageView; private lateinit var logo: ImageView; private lateinit var nameTv: TextView
     private lateinit var facts: TextView; private lateinit var desc: TextView; private lateinit var playBtn: TextView
+    private lateinit var trailerBtn: TextView; private lateinit var metadataChips: LinearLayout
     private lateinit var seasonRow: LinearLayout; private lateinit var epList: RecyclerView; private lateinit var body: LinearLayout
     private lateinit var loading: ProgressBar
+    private var selectedEpisode: Pair<Int, Int>? = null
+    private var trailerDialog: AlertDialog? = null; private var trailerWebView: WebView? = null
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -54,18 +61,21 @@ class DetailActivity : Activity() {
         title = Movies.Title(i.getStringExtra("imdb") ?: "", i.getIntExtra("tmdb", 0), i.getStringExtra("type") ?: "movie",
             i.getStringExtra("name") ?: "", i.getStringExtra("poster") ?: "", i.getStringExtra("bg") ?: "", i.getStringExtra("logo") ?: "",
             i.getStringExtra("year") ?: "", i.getStringExtra("rating") ?: "",
-            (i.getStringExtra("genres") ?: "").split("|").filter { it.isNotEmpty() }, i.getStringExtra("desc") ?: "")
+            (i.getStringExtra("genres") ?: "").split("|").filter { it.isNotEmpty() }, i.getStringExtra("desc") ?: "",
+            i.getStringExtra("runtime") ?: "", (i.getStringExtra("cast") ?: "").split("|").filter { it.isNotEmpty() },
+            i.getStringExtra("trailerKey") ?: "")
+        selectedEpisode = lastEpisode()
         build(); bind()
-        ui.postDelayed({ if (!isFinishing) try { BrowserActivity.sharedRuntime(this) } catch (_: Exception) {} }, 500)   // movies start faster
         io.execute {
             val (t, eps) = try { Movies.details(title.type, title.tmdb) } catch (_: Exception) { null to emptyList() }
             ui.post {
-                if (isFinishing) return@post
+                if (isFinishing || isDestroyed) return@post
                 loading.visibility = View.GONE
                 if (t != null) title = t.copy(tmdb = if (t.tmdb > 0) t.tmdb else title.tmdb)
                 episodes = eps; seasons = eps.map { it.season }.distinct().sorted()
                 val last = prefs.getInt("last_season_${title.imdb}", seasons.firstOrNull() ?: 1)
                 season = if (last in seasons) last else seasons.firstOrNull() ?: 1
+                selectedEpisode = lastEpisode()
                 bind(); if (title.isSeries) bindSeasons()
             }
         }
@@ -87,20 +97,30 @@ class DetailActivity : Activity() {
                 intArrayOf(Color.argb(255, 5, 6, 13), Color.argb(0, 5, 6, 13)))
         }, FrameLayout.LayoutParams(-1, (300 * dp).toInt(), Gravity.BOTTOM))
 
-        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding((64 * dp).toInt(), (56 * dp).toInt(), (64 * dp).toInt(), (28 * dp).toInt()) }
+        val compact = resources.configuration.screenHeightDp < 420
+        val inset = (if (compact) 28 else 48) * dp
+        val textWidth = (resources.displayMetrics.widthPixels * if (compact) 0.73f else 0.62f).toInt()
+        body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(inset.toInt(), ((if (compact) 72 else 94) * dp).toInt(), inset.toInt(), (32 * dp).toInt()) }
+        body.addView(tv(10f, pageAccent, fSemi).apply { text = if (title.isSeries) "AK SERIES  /  ON DEMAND" else "AK CINEMA  /  ON DEMAND"; letterSpacing = 0.14f },
+            LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (12 * dp).toInt() })
         logo = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_START; adjustViewBounds = true; visibility = View.GONE }
-        body.addView(logo, LinearLayout.LayoutParams((420 * dp).toInt(), (120 * dp).toInt()))
-        nameTv = tv(42f, Accent.TEXT, fBold).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
-        body.addView(nameTv, LinearLayout.LayoutParams((620 * dp).toInt(), -2))
-        facts = tv(15f, Accent.DIM, fSemi)
+        body.addView(logo, LinearLayout.LayoutParams(minOf(textWidth, (420 * dp).toInt()), ((if (compact) 74 else 110) * dp).toInt()))
+        nameTv = tv(if (compact) 30f else 42f, Accent.TEXT, fBold).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
+        body.addView(nameTv, LinearLayout.LayoutParams(textWidth, -2))
+        facts = tv(if (compact) 12f else 14f, Accent.DIM, fSemi)
         body.addView(facts, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (14 * dp).toInt() })
-        desc = tv(15f, Accent.DIM, fReg).apply { maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.25f) }
-        body.addView(desc, LinearLayout.LayoutParams((620 * dp).toInt(), -2).apply { topMargin = (12 * dp).toInt() })
+        metadataChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val chipScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; clipChildren = false; addView(metadataChips) }
+        body.addView(chipScroll, LinearLayout.LayoutParams(-1, (42 * dp).toInt()).apply { topMargin = (8 * dp).toInt() })
+        desc = tv(if (compact) 12f else 14f, Accent.DIM, fReg).apply { maxLines = if (compact) 3 else 4; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.25f) }
+        body.addView(desc, LinearLayout.LayoutParams(textWidth, -2).apply { topMargin = (8 * dp).toInt() })
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         playBtn = button("▶  Play", primary = true) { playCurrent() }
         buttons.addView(playBtn)
-        loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(RED) }
+        trailerBtn = button("▶  Trailer", primary = false) { showTrailerPanel() }
+        buttons.addView(trailerBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
+        loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(pageAccent) }
         buttons.addView(loading, LinearLayout.LayoutParams((28 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (16 * dp).toInt() })
         body.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (26 * dp).toInt() })
 
@@ -115,7 +135,18 @@ class DetailActivity : Activity() {
             setItemViewCacheSize(12)
         }
         body.addView(epList, LinearLayout.LayoutParams(-1, -2))
-        root.addView(body, FrameLayout.LayoutParams(-1, -1))
+        val contentScroll = ScrollView(this).apply { isFillViewport = true; isVerticalScrollBarEnabled = false; addView(body) }
+        root.addView(contentScroll, FrameLayout.LayoutParams(-1, -1))
+        val toolbar = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL; setPadding(inset.toInt(), (8 * dp).toInt(), inset.toInt(), (8 * dp).toInt())
+            setBackgroundColor(0xE6080B14.toInt())
+        }
+        toolbar.addView(button("‹  Back", false) { finish() })
+        toolbar.addView(ImageView(this).apply {
+            setImageResource(R.drawable.brand_aktv_user); scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "AK TV"
+        }, LinearLayout.LayoutParams((64 * dp).toInt(), (52 * dp).toInt()).apply { marginStart = (18 * dp).toInt() })
+        root.addView(toolbar, FrameLayout.LayoutParams(-1, (60 * dp).toInt(), Gravity.TOP))
         setContentView(root)
 
         body.alpha = 0f; body.translationX = -30 * dp
@@ -129,9 +160,11 @@ class DetailActivity : Activity() {
         val bg = GradientDrawable().apply { cornerRadius = 12 * dp }
         background = bg
         val style = { f: Boolean ->
-            bg.setColor(if (f) Color.WHITE else if (primary) Accent.SIGNAL else Color.argb(30, 255, 255, 255))
-            setTextColor(if (f || primary) Accent.ABYSS else Accent.TEXT)
-            animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
+            bg.setColor(if (f && !primary) Color.WHITE else if (primary) Color.WHITE else 0x991A2936.toInt())
+            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, pageAccent)
+            setTextColor(if (primary || f) Accent.ABYSS else Accent.TEXT)
+            animate().scaleX(if (f) 1.045f else 1f).scaleY(if (f) 1.045f else 1f).translationZ(if (f) 8 * dp else 0f)
+                .setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
         }
         style(false)
         setOnFocusChangeListener { _, f -> style(f) }
@@ -154,10 +187,76 @@ class DetailActivity : Activity() {
         bits.add(if (title.isSeries) "Series" else "Movie")
         if (title.genres.isNotEmpty()) bits.add(title.genres.take(3).joinToString(" · "))
         facts.text = bits.joinToString("   •   ")
+        metadataChips.removeAllViews()
+        (title.genres.take(5) + title.cast.take(4)).distinct().forEach { label ->
+            metadataChips.addView(metadataChip(label), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (7 * dp).toInt() })
+        }
+        metadataChips.visibility = if (metadataChips.childCount == 0) View.GONE else View.VISIBLE
         desc.text = title.description
         playBtn.text = if (title.isSeries) {
             val (s, e) = lastEpisode(); "▶  Play S$s · E$e"
         } else "▶  Play"
+    }
+
+    private fun metadataChip(label: String) = TextView(this).apply {
+        text = label; textSize = 10f; typeface = fSemi; setTextColor(Accent.DIM)
+        setPadding((11 * dp).toInt(), (6 * dp).toInt(), (11 * dp).toInt(), (6 * dp).toInt())
+        background = Ui.pill(dp, 0x552D4652, 24f)
+    }
+
+    /** In-app VOD-only YouTube embed. A missing key, non-embeddable video or WebView error is explicit. */
+    private fun showTrailerPanel() {
+        if (trailerDialog?.isShowing == true) return
+        val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val web = WebView(this).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = true
+            webChromeClient = WebChromeClient()
+            visibility = View.GONE
+        }
+        trailerWebView = web
+        val state = TextView(this).apply {
+            text = "Loading trailer…"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            setPadding((24 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt())
+        }
+        frame.addView(web, FrameLayout.LayoutParams(-1, -1))
+        frame.addView(state, FrameLayout.LayoutParams(-1, -1))
+        val dialog = AlertDialog.Builder(this).setTitle("Trailer · ${title.name.take(70)}")
+            .setView(frame).setNegativeButton("Close", null).create()
+        trailerDialog = dialog
+        dialog.setOnDismissListener {
+            if (trailerDialog === dialog) trailerDialog = null
+            if (trailerWebView === web) trailerWebView = null
+            web.stopLoading(); web.loadUrl("about:blank"); web.destroy()
+        }
+        dialog.setOnShowListener { dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.88f).toInt(), (resources.displayMetrics.heightPixels * 0.82f).toInt()) }
+        dialog.show()
+        io.execute {
+            val key = try { Movies.trailerKey(title.type, title.tmdb) } catch (_: Exception) { null }
+            ui.post {
+                if (!dialog.isShowing || isFinishing || isDestroyed) return@post
+                if (key.isNullOrBlank() || !key.matches(Regex("[A-Za-z0-9_-]{6,64}"))) {
+                    state.text = "Trailer unavailable for this title."
+                    return@post
+                }
+                state.text = "Loading YouTube trailer…"
+                web.visibility = View.VISIBLE
+                web.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        if (url == "about:blank") return
+                    }
+                    override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                        if (request?.isForMainFrame == true) {
+                            state.text = "Trailer unavailable on this TV."
+                            state.visibility = View.VISIBLE
+                        }
+                    }
+                }
+                val html = """<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><style>html,body,#player,#state{margin:0;width:100%;height:100%;background:#070c14;color:#eff6fa;font:16px sans-serif}#state{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}</style><div id="player"></div><div id="state">Loading YouTube trailer…</div><script src="https://www.youtube.com/iframe_api"></script><script>function onYouTubeIframeAPIReady(){new YT.Player('player',{width:'100%',height:'100%',videoId:'$key',playerVars:{playsinline:1,rel:0,autoplay:0},events:{onReady:function(){document.getElementById('state').style.display='none'},onError:function(){document.getElementById('state').innerText='Trailer unavailable on this TV';document.getElementById('state').style.display='grid'}}})}</script>"""
+                web.loadDataWithBaseURL("https://www.youtube-nocookie.com/", html, "text/html", "UTF-8", null)
+            }
+        }
     }
 
     private fun lastEpisode(): Pair<Int, Int> {
@@ -208,6 +307,8 @@ class DetailActivity : Activity() {
             card.addView(img, LinearLayout.LayoutParams((240 * dp).toInt(), (135 * dp).toInt()))
             val n = tv(14f, Accent.TEXT, fSemi).apply { id = 2; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
             card.addView(n, LinearLayout.LayoutParams((240 * dp).toInt(), -2).apply { topMargin = (10 * dp).toInt() })
+            card.addView(View(p.context).apply { id = 3; setBackgroundColor(pageAccent); visibility = View.GONE },
+                LinearLayout.LayoutParams((240 * dp).toInt(), (2 * dp).toInt()).apply { topMargin = (5 * dp).toInt() })
             card.layoutParams = RecyclerView.LayoutParams(-2, -2).apply { marginEnd = (18 * dp).toInt() }
             return VH(card)
         }
@@ -219,10 +320,24 @@ class DetailActivity : Activity() {
                 x.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).translationZ(if (f) 20 * dp else 0f)
                     .setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
                 (x as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(if (f) Accent.TEXT else Accent.DIM) }
-                if (f) desc.text = e.overview.ifEmpty { title.description }
+                if (f) {
+                    selectedEpisode = e.season to e.episode
+                    desc.text = e.overview.ifEmpty { title.description }
+                    updateEpisodeMarkers()
+                }
             }
             (v as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(Accent.DIM) }
-            v.setOnClickListener { play(e.season, e.episode) }
+            v.findViewById<View>(3).visibility = if (selectedEpisode == (e.season to e.episode)) View.VISIBLE else View.GONE
+            v.setOnClickListener { selectedEpisode = e.season to e.episode; play(e.season, e.episode) }
+        }
+    }
+
+    private fun updateEpisodeMarkers() {
+        for (i in 0 until epList.childCount) {
+            val child = epList.getChildAt(i)
+            val position = epList.getChildAdapterPosition(child)
+            val episode = seasonEps.getOrNull(position)
+            child.findViewById<View>(3)?.visibility = if (episode != null && selectedEpisode == (episode.season to episode.episode)) View.VISIBLE else View.GONE
         }
     }
 
@@ -233,121 +348,12 @@ class DetailActivity : Activity() {
     private fun play(s: Int, e: Int) {
         if (title.tmdb <= 0) { Toast.makeText(this, "This title can't be played right now", Toast.LENGTH_SHORT).show(); return }
         Movies.saveTitle(prefs, title)
-        val url = if (title.isSeries) {
-            prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
-            Movies.tvUrl(title.tmdb, s, e)
-        } else Movies.movieUrl(title.tmdb)
-        startActivity(Intent(this, MoviePlayerActivity::class.java).putExtra("url", url).putExtra("name", title.name))
+        if (title.isSeries) prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
+        MoviePlayerActivity.open(this, title, s, e, episodes)
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     override fun onResume() { super.onResume(); if (::playBtn.isInitialized) bind() }
     override fun onBackPressed() { finish(); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out) }
-}
-
-/**
- * Full-screen TGVID player (opens the movie / episode itself, not the website). Remote keys go straight to the
- * player: OK = play / pause, Left / Right = seek, Up / Down = volume, Back = close.
- */
-class MoviePlayerActivity : Activity() {
-    private lateinit var gv: GeckoView
-    private lateinit var session: GeckoSession
-    private lateinit var spinner: ProgressBar
-    private val ui = Handler(Looper.getMainLooper())
-    private var started = false; private var loadTries = 0
-
-    override fun onCreate(b: Bundle?) {
-        super.onCreate(b)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); hideUi()
-        val root = FrameLayout(this); root.setBackgroundColor(Color.BLACK); root.keepScreenOn = true
-        gv = GeckoView(this)
-        spinner = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Accent.SIGNAL) }
-        root.addView(gv, FrameLayout.LayoutParams(-1, -1))
-        root.addView(spinner, FrameLayout.LayoutParams((56 * resources.displayMetrics.density).toInt(), (56 * resources.displayMetrics.density).toInt(), Gravity.CENTER))
-        setContentView(root)
-
-        val rt = BrowserActivity.sharedRuntime(this)
-        session = GeckoSession(GeckoSessionSettings.Builder()
-            .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_DESKTOP)
-            .viewportMode(GeckoSessionSettings.VIEWPORT_MODE_DESKTOP).build())
-        session.navigationDelegate = object : GeckoSession.NavigationDelegate {
-            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession>? = null   // no pop-ups / ads
-        }
-        session.permissionDelegate = object : GeckoSession.PermissionDelegate {
-            override fun onContentPermissionRequest(session: GeckoSession, perm: GeckoSession.PermissionDelegate.ContentPermission): GeckoResult<Int>? =
-                GeckoResult.fromValue(GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW)   // let it autoplay with sound
-        }
-        session.contentDelegate = object : GeckoSession.ContentDelegate {
-            override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) { hideUi() }
-        }
-        session.progressDelegate = object : GeckoSession.ProgressDelegate {
-            override fun onPageStop(session: GeckoSession, success: Boolean) {
-                if (!success && loadTries < 2 && !closed) {      // network hiccup: try again instead of leaving a stuck black screen
-                    loadTries++; ui.postDelayed({ if (!closed) session.reload() }, 1500); return
-                }
-                spinner.animate().alpha(0f).setDuration(300).withEndAction { spinner.visibility = View.GONE }.start()
-                gv.requestFocus()
-            }
-        }
-        session.open(rt); gv.setSession(session)
-        gv.isFocusable = true; gv.isFocusableInTouchMode = true
-        session.loadUri(intent.getStringExtra("url") ?: "about:blank")
-    }
-
-    private fun hideUi() {
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
-    }
-
-    /** Sends a keyboard key to the page (the player listens for Space, arrows, F, C ...). */
-    private fun sendKey(code: Int) {
-        val t = SystemClock.uptimeMillis()
-        gv.dispatchKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0))
-        gv.dispatchKeyEvent(KeyEvent(t, t + 40, KeyEvent.ACTION_UP, code, 0))
-    }
-
-    private fun tapCenter() {
-        val x = gv.width / 2f; val y = gv.height / 2f; val t = SystemClock.uptimeMillis()
-        val d = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0); d.source = InputDevice.SOURCE_TOUCHSCREEN
-        gv.dispatchTouchEvent(d); d.recycle()
-        ui.postDelayed({
-            val u = MotionEvent.obtain(t, t + 60, MotionEvent.ACTION_UP, x, y, 0); u.source = InputDevice.SOURCE_TOUCHSCREEN
-            gv.dispatchTouchEvent(u); u.recycle()
-        }, 60)
-    }
-
-    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
-        val down = e.action == KeyEvent.ACTION_DOWN
-        when (e.keyCode) {
-            KeyEvent.KEYCODE_BACK -> { if (down) finish(); return true }
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                // OK = play / pause (Space in the player)
-                if (down && e.repeatCount == 0) { if (!started && spinner.visibility == View.VISIBLE) tapCenter() else sendKey(KeyEvent.KEYCODE_SPACE); started = true }
-                return true
-            }
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { if (down) sendKey(KeyEvent.KEYCODE_DPAD_RIGHT); return true }
-            KeyEvent.KEYCODE_MEDIA_REWIND -> { if (down) sendKey(KeyEvent.KEYCODE_DPAD_LEFT); return true }
-        }
-        return gv.dispatchKeyEvent(e) || super.dispatchKeyEvent(e)
-    }
-
-    override fun onWindowFocusChanged(f: Boolean) { super.onWindowFocusChanged(f); if (f) hideUi() }
-
-    // Leaving the player: the web view's video surface is released BEFORE the screen below comes back. Waiting for onDestroy
-    // (which can run after the next screen is already showing) left the old surface on top and the app looked black.
-    private var closed = false
-    private fun shutdown() {
-        if (closed) return; closed = true
-        ui.removeCallbacksAndMessages(null)
-        try { session.setActive(false) } catch (_: Exception) {}
-        try { gv.releaseSession() } catch (_: Exception) {}
-        try { session.close() } catch (_: Exception) {}
-        (gv.parent as? ViewGroup)?.removeView(gv)
-    }
-    override fun finish() { shutdown(); super.finish(); overridePendingTransition(0, 0) }
-    override fun onPause() { super.onPause(); if (!closed) try { session.setActive(false) } catch (_: Exception) {} }
-    override fun onResume() { super.onResume(); if (!closed) try { session.setActive(true) } catch (_: Exception) {} }
-    override fun onDestroy() { shutdown(); super.onDestroy() }
+    override fun onDestroy() { trailerDialog?.dismiss(); io.shutdownNow(); ui.removeCallbacksAndMessages(null); super.onDestroy() }
 }

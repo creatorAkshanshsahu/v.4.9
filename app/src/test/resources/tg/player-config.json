@@ -1,0 +1,38 @@
+{
+  "result": {
+    "primary": {
+      "label": "Server 1",
+      "urls": [
+        "https://media.example/live/index.mpd"
+      ],
+      "cookie": "__hdnea__=st=1~exp=4102444800~acl=/*~hmac=fixture",
+      "drm": {
+        "type": "clearkey",
+        "clearKeys": {
+          "00112233445566778899aabbccddeeff": "102132435465768798a9bacbdcedfe0f",
+          "ffeeddccbbaa99887766554433221100": "f0e0d0c0b0a090807060504030201000"
+        }
+      }
+    },
+    "backups": [
+      {
+        "label": "Server 2",
+        "url": "https://relay.example/play?channel=872&signature=a%2Bb",
+        "type": "dash",
+        "drm": {
+          "type": "clearkey",
+          "clearKeys": {
+            "00112233445566778899aabbccddeeff": "102132435465768798a9bacbdcedfe0f",
+            "ffeeddccbbaa99887766554433221100": "f0e0d0c0b0a090807060504030201000"
+          }
+        }
+      },
+      {
+        "label": "Server 3",
+        "playable": "https://relay.example/hls?route=playlist&id=872",
+        "type": "hls",
+        "drm": null
+      }
+    ]
+  }
+}
