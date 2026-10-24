@@ -2,7 +2,7 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 49; versionName = "4.9.32"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 50; versionName = "4.9.33"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
     }
     buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore

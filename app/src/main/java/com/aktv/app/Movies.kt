@@ -155,17 +155,40 @@ object Movies {
         } else ""
         val f = diskDir?.let { java.io.File(it, "tmdb_" + key.replace(Regex("[^A-Za-z0-9]"), "_") + ".json") }
         val fresh = f != null && f.exists() && System.currentTimeMillis() - f.lastModified() < 12 * 3600_000L
-        val body = if (fresh) f!!.readText() else try {
+        if (fresh) {
+            val cached = try { results(f!!.readText(), sh.type).distinctBy { it.imdb } } catch (_: Exception) { emptyList() }
+            if (cached.isNotEmpty()) {
+                synchronized(cache) { cache[key] = cached }
+                timing("catalog-shelf", started, true)
+                return cached
+            }
+            // An empty/corrupt cache must not turn every later retry into the same empty catalogue.
+            try { f?.delete() } catch (_: Exception) {}
+        }
+        val body = try {
             val all = org.json.JSONArray()
             for (page in 1..2) {
                 val arr = JSONObject(http(tm(path, "$extra&page=$page"))).optJSONArray("results") ?: break
                 for (i in 0 until arr.length()) all.put(arr.get(i))
             }
-            JSONObject().put("results", all).toString().also { b -> try { f?.writeText(b) } catch (_: Exception) {} }
-        } catch (e: Exception) { if (f != null && f.exists()) f.readText() else throw e }   // offline: use the older copy
+            JSONObject().put("results", all).toString()
+        } catch (e: Exception) {
+            val stale = try { f?.takeIf { it.exists() }?.readText()?.let { results(it, sh.type).distinctBy { title -> title.imdb } } }
+                catch (_: Exception) { null }
+            if (!stale.isNullOrEmpty()) {
+                synchronized(cache) { cache[key] = stale }
+                timing("catalog-shelf", started, true)
+                return stale
+            }
+            throw e
+        }
         val out = results(body, sh.type).distinctBy { it.imdb }
-        synchronized(cache) { cache[key] = out }
-        timing("catalog-shelf", started, fresh)
+        // Never persist/cache an empty or malformed catalogue response: a subsequent retry must try the network again.
+        if (out.isNotEmpty()) {
+            synchronized(cache) { cache[key] = out }
+            try { f?.writeText(body) } catch (_: Exception) {}
+        }
+        timing("catalog-shelf", started, false)
         return out
     }
 
