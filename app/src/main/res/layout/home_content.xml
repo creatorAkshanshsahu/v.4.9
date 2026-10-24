@@ -131,7 +131,7 @@
                     android:textColor="@color/text" android:textSize="11sp" android:fontFamily="@font/sora_semibold"/>
             </LinearLayout>
         </LinearLayout>
-        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.33"
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.34"
             android:visibility="gone" android:layout_marginTop="0dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
     </LinearLayout>
 </FrameLayout>

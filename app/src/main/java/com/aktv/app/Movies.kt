@@ -1,12 +1,11 @@
 package com.aktv.app
 
 import org.json.JSONObject
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import okhttp3.OkHttpClient
 
 /**
  * Movie & series catalogue (TMDB: trending, genres, search, posters, backdrops, episodes) and the
@@ -78,20 +77,15 @@ object Movies {
         }
     }
 
-    private fun http(u: String): String {
-        var last: Exception? = null
-        for (n in 1..3) {
-            try {
-                val c = URL(u).openConnection() as HttpURLConnection
-                c.connectTimeout = 12000; c.readTimeout = 15000; c.instanceFollowRedirects = true
-                c.setRequestProperty("User-Agent", Streams.CHROME); c.setRequestProperty("Accept", "application/json")
-                if (c.responseCode in 200..299) return c.inputStream.bufferedReader().use { it.readText() }
-                last = IOException("HTTP ${c.responseCode}"); c.disconnect()
-            } catch (e: Exception) { last = e }
-            Thread.sleep(500L * n)
-        }
-        throw last ?: IOException("no response")
-    }
+    private val catalogHttp = CatalogHttpTransport(OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(false)
+        .build())
+
+    private fun http(u: String): String = catalogHttp.get(u)
 
     private fun tm(path: String, q: String = "") = "$TM$path?api_key=$TMDB_KEY&language=en-US$q"
     private fun s(o: JSONObject, k: String) = if (o.isNull(k)) "" else o.optString(k, "")
