@@ -69,6 +69,7 @@ class MainActivity : AppCompatActivity() {
 
     // movie & series shelves (filled the first time the tab opens)
     private val vodRows = arrayOf(listOf<Row>(), listOf<Row>()); private val vodLoading = booleanArrayOf(false, false)   // [0] Movies, [1] Series
+    private val vodError = arrayOfNulls<String>(2)
     private val RECENT = "Recently watched"; private val CONTINUE = "Continue watching"
     private lateinit var heroBackdrop: ImageView; private lateinit var heroPreview: View; private lateinit var previewPv: PlayerView
     private var previewPlayer: ExoPlayer? = null; private var previewToken = 0
@@ -604,7 +605,12 @@ class MainActivity : AppCompatActivity() {
     }
     private fun updateStatus() {
         val msg = when { tab == 0 && all.isEmpty() -> v1Msg; tab == 1 && allV2.isEmpty() -> "Loading 24/7 channels…"
-            tab >= 2 && vodRows[tab - 2].isEmpty() -> { val w = if (tab == 3) "series" else "movies"; if (vodLoading[tab - 2]) "Loading $w…" else "Couldn't load $w. Check the connection and open the tab again." }
+            tab >= 2 && vodRows[tab - 2].isEmpty() -> {
+                val idx = tab - 2; val w = if (tab == 3) "series" else "movies"
+                if (vodLoading[idx]) "Loading $w…"
+                else vodError[idx]?.let { "Couldn't load $w ($it). Select this tab again to retry." }
+                    ?: "Couldn't load $w. Select this tab again to retry."
+            }
             else -> "" }
         status.text = msg; status.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
     }
@@ -705,15 +711,28 @@ class MainActivity : AppCompatActivity() {
      * Loads the shelves of one VOD tab (2 = Movies, 3 = Series) in parallel and shows each one the moment it (and those above it) are ready.
      * A title is shown only in the first shelf that has it, so the same poster no longer repeats down the page.
      */
+    private fun catalogFailureLabel(error: Exception): String {
+        val message = error.message.orEmpty()
+        if (message.matches(Regex("HTTP [0-9]{3}"))) return message.replace(' ', '_')
+        return when (error) {
+            is javax.net.ssl.SSLException -> "TLS"
+            is java.net.UnknownHostException -> "DNS"
+            is java.net.SocketTimeoutException -> "timeout"
+            is java.net.ConnectException -> "connect"
+            else -> "network"
+        }
+    }
+
     private fun loadVod(t: Int) {
         val idx = t - 2
         if (idx !in 0..1 || vodLoading[idx] || vodRows[idx].isNotEmpty()) return
-        vodLoading[idx] = true; updateStatus()
+        vodLoading[idx] = true; vodError[idx] = null; updateStatus()
         val shelves = Movies.shelves(if (idx == 1) "series" else "movie")
         Thread {
             val n = shelves.size
             val res = arrayOfNulls<List<Movies.Title>>(n); val done = BooleanArray(n)
             val pool = Executors.newFixedThreadPool(6)
+            val firstError = java.util.concurrent.atomic.AtomicReference<String?>(null)
             var published = 0
             val publish = {
                 runOnUiThread {
@@ -739,13 +758,18 @@ class MainActivity : AppCompatActivity() {
             }
             shelves.forEachIndexed { i, sh ->
                 pool.execute {
-                    try { val l = Movies.shelf(sh); if (l.isNotEmpty()) synchronized(res) { res[i] = l } } catch (_: Exception) {}
+                    try { val l = Movies.shelf(sh); if (l.isNotEmpty()) synchronized(res) { res[i] = l } }
+                    catch (error: Exception) { firstError.compareAndSet(null, catalogFailureLabel(error)) }
                     synchronized(res) { done[i] = true }
                     publish()
                 }
             }
             pool.shutdown(); pool.awaitTermination(40, java.util.concurrent.TimeUnit.SECONDS)
-            runOnUiThread { vodLoading[idx] = false; updateStatus() }
+            runOnUiThread {
+                vodLoading[idx] = false
+                if (vodRows[idx].isEmpty()) vodError[idx] = firstError.get() ?: "empty"
+                updateStatus()
+            }
         }.start()
     }
 
@@ -795,7 +819,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun switchTab(t: Int) {
-        if (t == tab) return
+        if (t == tab) {
+            if (t >= 2 && vodRows[t - 2].isEmpty() && !vodLoading[t - 2]) loadVod(t)
+            return
+        }
         val dir = if (t > tab) 1 else -1
         tab = t; layoutHero(); styleSegs(); stopPreview()
         val shift = 28 * dp * dir
