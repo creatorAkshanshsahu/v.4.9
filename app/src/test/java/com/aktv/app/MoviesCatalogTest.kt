@@ -56,7 +56,7 @@ class MoviesCatalogTest {
     }
 
     @Test fun `catalog DNS falls back to resolver only for TMDB API host`() {
-        val resolved = InetAddress.getByAddress(byteArrayOf(203, 0, 113, 7))
+        val resolved = InetAddress.getByAddress(byteArrayOf(203.toByte(), 0, 113, 7))
         var fallbackCalls = 0
         val system = object : Dns {
             override fun lookup(hostname: String): List<InetAddress> = throw UnknownHostException(hostname)
@@ -72,8 +72,9 @@ class MoviesCatalogTest {
 
         assertEquals(listOf(resolved), dns.lookup(CatalogDns.TMDB_API_HOST))
         assertEquals(1, fallbackCalls)
-        val unrelated = try { dns.lookup("other.example") } catch (error: UnknownHostException) { error }
-        assertEquals("other.example", unrelated.message)
+        var unrelated: UnknownHostException? = null
+        try { dns.lookup("other.example") } catch (error: UnknownHostException) { unrelated = error }
+        assertEquals("other.example", unrelated?.message)
         assertEquals(1, fallbackCalls)
     }
 
