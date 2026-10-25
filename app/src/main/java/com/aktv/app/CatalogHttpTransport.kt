@@ -8,7 +8,7 @@ import java.io.IOException
 internal class CatalogHttpTransport(private val client: OkHttpClient) {
     fun get(url: String): String {
         var last: Exception? = null
-        for (attempt in 1..3) {
+        for (attempt in 1..2) {
             try {
                 val request = Request.Builder().url(url)
                     .header("User-Agent", Streams.CHROME)

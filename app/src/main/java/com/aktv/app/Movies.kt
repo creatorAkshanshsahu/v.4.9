@@ -79,9 +79,9 @@ object Movies {
 
     private val catalogHttp = CatalogHttpTransport(OkHttpClient.Builder()
         .dns(CatalogDns(fallbackDns = GoogleDohDns()))
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(14, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(false)
         .build())
@@ -129,7 +129,7 @@ object Movies {
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let { o -> parse(o, type) } }
     }
 
-    /** One shelf of titles (two pages, cached for the session and for 12 h on disk). Every title has a TMDB id; native source availability is checked separately. */
+    /** One shelf of titles (first TMDB page, cached for the session and for 12 h on disk). Every title has a TMDB id; native source availability is checked separately. */
     fun shelf(sh: Shelf): List<Title> {
         val key = "${sh.type}/${sh.catalog}/${sh.genre}"
         return shelfRequests.execute(key) { loadShelf(sh, key) }
@@ -161,12 +161,14 @@ object Movies {
             try { f?.delete() } catch (_: Exception) {}
         }
         val body = try {
-            val all = org.json.JSONArray()
-            for (page in 1..2) {
-                val arr = JSONObject(http(tm(path, "$extra&page=$page"))).optJSONArray("results") ?: break
-                for (i in 0 until arr.length()) all.put(arr.get(i))
-            }
-            JSONObject().put("results", all).toString()
+            // Page one is enough to populate a shelf and avoids making every row wait for a second
+            // network round-trip. In particular, a slow page 2 must never turn a valid page 1 into
+            // an empty tab on slower Android TV/network combinations.
+            val arr = JSONObject(http(tm(path, "$extra&page=1"))).optJSONArray("results")
+                ?: throw java.io.IOException("TMDB response missing results")
+            val firstPage = org.json.JSONArray()
+            for (i in 0 until arr.length()) firstPage.put(arr.get(i))
+            JSONObject().put("results", firstPage).toString()
         } catch (e: Exception) {
             val stale = try { f?.takeIf { it.exists() }?.readText()?.let { results(it, sh.type).distinctBy { title -> title.imdb } } }
                 catch (_: Exception) { null }

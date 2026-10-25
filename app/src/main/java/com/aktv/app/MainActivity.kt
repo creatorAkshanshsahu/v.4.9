@@ -731,7 +731,9 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val n = shelves.size
             val res = arrayOfNulls<List<Movies.Title>>(n); val done = BooleanArray(n)
-            val pool = Executors.newFixedThreadPool(6)
+            // TMDB's public API is contacted by many shelves. Keep TV/mobile network pressure
+            // bounded so Android TV hotspots don't starve the first visible catalogue rows.
+            val pool = Executors.newFixedThreadPool(2)
             val firstError = java.util.concurrent.atomic.AtomicReference<String?>(null)
             var published = 0
             val publish = {

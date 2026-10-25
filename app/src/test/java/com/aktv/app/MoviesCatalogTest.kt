@@ -43,7 +43,7 @@ class MoviesCatalogTest {
 
     @Test fun `catalog transport retries HTTP errors and preserves the status code`() {
         MockWebServer().use { server ->
-            repeat(3) { server.enqueue(MockResponse().setResponseCode(401).setBody("{}")) }
+            repeat(2) { server.enqueue(MockResponse().setResponseCode(401).setBody("{}")) }
             val transport = CatalogHttpTransport(OkHttpClient.Builder().build())
             val error = try {
                 transport.get(server.url("/3/configuration").toString())
@@ -51,47 +51,91 @@ class MoviesCatalogTest {
             } catch (e: IOException) { e }
 
             assertEquals("HTTP 401", error?.message)
-            assertEquals(3, server.requestCount)
+            assertEquals(2, server.requestCount)
         }
     }
 
-    @Test fun `catalog DNS falls back to resolver only for TMDB API host`() {
-        val resolved = InetAddress.getByAddress(byteArrayOf(203.toByte(), 0, 113, 7))
+    @Test fun `catalog DNS tries DoH and retains system addresses as connection fallbacks`() {
+        val systemAddress = InetAddress.getByAddress(byteArrayOf(203.toByte(), 0, 113, 8))
+        val dohAddress = InetAddress.getByAddress(byteArrayOf(203.toByte(), 0, 113, 7))
         var fallbackCalls = 0
+        var systemCalls = 0
         val system = object : Dns {
-            override fun lookup(hostname: String): List<InetAddress> = throw UnknownHostException(hostname)
+            override fun lookup(hostname: String): List<InetAddress> {
+                systemCalls++
+                return listOf(systemAddress)
+            }
         }
         val fallback = object : Dns {
             override fun lookup(hostname: String): List<InetAddress> {
                 fallbackCalls++
                 assertEquals(CatalogDns.TMDB_API_HOST, hostname)
-                return listOf(resolved)
+                return listOf(dohAddress)
             }
         }
         val dns = CatalogDns(system, fallback)
 
-        assertEquals(listOf(resolved), dns.lookup(CatalogDns.TMDB_API_HOST))
+        assertEquals(listOf(dohAddress, systemAddress), dns.lookup(CatalogDns.TMDB_API_HOST))
         assertEquals(1, fallbackCalls)
-        var unrelated: UnknownHostException? = null
-        try { dns.lookup("other.example") } catch (error: UnknownHostException) { unrelated = error }
-        assertEquals("other.example", unrelated?.message)
+        assertEquals(1, systemCalls)
+        assertEquals(listOf(systemAddress), dns.lookup("other.example"))
         assertEquals(1, fallbackCalls)
+        assertEquals(2, systemCalls)
     }
 
-    @Test fun `Google DoH parses IPv4 and IPv6 answers for TMDB without carrying API data`() {
+    @Test fun `catalog DNS backs off unavailable DoH and keeps system DNS working`() {
+        val systemAddress = InetAddress.getByAddress(byteArrayOf(203.toByte(), 0, 113, 8))
+        var systemCalls = 0
+        var fallbackCalls = 0
+        var nowMs = 1_000L
+        val system = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                systemCalls++
+                return listOf(systemAddress)
+            }
+        }
+        val fallback = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                fallbackCalls++
+                throw UnknownHostException(hostname)
+            }
+        }
+        val dns = CatalogDns(system, fallback) { nowMs }
+
+        assertEquals(listOf(systemAddress), dns.lookup(CatalogDns.TMDB_API_HOST))
+        assertEquals(listOf(systemAddress), dns.lookup(CatalogDns.TMDB_API_HOST))
+        assertEquals(1, fallbackCalls)
+        assertEquals(2, systemCalls)
+        nowMs += 60_001L
+        assertEquals(listOf(systemAddress), dns.lookup(CatalogDns.TMDB_API_HOST))
+        assertEquals(2, fallbackCalls)
+    }
+
+    @Test fun `Google DoH queries AAAA when no IPv4 answer exists`() {
         MockWebServer().use { server ->
-            server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[{"name":"api.themoviedb.org.","type":1,"TTL":60,"data":"198.51.100.25"}]}"""))
+            server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[]}"""))
             server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[{"name":"api.themoviedb.org.","type":28,"TTL":60,"data":"2001:db8::25"}]}"""))
             val dns = GoogleDohDns(OkHttpClient.Builder().build(), server.url("/resolve"))
 
-            val addresses = dns.lookup(CatalogDns.TMDB_API_HOST).map { it.hostAddress }.toSet()
-            assertEquals(setOf("198.51.100.25", "2001:db8:0:0:0:0:0:25"), addresses)
+            val addresses = dns.lookup(CatalogDns.TMDB_API_HOST).map { it.hostAddress }
+            assertEquals(listOf("2001:db8:0:0:0:0:0:25"), addresses)
             val aRequest = server.takeRequest()
             val aaaaRequest = server.takeRequest()
             assertEquals("api.themoviedb.org", aRequest.requestUrl?.queryParameter("name"))
             assertEquals("A", aRequest.requestUrl?.queryParameter("type"))
             assertEquals("AAAA", aaaaRequest.requestUrl?.queryParameter("type"))
             assertEquals("application/dns-json", aRequest.getHeader("Accept"))
+        }
+    }
+
+    @Test fun `Google DoH stops after a usable IPv4 answer`() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[{"name":"api.themoviedb.org.","type":1,"TTL":60,"data":"198.51.100.25"}]}"""))
+            val dns = GoogleDohDns(OkHttpClient.Builder().build(), server.url("/resolve"))
+
+            assertEquals(listOf("198.51.100.25"), dns.lookup(CatalogDns.TMDB_API_HOST).map { it.hostAddress })
+            assertEquals("A", server.takeRequest().requestUrl?.queryParameter("type"))
+            assertEquals(1, server.requestCount)
         }
     }
 }
