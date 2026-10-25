@@ -91,9 +91,10 @@ internal class GoogleDohDns(
                 InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)),
                 InetAddress.getByAddress(byteArrayOf(8, 8, 4, 4))
             )
-            val dns = Dns { hostname ->
-                if (hostname.equals("dns.google", ignoreCase = true)) bootstrap
-                else Dns.SYSTEM.lookup(hostname)
+            val dns = object : Dns {
+                override fun lookup(hostname: String): List<InetAddress> =
+                    if (hostname.equals("dns.google", ignoreCase = true)) bootstrap
+                    else Dns.SYSTEM.lookup(hostname)
             }
             return OkHttpClient.Builder()
                 .dns(dns)
