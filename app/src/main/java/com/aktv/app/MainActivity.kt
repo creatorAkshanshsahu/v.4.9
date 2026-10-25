@@ -773,14 +773,14 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** Builds the rows for the first [upTo] shelves, giving each title to the first shelf that has it. Shelves left with too few new titles are skipped. */
+    /** Builds rows for the first [upTo] shelves, giving each title to its first matching shelf and skipping only fully deduplicated rows. */
     private fun dedupeShelves(shelves: List<Movies.Shelf>, res: Array<List<Movies.Title>?>, upTo: Int, old: List<Row>): List<Row> {
         val seen = HashSet<String>(); val out = ArrayList<Row>()
         val byTitle = old.associateBy { it.title }
         for (i in 0 until upTo) {
             val l = res[i] ?: continue
             val keep = l.filter { seen.add(it.imdb) }.take(50)
-            if (keep.size < 6) { keep.forEach { seen.remove(it.imdb) }; continue }
+            if (keep.isEmpty()) continue
             val tiles = keep.map { Tile.Mv(it) }
             val title = shelves[i].title
             out.add(byTitle[title]?.takeIf { it.tiles == tiles } ?: Row(title, tiles))   // same Row object when nothing changed
