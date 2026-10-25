@@ -1,5 +1,6 @@
 package com.aktv.app
 
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -7,6 +8,8 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.IOException
+import java.net.InetAddress
+import java.net.UnknownHostException
 
 class MoviesCatalogTest {
     @Test fun `trailer selection prefers an official YouTube trailer and ignores unrelated providers`() {
@@ -49,6 +52,37 @@ class MoviesCatalogTest {
 
             assertEquals("HTTP 401", error?.message)
             assertEquals(3, server.requestCount)
+        }
+    }
+
+    @Test fun `catalog DNS falls back to resolver only for TMDB API host`() {
+        val resolved = InetAddress.getByAddress(byteArrayOf(203, 0, 113, 7))
+        var fallbackCalls = 0
+        val system = Dns { throw UnknownHostException(it) }
+        val fallback = Dns { hostname ->
+            fallbackCalls++
+            assertEquals(CatalogDns.TMDB_API_HOST, hostname)
+            listOf(resolved)
+        }
+        val dns = CatalogDns(system, fallback)
+
+        assertEquals(listOf(resolved), dns.lookup(CatalogDns.TMDB_API_HOST))
+        assertEquals(1, fallbackCalls)
+        val unrelated = try { dns.lookup("other.example") } catch (error: UnknownHostException) { error }
+        assertEquals("other.example", unrelated.message)
+        assertEquals(1, fallbackCalls)
+    }
+
+    @Test fun `Google DoH parses IPv4 answers for the TMDB host without carrying API data`() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[{"name":"api.themoviedb.org.","type":1,"TTL":60,"data":"198.51.100.25"}]}"""))
+            val dns = GoogleDohDns(OkHttpClient.Builder().build(), server.url("/resolve"))
+
+            assertEquals("198.51.100.25", dns.lookup(CatalogDns.TMDB_API_HOST).single().hostAddress)
+            val request = server.takeRequest()
+            assertEquals("api.themoviedb.org", request.requestUrl?.queryParameter("name"))
+            assertEquals("A", request.requestUrl?.queryParameter("type"))
+            assertEquals("application/dns-json", request.getHeader("Accept"))
         }
     }
 }

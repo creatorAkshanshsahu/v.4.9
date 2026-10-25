@@ -78,6 +78,7 @@ object Movies {
     }
 
     private val catalogHttp = CatalogHttpTransport(OkHttpClient.Builder()
+        .dns(CatalogDns(fallbackDns = GoogleDohDns()))
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(30, TimeUnit.SECONDS)
