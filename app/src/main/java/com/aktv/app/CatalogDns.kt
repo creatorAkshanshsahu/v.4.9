@@ -6,6 +6,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.Locale
@@ -54,42 +55,52 @@ internal class GoogleDohDns(
         val host = hostname.lowercase(Locale.US)
         cache[host]?.takeIf { it.expiresAt > nowMs() }?.let { return it.addresses }
 
-        val url = endpoint.newBuilder().addQueryParameter("name", host).addQueryParameter("type", "A").build()
-        val request = Request.Builder().url(url).header("Accept", "application/dns-json").build()
-        val result = try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw UnknownHostException("DoH HTTP ${response.code}")
-                val body = response.body?.string() ?: throw UnknownHostException("Empty DoH response")
-                val root = JSONObject(body)
-                if (root.optInt("Status", -1) != 0) throw UnknownHostException("DoH lookup failed")
-                val answers = root.optJSONArray("Answer") ?: throw UnknownHostException("No DNS answer")
-                val parsed = ArrayList<InetAddress>()
-                var ttl = 300L
-                for (i in 0 until answers.length()) {
-                    val answer = answers.optJSONObject(i) ?: continue
-                    if (answer.optInt("type") != 1) continue
-                    val value = answer.optString("data")
-                    if (!value.matches(Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}"))) continue
-                    try { parsed.add(InetAddress.getByName(value)) } catch (_: Exception) { }
-                    ttl = minOf(ttl, answer.optLong("TTL", 300L).coerceIn(30L, 300L))
+        val parsed = ArrayList<InetAddress>()
+        var ttlSeconds = 300L
+        var successfulLookups = 0
+        var lastError: Exception? = null
+        for ((queryType, recordType) in listOf("A" to 1, "AAAA" to 28)) {
+            val url = endpoint.newBuilder().addQueryParameter("name", host).addQueryParameter("type", queryType).build()
+            val request = Request.Builder().url(url).header("Accept", "application/dns-json").build()
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw UnknownHostException("DoH HTTP ${response.code}")
+                    val body = response.body?.string() ?: throw UnknownHostException("Empty DoH response")
+                    val root = JSONObject(body)
+                    if (root.optInt("Status", -1) != 0) throw UnknownHostException("DoH lookup failed")
+                    successfulLookups++
+                    val answers = root.optJSONArray("Answer") ?: return@use
+                    for (i in 0 until answers.length()) {
+                        val answer = answers.optJSONObject(i) ?: continue
+                        if (answer.optInt("type") != recordType) continue
+                        val value = answer.optString("data")
+                        val isAddress = if (recordType == 1) value.matches(Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}"))
+                            else value.contains(':') && value.matches(Regex("[0-9a-fA-F:.]+"))
+                        if (!isAddress) continue
+                        try { parsed.add(InetAddress.getByName(value)) } catch (_: Exception) { }
+                        ttlSeconds = minOf(ttlSeconds, answer.optLong("TTL", 300L).coerceIn(30L, 300L))
+                    }
                 }
-                parsed.distinct() to ttl
+            } catch (error: Exception) {
+                lastError = error
             }
-        } catch (error: UnknownHostException) {
-            throw error
-        } catch (error: Exception) {
-            throw UnknownHostException("DoH lookup failed").apply { initCause(error) }
         }
-        if (result.first.isEmpty()) throw UnknownHostException(host)
-        cache[host] = Entry(nowMs() + result.second * 1_000L, result.first)
-        return result.first
+        if (parsed.isEmpty()) {
+            if (successfulLookups == 0 && lastError != null) throw UnknownHostException("DoH lookup failed").apply { initCause(lastError) }
+            throw UnknownHostException(host)
+        }
+        val addresses = parsed.distinct().sortedBy { if (it is Inet6Address) 0 else 1 }
+        cache[host] = Entry(nowMs() + ttlSeconds * 1_000L, addresses)
+        return addresses
     }
 
     companion object {
         private fun bootstrapClient(): OkHttpClient {
             val bootstrap = listOf(
                 InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)),
-                InetAddress.getByAddress(byteArrayOf(8, 8, 4, 4))
+                InetAddress.getByAddress(byteArrayOf(8, 8, 4, 4)),
+                InetAddress.getByName("2001:4860:4860::8888"),
+                InetAddress.getByName("2001:4860:4860::8844")
             )
             val dns = object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =

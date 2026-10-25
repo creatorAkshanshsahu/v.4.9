@@ -78,16 +78,20 @@ class MoviesCatalogTest {
         assertEquals(1, fallbackCalls)
     }
 
-    @Test fun `Google DoH parses IPv4 answers for the TMDB host without carrying API data`() {
+    @Test fun `Google DoH parses IPv4 and IPv6 answers for TMDB without carrying API data`() {
         MockWebServer().use { server ->
             server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[{"name":"api.themoviedb.org.","type":1,"TTL":60,"data":"198.51.100.25"}]}"""))
+            server.enqueue(MockResponse().setBody("""{"Status":0,"Answer":[{"name":"api.themoviedb.org.","type":28,"TTL":60,"data":"2001:db8::25"}]}"""))
             val dns = GoogleDohDns(OkHttpClient.Builder().build(), server.url("/resolve"))
 
-            assertEquals("198.51.100.25", dns.lookup(CatalogDns.TMDB_API_HOST).single().hostAddress)
-            val request = server.takeRequest()
-            assertEquals("api.themoviedb.org", request.requestUrl?.queryParameter("name"))
-            assertEquals("A", request.requestUrl?.queryParameter("type"))
-            assertEquals("application/dns-json", request.getHeader("Accept"))
+            val addresses = dns.lookup(CatalogDns.TMDB_API_HOST).map { it.hostAddress }.toSet()
+            assertEquals(setOf("198.51.100.25", "2001:db8:0:0:0:0:0:25"), addresses)
+            val aRequest = server.takeRequest()
+            val aaaaRequest = server.takeRequest()
+            assertEquals("api.themoviedb.org", aRequest.requestUrl?.queryParameter("name"))
+            assertEquals("A", aRequest.requestUrl?.queryParameter("type"))
+            assertEquals("AAAA", aaaaRequest.requestUrl?.queryParameter("type"))
+            assertEquals("application/dns-json", aRequest.getHeader("Accept"))
         }
     }
 }
