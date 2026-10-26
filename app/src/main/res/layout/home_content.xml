@@ -14,6 +14,8 @@
                 app:resize_mode="zoom" app:surface_type="texture_view" app:use_artwork="false"
                 app:shutter_background_color="@android:color/transparent"/>
         </FrameLayout>
+        <View android:id="@+id/heroTreatment" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:background="@drawable/scrim_hero_cinematic" android:importantForAccessibility="no"/>
         <ImageView android:id="@+id/heroLogo" android:layout_width="210dp" android:layout_height="132dp"
             android:layout_gravity="top|end" android:layout_marginTop="42dp" android:layout_marginEnd="56dp" android:scaleType="fitCenter"/>
         <TextView android:id="@+id/heroLogoCaption" android:layout_width="170dp" android:layout_height="wrap_content"
@@ -53,7 +55,7 @@
             <LinearLayout android:id="@+id/phoneNav" android:layout_width="wrap_content" android:layout_height="match_parent"
                 android:orientation="horizontal" android:gravity="center_vertical">
                 <ImageView android:id="@+id/phoneBrand" android:layout_width="48dp" android:layout_height="42dp"
-                    android:layout_marginEnd="8dp" android:src="@drawable/brand_aktv_user" android:scaleType="fitCenter"
+                    android:layout_marginEnd="8dp" android:src="@drawable/aktv_logo_cinematic" android:scaleType="fitCenter"
                     android:contentDescription="AK TV logo"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
                 <TextView android:id="@+id/phoneV2" style="@style/Widget.AKTV.PhonePill" android:text="Always on"/>
@@ -98,7 +100,7 @@
     <LinearLayout android:id="@+id/navRail" android:layout_width="144dp" android:layout_height="match_parent"
         android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
         android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
-        <ImageView android:id="@+id/brandMark" android:layout_width="96dp" android:layout_height="82dp" android:src="@drawable/brand_aktv_user"
+        <ImageView android:id="@+id/brandMark" android:layout_width="96dp" android:layout_height="82dp" android:src="@drawable/aktv_logo_cinematic"
             android:scaleType="fitCenter" android:contentDescription="AK TV logo"/>
         <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
             android:visibility="gone" android:layout_marginTop="0dp" android:layout_marginBottom="0dp" android:textSize="11sp" android:letterSpacing="0.11"
@@ -131,7 +133,7 @@
                     android:textColor="@color/text" android:textSize="11sp" android:fontFamily="@font/sora_semibold"/>
             </LinearLayout>
         </LinearLayout>
-        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.37"
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.39"
             android:visibility="gone" android:layout_marginTop="0dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
     </LinearLayout>
 </FrameLayout>

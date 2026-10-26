@@ -1,0 +1,5 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@drawable/scrim_left"/>
+    <item android:drawable="@drawable/scrim_bottom"/>
+    <item android:drawable="@drawable/scrim_top"/>
+</layer-list>

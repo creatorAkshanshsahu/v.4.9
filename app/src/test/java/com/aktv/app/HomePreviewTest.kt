@@ -44,7 +44,7 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.sectionTitle).text = if (movies) "Movies" else "Live TV"
             root.findViewById<TextView>(R.id.sectionKicker).apply {
                 text = if (movies) "YOUR NEXT MOVIE NIGHT" else "LIVE, RIGHT NOW"
-                setTextColor(if (movies) Accent.GOLD else Accent.SIGNAL)
+                setTextColor(Accent.SIGNAL)
             }
             root.findViewById<TextView>(R.id.librarySummary).text = "SAMPLE CONTENT · UI PREVIEW"
             root.findViewById<TextView>(R.id.homeClock).text = "8:45 PM"
@@ -61,17 +61,22 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.heroDot).apply {
                 visibility = View.VISIBLE
                 text = if (movies) "FEATURED MOVIE" else "●  LIVE NOW"
-                setTextColor(if (movies) Accent.GOLD else Accent.SIGNAL)
+                setTextColor(Accent.SIGNAL)
             }
-            root.findViewById<ImageView>(R.id.heroLogo).setImageResource(if (movies) R.drawable.brand_aktv_user else R.drawable.brand_ak_mark)
+            root.findViewById<ImageView>(R.id.heroLogo).apply {
+                setImageResource(R.drawable.aktv_mark_cinematic)
+                visibility = if (movies) View.GONE else View.VISIBLE
+            }
             root.findViewById<TextView>(R.id.heroLogoCaption).visibility = if (movies) View.GONE else View.VISIBLE
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 intArrayOf(0xFF091521.toInt(), 0xFF0C1D2A.toInt(), 0xFF07111B.toInt()))
-            root.findViewById<ImageView>(R.id.heroBackdrop).apply { setImageDrawable(null); visibility = View.GONE; alpha = 0f }
+            root.findViewById<ImageView>(R.id.heroBackdrop).apply {
+                setImageResource(R.drawable.home_hero_cinematic); visibility = View.VISIBLE; alpha = 1f
+            }
             root.findViewById<View>(R.id.heroPreview).visibility = View.GONE
             root.findViewById<View>(R.id.heroGlow).visibility = View.VISIBLE
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
-            val heroActions = if (movies) listOf("▶   Details") else listOf("▶   Play Live", "ⓘ   Details")
+            val heroActions = if (movies) listOf("▶   More info") else listOf("▶   Play Live", "ⓘ   Details")
             heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
                     text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)

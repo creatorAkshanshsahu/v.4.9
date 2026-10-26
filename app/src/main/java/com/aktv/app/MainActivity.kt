@@ -451,7 +451,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.home).requestLayout()
     }
 
-    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2 -> Accent.GOLD; else -> Accent.INDIGO }
+    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2 -> Accent.SIGNAL; else -> Accent.INDIGO }
 
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
         val accent = sectionAccent()
@@ -479,9 +479,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 2) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
 
-    /** Small view-property lift plus a translucent aqua focus plate; no layout animation or blur pass. */
+    /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
     private fun focusAnim(x: View, f: Boolean, color: Int = 0) {
-        val s = if (f) 1.06f else 1f
+        val s = if (f) 1.045f else 1f
         x.animate().cancel()
         x.animate().setStartDelay(0).scaleX(s).scaleY(s).translationZ(if (f) 12 * dp else 0f)
             .setDuration(180).setInterpolator(DecelerateInterpolator(1.6f)).start()
@@ -866,22 +866,58 @@ class MainActivity : AppCompatActivity() {
     }
     private fun applyHero(t: Tile?) {
         heroText.animate().cancel()
-        heroText.animate().alpha(0f).translationX(-10 * dp).setDuration(110).withEndAction {
-            fillHero(t); heroText.translationX = 16 * dp
-            heroText.animate().alpha(1f).translationX(0f).setDuration(300).setInterpolator(DecelerateInterpolator(2f)).start()
+        heroText.animate().alpha(0f).translationX(-14 * dp).setDuration(150).withEndAction {
+            fillHero(t); heroText.translationX = 20 * dp
+            heroText.animate().alpha(1f).translationX(0f).setDuration(380).setInterpolator(DecelerateInterpolator(1.7f)).start()
         }.start()
     }
-    /** Tints the native, image-free hero gradient with the selected channel's accent. */
+    /** Tints the dark hero treatment with the selected section's accent. */
     private fun glowHero(c: Int, partner: Int) {
         orbBg.colors = intArrayOf(Ui.mix(0xFF091521.toInt(), partner, 0.12f), Ui.mix(0xFF0C1D2A.toInt(), c, 0.16f), 0xFF07111B.toInt())
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
-    /** Keep the reference's atmospheric hero native: gradient, typography and accents, never a backdrop image/video. */
-    private fun showCinematicFallback() {
+    /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
+    private fun showCinematicFallback(forTile: Tile?) {
         heroBackdrop.animate().cancel(); heroOrb.animate().cancel()
-        heroBackdrop.setImageDrawable(null); heroBackdrop.alpha = 0f; heroOrb.alpha = 1f
+        if (forTile !is Tile.Mv) {
+            heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+            heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+        }
+        heroBackdrop.visibility = View.VISIBLE
+        heroOrb.alpha = if (forTile is Tile.Mv) 0.30f else 0.72f
         heroPreview.visibility = View.GONE
         stopPreview()
+    }
+
+    /** Use the selected film's real TMDB backdrop for a full-bleed streaming-service hero. */
+    private fun showHeroArtwork(title: Movies.Title) {
+        val artwork = title.background.ifBlank { title.poster }.let {
+            if (lowEnd || television) it.replace("/w1280/", "/w780/") else it
+        }
+        if (artwork.isBlank()) {
+            heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+            heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+            return
+        }
+        heroBackdrop.animate().cancel()
+        heroBackdrop.visibility = View.VISIBLE; heroBackdrop.alpha = 1f
+        val pushIn = if (lowEnd) 1f else 1.035f
+        heroBackdrop.scaleX = pushIn; heroBackdrop.scaleY = pushIn
+        heroBackdrop.load(artwork) {
+            crossfade(360)
+            listener(onSuccess = { _, _ ->
+                if ((heroTile as? Tile.Mv)?.m?.imdb == title.imdb && !heroCollapsed) {
+                    heroBackdrop.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                        .setDuration(if (lowEnd) 280 else 700).setInterpolator(DecelerateInterpolator(1.4f)).start()
+                }
+            }, onError = { _, _ ->
+                if ((heroTile as? Tile.Mv)?.m?.imdb == title.imdb) {
+                    heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+                    heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+                }
+            })
+        }
+        heroOrb.animate().alpha(0.30f).setDuration(420).setInterpolator(DecelerateInterpolator()).start()
     }
     private fun fillHero(t: Tile?) {
         heroChips.removeAllViews()
@@ -890,7 +926,7 @@ class MainActivity : AppCompatActivity() {
         heroBadge.background = Ui.pill(dp, 0x2424D3D0, 16f).apply {
             setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
         }
-        showCinematicFallback()
+        showCinematicFallback(t)
         heroTagline.visibility = if (tab < 2 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
         heroSubheading.text = if (tab < 2) "A clearer view of what’s next." else "Find your next story."
         when (t) {
@@ -931,19 +967,20 @@ class MainActivity : AppCompatActivity() {
                     setTextColor(accent); backgroundTintList = ColorStateList.valueOf(accent)
                 }
                 heroTitle.text = t.m.name
+                showHeroArtwork(t.m)
                 heroSubheading.text = if (t.m.isSeries) "Stories that keep going." else "Your next movie night starts here."
                 heroBadge.text = if (t.m.isSeries) "SERIES  /  ON DEMAND" else "MOVIE  /  ON DEMAND"
-                heroChips.addView(chip("▶   Details", true).apply { setOnClickListener {
+                heroChips.addView(chip("▶   More info", true).apply { setOnClickListener {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)
                 } })
                 listOfNotNull(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
                     .plus(t.m.genres.take(2)).forEach { heroChips.addView(heroMetaChip(it)) }
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.alpha = 0f
-                if (t.m.logo.isNotBlank()) heroLogo.load(t.m.logo) {
-                    crossfade(180); listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.imdb == t.m.imdb) heroLogo.animate().alpha(1f).setDuration(220).start() })
-                } else {
-                    heroLogo.setImageResource(R.drawable.brand_aktv_user)
-                    heroLogo.animate().alpha(0.92f).setDuration(220).start()
+                heroMono.visibility = View.GONE; heroLogo.setImageDrawable(null); heroLogo.visibility = View.GONE
+                if (t.m.logo.isNotBlank()) {
+                    heroLogo.visibility = View.VISIBLE; heroLogo.alpha = 0f
+                    heroLogo.load(t.m.logo) {
+                        crossfade(220); listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.imdb == t.m.imdb) heroLogo.animate().alpha(1f).setDuration(260).start() })
+                    }
                 }
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
                 heroDesc.text = t.m.description
@@ -954,7 +991,7 @@ class MainActivity : AppCompatActivity() {
             else -> {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
                 heroSubheading.text = "A clearer view of what’s next."
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.brand_aktv_user)
+                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.aktv_logo_cinematic)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
         }

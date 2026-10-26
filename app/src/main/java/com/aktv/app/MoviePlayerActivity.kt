@@ -20,6 +20,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
@@ -34,6 +35,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
 import java.util.concurrent.Executors
@@ -127,7 +129,7 @@ class MoviePlayerActivity : Activity() {
         val root = FrameLayout(this).apply { setBackgroundColor(Accent.ABYSS) }
         view = PlayerView(this).apply {
             useController = true
-            controllerShowTimeoutMs = 7000
+            controllerShowTimeoutMs = 5200
             controllerAutoShow = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             setShowSubtitleButton(true)
@@ -138,19 +140,23 @@ class MoviePlayerActivity : Activity() {
             useArtwork = true
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
+        view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
+            setPlayedColor(Accent.SIGNAL); setScrubberColor(Accent.TEXT)
+            setBufferedColor(0x887F8A99.toInt()); setUnplayedColor(0x557F8A99)
+        }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xE80A0D13.toInt(), 0xA50A0D13.toInt(), 0x240A0D13, Color.TRANSPARENT))
+                intArrayOf(0xF005070C.toInt(), 0xB805070C.toInt(), 0x3805070C, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(0xEF080B10.toInt(), 0xB5080B10.toInt(), 0x24080B10, Color.TRANSPARENT))
+                intArrayOf(0xF505070C.toInt(), 0xC505070C.toInt(), 0x3205070C, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
         val brand = ImageView(this).apply {
-            setImageResource(R.drawable.brand_aktv_user); scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "AK TV"; alpha = 0.94f
         }
         overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {
@@ -172,7 +178,7 @@ class MoviePlayerActivity : Activity() {
         info.addView(TextView(this).apply {
             text = if (title.isSeries) "AK SERIES  /  NOW PLAYING" else "AK CINEMA  /  NOW PLAYING"
             textSize = 10f; letterSpacing = 0.17f
-            setTextColor(if (title.isSeries) Accent.INDIGO else Accent.GOLD)
+            setTextColor(if (title.isSeries) Accent.ION else Accent.SIGNAL)
             setTypeface(null, Typeface.BOLD)
         }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(9) })
         heading = TextView(this).apply {
@@ -189,8 +195,8 @@ class MoviePlayerActivity : Activity() {
             textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
             background = GradientDrawable().apply {
-                cornerRadius = px(14).toFloat(); setColor(0xB9101721.toInt())
-                setStroke(px(1), 0x38FFFFFF)
+                cornerRadius = px(14).toFloat(); setColor(0xD005070C.toInt())
+                setStroke(px(1), 0x50F8F9FC)
             }
         }
         info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
@@ -219,15 +225,33 @@ class MoviePlayerActivity : Activity() {
         })
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         spinner = ProgressBar(this).apply {
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.INDIGO else Accent.GOLD)
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.ION else Accent.SIGNAL)
         }
         root.addView(spinner, FrameLayout.LayoutParams(px(48), px(48), Gravity.CENTER))
         setContentView(root)
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            overlay.visibility = if (visibility == View.VISIBLE || failed || spinner.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+            setOverlayVisible(visibility == View.VISIBLE || failed || spinner.visibility == View.VISIBLE)
         })
         updateTitle()
         view.requestFocus()
+    }
+
+    private fun setOverlayVisible(visible: Boolean) {
+        overlay.animate().cancel()
+        if (visible) {
+            if (overlay.visibility != View.VISIBLE) {
+                overlay.alpha = 0f; overlay.translationY = px(12).toFloat(); overlay.visibility = View.VISIBLE
+            }
+            overlay.animate().alpha(1f).translationY(0f).setDuration(240)
+                .setInterpolator(DecelerateInterpolator(1.6f)).start()
+        } else {
+            overlay.animate().alpha(0f).translationY(px(10).toFloat()).setDuration(220)
+                .withEndAction {
+                    if (!failed && spinner.visibility != View.VISIBLE) {
+                        overlay.visibility = View.GONE; overlay.alpha = 1f; overlay.translationY = 0f
+                    }
+                }.start()
+        }
     }
 
     private fun px(value: Int) = (value * dp).toInt()
@@ -235,7 +259,7 @@ class MoviePlayerActivity : Activity() {
         text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
         isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
-        val accent = if (title.isSeries) Accent.INDIGO else Accent.GOLD
+        val accent = Accent.SIGNAL
         fun style(focused: Boolean) {
             background = GradientDrawable().apply {
                 cornerRadius = px(16).toFloat()
@@ -268,7 +292,7 @@ class MoviePlayerActivity : Activity() {
     private fun message(text: String, loading: Boolean = false) {
         status.text = text
         spinner.visibility = if (loading) View.VISIBLE else View.GONE
-        overlay.visibility = View.VISIBLE
+        setOverlayVisible(true)
         view.showController()
     }
 

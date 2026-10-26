@@ -18,17 +18,17 @@ import kotlin.math.max
 
 /** AK TV cinema palette: ink-black surfaces, electric blue controls, cyan media cues and violet depth. */
 object Accent {
-    val ABYSS = 0xFF070A12.toInt()
-    val SURFACE = 0xFF12202B.toInt()
-    val SIGNAL = 0xFF27E4DF.toInt()
-    val ION = 0xFF48E0D2.toInt()
-    val INDIGO = 0xFF8058F4.toInt()
-    val DEEP = 0xFF22204C.toInt()
-    val LIVE = 0xFFFF5C75.toInt()
-    val GOLD = 0xFFFFC45E.toInt()
-    val TEXT = 0xFFF2F5FF.toInt()
-    val DIM = 0xFFAAB6D2.toInt()
-    val FAINT = 0xFF7180A1.toInt()
+    val ABYSS = 0xFF05070C.toInt()
+    val SURFACE = 0xFF111923.toInt()
+    val SIGNAL = 0xFF62E5D4.toInt()
+    val ION = 0xFF64D3E6.toInt()
+    val INDIGO = 0xFF8178F5.toInt()
+    val DEEP = 0xFF1D2431.toInt()
+    val LIVE = 0xFFF05E74.toInt()
+    val GOLD = 0xFFE7B969.toInt()
+    val TEXT = 0xFFF8F9FC.toInt()
+    val DIM = 0xFFB7BECA.toInt()
+    val FAINT = 0xFF818A99.toInt()
 
     /** Makes any logo colour usable as a tint: saturated, mid-light. Greys fall back to the brand blue. */
     fun normalize(c: Int?): Int {

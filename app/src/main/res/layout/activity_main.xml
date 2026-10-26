@@ -46,7 +46,7 @@
         <LinearLayout android:id="@+id/playerBrand" android:layout_width="104dp" android:layout_height="90dp"
             android:layout_gravity="top|start" android:layout_marginStart="40dp" android:layout_marginTop="22dp"
             android:orientation="vertical" android:gravity="center" android:alpha="0" android:contentDescription="AK TV">
-            <ImageView android:layout_width="100dp" android:layout_height="86dp" android:src="@drawable/brand_aktv_user" android:scaleType="fitCenter"/>
+            <ImageView android:layout_width="100dp" android:layout_height="86dp" android:src="@drawable/aktv_logo_cinematic" android:scaleType="fitCenter"/>
         </LinearLayout>
         <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"

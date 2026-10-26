@@ -43,7 +43,7 @@ class DetailActivity : Activity() {
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
-    private val pageAccent get() = if (title.isSeries) Accent.INDIGO else Accent.GOLD
+    private val pageAccent get() = if (title.isSeries) Accent.ION else Accent.SIGNAL
 
     private lateinit var title: Movies.Title
     private var episodes = listOf<Movies.Episode>(); private var seasons = listOf<Int>(); private var season = 1
@@ -143,7 +143,7 @@ class DetailActivity : Activity() {
         }
         toolbar.addView(button("‹  Back", false) { finish() })
         toolbar.addView(ImageView(this).apply {
-            setImageResource(R.drawable.brand_aktv_user); scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "AK TV"
         }, LinearLayout.LayoutParams((64 * dp).toInt(), (52 * dp).toInt()).apply { marginStart = (18 * dp).toInt() })
         root.addView(toolbar, FrameLayout.LayoutParams(-1, (60 * dp).toInt(), Gravity.TOP))

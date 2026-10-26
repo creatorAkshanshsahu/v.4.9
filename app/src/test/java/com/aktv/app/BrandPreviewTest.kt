@@ -31,7 +31,7 @@ class BrandPreviewTest {
             val output = File(System.getProperty("aktv.ui.previewDir", "build/reports/ui-preview")).apply { mkdirs() }
             val root = FrameLayout(activity).apply { setBackgroundColor(Accent.ABYSS) }
             val mark = ImageView(activity).apply {
-                setImageResource(R.drawable.brand_aktv_user); scaleType = ImageView.ScaleType.FIT_CENTER
+                setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
                 contentDescription = "AK TV logo preview"
             }
             root.addView(mark, FrameLayout.LayoutParams(560, 480, Gravity.CENTER))
