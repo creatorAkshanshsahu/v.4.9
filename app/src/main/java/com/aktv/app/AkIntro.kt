@@ -27,6 +27,9 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.aktv_logo_cinematic) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
+    private val bylinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFB7C2D2.toInt(); textAlign = Paint.Align.CENTER; textSize = 11 * dp
+    }
     private val destination = RectF()
     private val soundTarget = RectF()
     private var progress = 0f
@@ -165,6 +168,9 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             it.draw(canvas)
         }
 
+        bylinePaint.alpha = (alpha * appear * 0.86f).toInt()
+        val bylineY = minOf(destination.bottom + 25 * dp, height * 0.84f)
+        canvas.drawText("by Akshansh Sahu", centerX, bylineY, bylinePaint)
         hintPaint.alpha = (alpha * 0.74f).toInt()
         canvas.drawText("Loading...", centerX, height * 0.93f, hintPaint)
         val half = 100 * dp

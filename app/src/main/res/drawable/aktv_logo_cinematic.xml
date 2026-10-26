@@ -2,6 +2,9 @@
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="300dp" android:height="260dp"
     android:viewportWidth="600" android:viewportHeight="520">
+    <!-- Subtle rounded panel sits behind the AK mark; the wordmark stays unobstructed below. -->
+    <path android:fillColor="#142033" android:strokeColor="#35FFFFFF" android:strokeWidth="3"
+        android:pathData="M82,14 H518 Q556,14 556,52 V228 Q556,266 518,266 H82 Q44,266 44,228 V52 Q44,14 82,14 Z"/>
     <!-- The AK monogram is drawn as a single, clean cinematic mark. -->
     <path android:fillType="evenOdd" android:pathData="M52,238 L151,42 L249,238 L192,238 L173,198 L128,198 L108,238 Z M140,171 L162,171 L151,142 Z">
         <aapt:attr name="android:fillColor">
