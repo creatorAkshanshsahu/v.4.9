@@ -19,7 +19,7 @@ internal object HomeChrome {
         // Give the lead artwork room to breathe, while keeping the first shelf visible on TV and mobile.
         val header = if (phone) ((if (compact) 54 else 76) * dp).toInt() else 0
         val heroRatio = when {
-            phone && compact -> if (movies) 0.31f else 0.34f
+            phone && compact -> if (movies) 0.26f else 0.30f
             phone -> if (movies) 0.39f else 0.41f
             movies -> 0.43f
             else -> 0.44f
