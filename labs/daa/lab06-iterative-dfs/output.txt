@@ -1,0 +1,34 @@
+$ gcc -std=c11 -Wall -Wextra -pedantic -O2 dfs.c -o dfs
+$ ./dfs
+Iterative DFS traversal starting from vertex 0: 0 1 3 4 2 5
+
+$ ./dfs --compare
+Iterative DFS traversal starting from vertex 0: 0 1 3 4 2 5
+Recursive DFS traversal starting from vertex 0: 0 1 3 4 2 5
+Iterative and recursive traversals agree: yes
+
+$ ./dfs --variant notebook
+Iterative DFS traversal (notebook pseudo code) starting from vertex 0: 0 2 5 1 4 3
+
+$ ./dfs --show-graph
+Graph (adjacency lists):
+  0 -> 1 2
+  1 -> 0 3 4
+  2 -> 0 5
+  3 -> 1
+  4 -> 1
+  5 -> 2
+Iterative DFS traversal starting from vertex 0: 0 1 3 4 2 5
+
+$ ./dfs --start 4
+Iterative DFS traversal starting from vertex 4: 4 1 0 2 5 3
+
+$ ./dfs --forest --compare      # graph: 0-1, 0-2, 1-3, 1-4, 2-5, 5-6
+DFS forest visiting every connected component: 0 1 3 4 2 5 6
+Recursive DFS forest visiting every connected component: 0 1 3 4 2 5 6
+Iterative and recursive traversals agree: yes
+
+$ ./dfs --stress 200000
+Stress test: path graph with 200000 vertices and 199999 edges.
+Iterative DFS (heap stack): visited 200000 vertices in 0.005 s, first 0 last 199999.
+Recursive DFS (call stack): crashed with signal 11 (call stack overflow).

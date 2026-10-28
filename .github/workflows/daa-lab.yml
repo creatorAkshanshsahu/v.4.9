@@ -1,0 +1,26 @@
+name: DAA lab programs
+
+on:
+  push:
+    branches: [ main, master ]
+    paths: [ 'labs/**' ]
+  pull_request:
+    paths: [ 'labs/**' ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the iterative DFS lab program
+        working-directory: labs/daa/lab06-iterative-dfs
+        run: make
+      - name: Run the iterative DFS lab tests
+        working-directory: labs/daa/lab06-iterative-dfs
+        run: python3 -B tests/test_iterative_dfs.py -v
