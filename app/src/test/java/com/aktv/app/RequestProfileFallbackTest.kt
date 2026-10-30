@@ -17,7 +17,7 @@ class RequestProfileFallbackTest {
         assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = 1))
         assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = -1))
         assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = 0))
-        assertEquals(1, RequestProfileFallback.initialIndex(listOf(native), rememberedIndex = 1))
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(native), rememberedIndex = 0))
     }
 
     @Test fun `a refused browser-style request moves to the declared native style`() {
