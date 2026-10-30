@@ -101,6 +101,10 @@ class MainActivity : AppCompatActivity() {
     private var playToken = 0
     private var resolveJob: Future<*>? = null
     private val playbackIo = Executors.newFixedThreadPool(2)
+    private val sourceWarmupGate = LiveSourceWarmupGate()
+    private var pendingWarmupChannel: Channel? = null
+    private var sourceWarmupRunning = false
+    private val sourceWarmupRunnable = Runnable { runSourceWarmup() }
     private var nativeSources = emptyList<TgStream>()
     private var serverIdx = 0
     private var nativeProviders = listOf(LiveProvider.TG)
@@ -1274,9 +1278,9 @@ class MainActivity : AppCompatActivity() {
         val provider = nativeProviders.first()
         enterNativeProvider(ch, provider)
         releasePlayer(); spinner.visibility = View.GONE
-        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        infoNext.text = "Auto · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Connecting to ${providerName(provider)}…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             try {
                 val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = fresh, v2 = ch.v2)
@@ -1331,9 +1335,9 @@ class MainActivity : AppCompatActivity() {
         val token = ++playToken
         resolveJob?.cancel(true)
         spinner.visibility = View.GONE
-        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        infoNext.text = "Auto · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg("Automatically trying ${providerName(provider)} native streams…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             var failureReason = reason
             val extra = try { LiveMetadataRequests.fetch(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
@@ -1423,11 +1427,17 @@ class MainActivity : AppCompatActivity() {
         val ts = NativePlaybackPolicy.tracks(this, profile, shown.getOrNull(current)?.name?.contains("Hindi", true) == true)
         val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
             .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
-        val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
-            .setLoadControl(if (stable) androidx.media3.exoplayer.DefaultLoadControl.Builder()
+        val loadControl = when {
+            stable -> androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(10_000, 30_000, 1500, 4000).setBackBuffer(0, false)
                 .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()
-                else NativePlaybackPolicy.buffers(profile)).setTrackSelector(ts).setBandwidthMeter(bw).build()
+            currentNativeProvider == LiveProvider.TG -> androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(profile.minBufferMs, profile.maxBufferMs, 750, 4000).setBackBuffer(0, false)
+                .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()
+            else -> NativePlaybackPolicy.buffers(profile)
+        }
+        val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
+            .setLoadControl(loadControl).setTrackSelector(ts).setBandwidthMeter(bw).build()
         p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         trackSel = ts; activeAttempt = trace
         val controller = NativePictureController(p, ts, { player === p && playbackActive },
@@ -1452,7 +1462,7 @@ class MainActivity : AppCompatActivity() {
     private fun prepareOnSurface(owner: ExoPlayer) {
         val view = pv.videoSurfaceView as? SurfaceView
         if (view == null || view.holder.surface.isValid) { activeAttempt?.surfaceReady(); owner.prepare(); return }
-        playMsg("Waiting for the TV video surface…")
+        playMsg(null)
         val holder = view.holder
         val callback = object : SurfaceHolder.Callback {
             private val gate = SurfaceStartGate(
@@ -1490,7 +1500,7 @@ class MainActivity : AppCompatActivity() {
                         if (!expectsVideo()) { startupBudget.rendered(); providerWindow.rendered() }
                     } else {
                         spinner.visibility = View.GONE
-                        playMsg("Stream connected — waiting for the first picture…")
+                        playMsg(null)
                     }
                 }
                 Player.STATE_BUFFERING -> spinner.visibility = View.GONE
@@ -1642,7 +1652,7 @@ class MainActivity : AppCompatActivity() {
         startupBudget.recover(SystemClock.elapsedRealtime())
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
-        playMsg("$reason. Trying native TV compatibility mode…")
+        playMsg(null)
         ui.post { if (playbackActive && token == playToken && layer.visibility == View.VISIBLE) startNative() }
         return true
     }
@@ -1664,9 +1674,9 @@ class MainActivity : AppCompatActivity() {
         resolveJob?.cancel(true); releasePlayer()
         diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
         spinner.visibility = View.GONE
-        infoNext.text = "Auto · ${providerName(provider)} · refreshing rejected credentials…"
+        infoNext.text = "Auto · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg("${providerName(provider)} returned HTTP $code — fetching fresh stream credentials once…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             try {
                 val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = true, v2 = ch.v2)
@@ -1719,9 +1729,9 @@ class MainActivity : AppCompatActivity() {
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
         spinner.visibility = View.GONE
-        infoNext.text = "Auto · ${providerName(provider)} · paced retry $refusalRetryCount of 2…"
+        infoNext.text = "Auto · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg("${providerName(provider)} refused this request — retry $refusalRetryCount of 2 in ${delayMs / 1000}s…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             try { Thread.sleep(delayMs) } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt(); return@submit
@@ -1766,7 +1776,7 @@ class MainActivity : AppCompatActivity() {
                 serverIdx = action.index
                 val provider = LiveProviders.provider(nativeSources[serverIdx])
                 if (provider != currentNativeProvider) enterNativeProvider(ch, provider)
-                playMsg("Automatically trying ${nativeSources[serverIdx].label}…")
+                playMsg(null)
                 val token = playToken
                 ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
             }
@@ -1796,7 +1806,7 @@ class MainActivity : AppCompatActivity() {
         releasePlayer()
         serverIdx = index
         enterNativeProvider(ch, LiveProviders.provider(nativeSources[serverIdx]))
-        playMsg("Switching to ${nativeSources[serverIdx].label}…")
+        playMsg(null)
         startNative()
     }
 
@@ -2476,6 +2486,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- focus-driven stream prefetch (metadata only, no second decoder) ----------
+    private fun scheduleSourceWarmup(channel: Channel) {
+        if (layer.visibility == View.VISIBLE || searchShown) return
+        pendingWarmupChannel = channel
+        ui.removeCallbacks(sourceWarmupRunnable)
+        ui.postDelayed(sourceWarmupRunnable, 260)
+    }
+
+    private fun runSourceWarmup() {
+        val channel = pendingWarmupChannel ?: return
+        if (sourceWarmupRunning) return
+        if (layer.visibility == View.VISIBLE || searchShown || isFinishing || isDestroyed) {
+            pendingWarmupChannel = null
+            return
+        }
+        val provider = providerOrder(channel).firstOrNull() ?: return
+        val key = "${provider.name}:${channel.key}"
+        if (!sourceWarmupGate.begin(key, SystemClock.elapsedRealtime())) {
+            pendingWarmupChannel = null
+            return
+        }
+        pendingWarmupChannel = null
+        sourceWarmupRunning = true
+        io.submit {
+            try { LiveMetadataRequests.fetch(provider, channel.id, v2 = channel.v2) } catch (_: Exception) { }
+            finally {
+                sourceWarmupGate.finish(key)
+                ui.post {
+                    sourceWarmupRunning = false
+                    if (pendingWarmupChannel != null && layer.visibility != View.VISIBLE && !searchShown) {
+                        ui.removeCallbacks(sourceWarmupRunnable)
+                        ui.postDelayed(sourceWarmupRunnable, 100)
+                    }
+                }
+            }
+        }
+    }
+
     // ---------- live channel preview (hero window, muted) ----------
     private val previewRunnable = Runnable { startPreview() }
     private fun schedulePreview(c: Channel?) {
@@ -2644,6 +2692,7 @@ class MainActivity : AppCompatActivity() {
                         focusAnim(x, f)
                         if (f) {
                             setHero(t)
+                            if (tab < 2) scheduleSourceWarmup(t.c)
                             fetchGuide(t.c) { guide ->
                                 if (nowCaption.tag == t.c.key) nowCaption.text = if (t.c.v2) "Always-on · no schedule feed" else guide?.now?.title ?: "Programme information unavailable"
                             }
