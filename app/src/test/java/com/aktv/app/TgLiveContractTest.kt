@@ -22,7 +22,9 @@ class TgLiveContractTest {
             requested.add(URI(url).path) // Public endpoint paths only; never the signed query.
             transport.get(url, headers)
         }
-        val ids = listOf("872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+        // Include Zee Cinema HD (165) as the user-confirmed working control, plus Sony Ten 3 Hindi
+        // HD/SD (Jio IDs 892/524) to report live credential timing for the failing channel.
+        val ids = listOf("165", "524", "892", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val missing = ArrayList<String>()
         var functionSaved = false
@@ -35,16 +37,22 @@ class TgLiveContractTest {
                         sources.forEachIndexed { index, source ->
                             put(JSONObject().put("index", index + 1).put("label", source.label).put("type", source.type)
                                 .put("host", URI(source.url).host).put("cookiePresent", source.cookie.isNotBlank())
-                                .put("tokenSecondsLeft", StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 })
+                                .put("tokenSecondsLeft", tokenSecondsLeft(source))
+                                .put("tokenTimingStatus", tokenTimingStatus(source))
                                 .put("keyCount", source.drm?.let { ClearKey.pairs(it).size } ?: 0))
                         }
                     })
-                    if (id in setOf("872", "1106")) {
+                    if (id in setOf("165", "524", "892", "872", "1106")) {
                         report.put("manifests", JSONArray().apply { sources.take(4).forEach { put(probe(it)) } })
                     }
                 } catch (error: Exception) {
                     missing.add(id)
                     report.put("metadataError", error.javaClass.simpleName)
+                        .put("metadataHttpStatus", when (error) {
+                            is TgResolveException -> error.status
+                            is JjtvHttpException -> error.status
+                            else -> null
+                        })
                 }
                 println("TG_NATIVE $report")
             }
@@ -57,7 +65,7 @@ class TgLiveContractTest {
 
     @Test fun `JJTV native configuration supplies exact channel keys and per-channel cookies`() {
         assumeTrue(System.getProperty("aktv.live.tg") == "true")
-        val ids = listOf("816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+        val ids = listOf("165", "524", "892", "816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val resolver = JjtvResolver()
         val missing = ArrayList<String>()
@@ -71,21 +79,39 @@ class TgLiveContractTest {
                         put(JSONObject().put("host", URI(source.url).host).put("type", source.type)
                             .put("keyCount", source.drm?.let { ClearKey.pairs(it).size } ?: 0)
                             .put("cookiePresent", source.cookie.isNotBlank())
-                            .put("tokenSecondsLeft", StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 }))
+                            .put("tokenSecondsLeft", tokenSecondsLeft(source))
+                            .put("tokenTimingStatus", tokenTimingStatus(source)))
                     }
                 })
-                if (id in setOf("816", "872", "1106")) {
-                    if (sources.none { it.drm?.let { drm -> ClearKey.pairs(drm).isNotEmpty() } == true }) missingKeys.add(id)
+                if (id in setOf("165", "524", "892", "816", "872", "1106")) {
+                    if (id in setOf("816", "872", "1106") &&
+                        sources.none { it.drm?.let { drm -> ClearKey.pairs(drm).isNotEmpty() } == true }) missingKeys.add(id)
                     report.put("manifests", JSONArray().apply { sources.take(2).forEach { put(probe(it)) } })
                 }
             } catch (error: Exception) {
                 missing.add(id)
                 report.put("metadataError", error.javaClass.simpleName)
+                    .put("metadataHttpStatus", when (error) {
+                        is TgResolveException -> error.status
+                        is JjtvHttpException -> error.status
+                        else -> null
+                    })
             }
             println("TG_NATIVE $report")
         }
         assertTrue("JJTV metadata unavailable for exact channel IDs: ${missing.joinToString()}", missing.isEmpty())
         assertTrue("JJTV omitted expected key data for channel IDs: ${missingKeys.joinToString()}", missingKeys.isEmpty())
+    }
+
+    /** Public timing only; positive expiry is not proof that the provider accepts the signature. */
+    private fun tokenSecondsLeft(source: TgStream): Long? =
+        StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 }
+
+    private fun tokenTimingStatus(source: TgStream): String = when (val seconds = tokenSecondsLeft(source)) {
+        null -> "opaque-or-unsigned"
+        in Long.MIN_VALUE..0L -> "expired-by-timestamp"
+        in 1L..60L -> "expires-within-60-seconds"
+        else -> "timestamp-not-expired"
     }
 
     /** Inspect the Media3 transport, not a second guessed HTTP profile. A manifest is NOT playback proof. */
