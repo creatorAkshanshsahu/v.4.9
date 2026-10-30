@@ -13,6 +13,13 @@ class RequestProfileFallbackTest {
     private val browser = source(jjtv, true, "JJTV · Server 1 · browser request")
     private val native = source(jjtv, false, "JJTV · Server 1 · native request")
 
+    @Test fun `JJTV starts with the observed browser profile instead of a remembered failing native profile`() {
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = 1))
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = -1))
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = 0))
+        assertEquals(1, RequestProfileFallback.initialIndex(listOf(native), rememberedIndex = 1))
+    }
+
     @Test fun `a refused browser-style request moves to the declared native style`() {
         assertEquals(1, RequestProfileFallback.alternative(listOf(browser, native), browser))
     }

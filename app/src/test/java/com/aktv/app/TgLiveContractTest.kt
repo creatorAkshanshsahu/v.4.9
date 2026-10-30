@@ -22,9 +22,9 @@ class TgLiveContractTest {
             requested.add(URI(url).path) // Public endpoint paths only; never the signed query.
             transport.get(url, headers)
         }
-        // Include Zee Cinema HD (165) as the user-confirmed working control, plus Sony Ten 3 Hindi
-        // HD/SD (Jio IDs 892/524) to report live credential timing for the failing channel.
-        val ids = listOf("165", "524", "892", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+        // Include working Zee Cinema HD (165), the reported Star Gold HD (156), and Sony Ten 3
+        // Hindi HD/SD (Jio IDs 892/524) for targeted live metadata and request-profile diagnostics.
+        val ids = listOf("165", "156", "524", "892", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val missing = ArrayList<String>()
         var functionSaved = false
@@ -32,7 +32,7 @@ class TgLiveContractTest {
             for (id in ids) {
                 val report = JSONObject().put("provider", "TG").put("channel", id)
                 try {
-                    val sources = resolver.resolve(id, fresh = false)
+                    val sources = WebsiteRequestParity.playbackSources(LiveProvider.TG, resolver.resolve(id, fresh = false))
                     report.put("sources", JSONArray().apply {
                         sources.forEachIndexed { index, source ->
                             put(JSONObject().put("index", index + 1).put("label", source.label).put("type", source.type)
@@ -42,7 +42,7 @@ class TgLiveContractTest {
                                 .put("keyCount", source.drm?.let { ClearKey.pairs(it).size } ?: 0))
                         }
                     })
-                    if (id in setOf("165", "524", "892", "872", "1106")) {
+                    if (id in setOf("165", "156", "524", "892", "872", "1106")) {
                         report.put("manifests", JSONArray().apply { sources.take(4).forEach { put(probe(it)) } })
                     }
                 } catch (error: Exception) {
@@ -65,7 +65,7 @@ class TgLiveContractTest {
 
     @Test fun `JJTV native configuration supplies exact channel keys and per-channel cookies`() {
         assumeTrue(System.getProperty("aktv.live.tg") == "true")
-        val ids = listOf("165", "524", "892", "816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
+        val ids = listOf("165", "156", "524", "892", "816", "872", "1106", "460", "1123", "461", "1114", "1142", "1108", "362", "1109",
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val resolver = JjtvResolver()
         val missing = ArrayList<String>()
@@ -83,7 +83,7 @@ class TgLiveContractTest {
                             .put("tokenTimingStatus", tokenTimingStatus(source)))
                     }
                 })
-                if (id in setOf("165", "524", "892", "816", "872", "1106")) {
+                if (id in setOf("165", "156", "524", "892", "816", "872", "1106")) {
                     if (id in setOf("816", "872", "1106") &&
                         sources.none { it.drm?.let { drm -> ClearKey.pairs(drm).isNotEmpty() } == true }) missingKeys.add(id)
                     report.put("manifests", JSONArray().apply { sources.take(2).forEach { put(probe(it)) } })

@@ -19,6 +19,17 @@ internal object RequestProfileFallback {
         }
     }
 
+    /** Start JJTV with the observed browser/no-Referer profile even if an old build saved native headers. */
+    fun initialIndex(sources: List<TgStream>, rememberedIndex: Int): Int {
+        val remembered = rememberedIndex.takeIf { it in sources.indices }
+        val browser = sources.indexOfFirst { it.omitReferrer }.takeIf { it >= 0 }
+        return when {
+            browser == null -> remembered ?: 0
+            remembered == null || !sources[remembered].omitReferrer -> browser
+            else -> remembered
+        }
+    }
+
     /** Index to try next: the other style when one exists, otherwise a valid source index. */
     fun preferredIndex(sources: List<TgStream>, refused: TgStream?, sameAsBefore: (TgStream) -> Boolean): Int {
         alternative(sources, refused).takeIf { it >= 0 }?.let { return it }

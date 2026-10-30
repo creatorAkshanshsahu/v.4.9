@@ -11,6 +11,21 @@ class ChannelProviderOrderTest {
         )
     }
 
+    @Test fun `Sony Ten 3 HD tries JJTV first as requested and retains TG fallback`() {
+        assertEquals(
+            listOf(LiveProvider.JJTV, LiveProvider.TG),
+            ChannelProviderOrder.order("892", v2 = false, rememberedWebsite = TgResolver.SITE)
+        )
+    }
+
+    @Test fun `explicit TG selection still overrides Sony Ten 3 HD automatic preference`() {
+        assertEquals(
+            listOf(LiveProvider.TG, LiveProvider.JJTV),
+            ChannelProviderOrder.order("892", v2 = false, rememberedWebsite = JjtvResolver.SITE,
+                requested = LiveProvider.TG)
+        )
+    }
+
     @Test fun `explicit source selection overrides Sony YAY automatic preference`() {
         assertEquals(
             listOf(LiveProvider.TG, LiveProvider.JJTV),

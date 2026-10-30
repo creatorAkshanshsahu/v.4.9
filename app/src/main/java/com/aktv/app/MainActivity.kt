@@ -111,6 +111,7 @@ class MainActivity : AppCompatActivity() {
     private val providerWindow = NativeProviderWindow()
     private val decoderRetries = NativeDecoderRetries()
     private val authRecovery = PlaybackAuthRecovery()
+    private val freshCredentialProviders = HashSet<LiveProvider>()
     private val recovery = PlaybackRecovery()
     // A transient refusal gets two paced, fresh-metadata retries inside the existing 60 s budget.
     private var refusalRetryCount = 0
@@ -1108,6 +1109,7 @@ class MainActivity : AppCompatActivity() {
         if (ch.v2) { infoNow.text = "24/7 live channel · programme schedule unavailable"; infoNow.visibility = View.VISIBLE }
         else fetchGuide(ch) { g -> if (shown.getOrNull(current)?.key == ch.key) fillInfoGuide(g) }
         showInfo()
+        if (television) infoGuideAction.requestFocus()
     }
     private fun fillInfoGuide(g: Guide?) {
         val n = g?.now
@@ -1282,7 +1284,8 @@ class MainActivity : AppCompatActivity() {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                     nativeSources = sources
                     val saved = prefs.getString("source_${ch.key}", null)
-                    serverIdx = sources.indexOfFirst { sourceKey(it) == saved }.coerceAtLeast(0)
+                    val rememberedIndex = sources.indexOfFirst { sourceKey(it) == saved }
+                    serverIdx = RequestProfileFallback.initialIndex(sources, rememberedIndex)
                     if (sources.isEmpty()) advanceNative("No native stream was advertised") else startNative()
                 }
             } catch (e: Exception) {
@@ -1397,7 +1400,7 @@ class MainActivity : AppCompatActivity() {
         val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG) "TG TV · ${source.label}" else source.label
         val probeStatus = starProbeStatus(currentNativeProvider, shown.getOrNull(current), nativeSources)
         infoNext.text = "Auto · $sourceLabel · ${serverIdx + 1} of ${nativeSources.size}" +
-            (if (nativeSources.size > 1) "   ·   OK switches server" else "") + (probeStatus?.let { "   ·   $it" } ?: "")
+            (if (nativeSources.size > 1) "   ·   SOURCE chooses server · LEFT cycles" else "") + (probeStatus?.let { "   ·   $it" } ?: "")
         infoNext.visibility = View.VISIBLE
         val trace = diagnostics.begin(
             if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG,
@@ -1569,7 +1572,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
-        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear()
+        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); freshCredentialProviders.clear(); providerWindow.clear()
         refusalRetryCount = 0
         compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
@@ -1616,7 +1619,7 @@ class MainActivity : AppCompatActivity() {
                     PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
                         advanceNative(relayStallReason())
                     null -> if (result.stable) {
-                        recovery.reset(); authRecovery.reset(); refusalRetryCount = 0
+                        recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); refusalRetryCount = 0
                         shown.getOrNull(current)?.let { ch ->
                             prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
@@ -1652,6 +1655,7 @@ class MainActivity : AppCompatActivity() {
         val provider = currentNativeProvider
         if (startupBudget.expired(SystemClock.elapsedRealtime()) || providerWindow.expired(SystemClock.elapsedRealtime()) ||
             !authRecovery.retry(provider, code)) return false
+        freshCredentialProviders.add(provider)
         startupBudget.recover(SystemClock.elapsedRealtime()); providerWindow.recover(SystemClock.elapsedRealtime())
         val refusedSource = nativeSources.getOrNull(serverIdx)
         val previousKey = refusedSource?.let(::sourceKey)
@@ -1694,18 +1698,23 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    /** The TV is refused on some requests and accepted seconds later. Give the provider that
-     * actually plays this channel two delayed, freshly credentialed retries before moving to a
-     * provider whose advertised DRM cannot be opened. Bounded inside the existing playback budget;
-     * every other HTTP result keeps the existing immediate fallback.
+    /** A transient TG refusal gets two paced fresh retries. A JJTV 403 after its fresh lookup
+     * moves to the other native provider instead of spending the startup budget on a repeated URL.
+     * All retries stay bounded by the existing playback budget and DRM requirements.
      */
     private fun retryRefusedProvider(code: Int?): Boolean {
-        val delayMs = RefusalRetryBackoff.delayFor(refusalRetryCount)
-        if (code != 403 || delayMs == null || !playbackActive) return false
+        if (code != 403 || !playbackActive) return false
         val ch = shown.getOrNull(current) ?: return false
+        val provider = currentNativeProvider
+        if (FreshRefusalPolicy.shouldMoveToAlternateProvider(provider, code, provider in freshCredentialProviders)) {
+            // A fresh JJTV source already failed at HTTP 403. Retrying its stale/unchanged media
+            // URL delays a provider that may work; retire this JJTV turn and let native fallback run.
+            recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
+            return false
+        }
+        val delayMs = RefusalRetryBackoff.delayFor(refusalRetryCount) ?: return false
         if (layer.visibility != View.VISIBLE || startupBudget.expired(SystemClock.elapsedRealtime())) return false
         refusalRetryCount++
-        val provider = currentNativeProvider
         val refusedSource = nativeSources.getOrNull(serverIdx)
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
@@ -1770,15 +1779,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Left / OK switches native sources, not players; a single-source channel simply reloads. */
+    /** Left cycles native sources; SOURCE also opens this exact, directly selectable server list. */
     private fun switchServer() {
         if (drmProbeRunning) return
         if (nativeSources.size < 2) { reloadStream(); return }
+        selectNativeServer((serverIdx + 1) % nativeSources.size)
+    }
+
+    private fun selectNativeServer(index: Int) {
+        val ch = shown.getOrNull(current) ?: return
+        if (drmProbeRunning || index !in nativeSources.indices) return
+        sourceMenu?.dismiss()
+        if (index == serverIdx) return
         playToken++; resolveJob?.cancel(true); recovery.reset()
-        shown.getOrNull(current)?.let { beginNativeSession(it) }
+        beginNativeSession(ch)
         releasePlayer()
-        serverIdx = (serverIdx + 1) % nativeSources.size
-        shown.getOrNull(current)?.let { enterNativeProvider(it, LiveProviders.provider(nativeSources[serverIdx])) }
+        serverIdx = index
+        enterNativeProvider(ch, LiveProviders.provider(nativeSources[serverIdx]))
         playMsg("Switching to ${nativeSources[serverIdx].label}…")
         startNative()
     }
@@ -1796,6 +1813,12 @@ class MainActivity : AppCompatActivity() {
         if (sourceMenu?.isShowing == true) return
         val choices = ArrayList<Pair<String, () -> Unit>>()
         choices.add("Automatic native source" to { selectNativeProvider(null) })
+        nativeSources.forEachIndexed { index, source ->
+            val provider = providerName(LiveProviders.provider(source))
+            val type = source.type.uppercase()
+            val selected = if (index == serverIdx) "Now playing · " else ""
+            choices.add("${selected}Server ${index + 1} · $provider · $type" to { selectNativeServer(index) })
+        }
         if (!ch.v2) choices.add("Play JJTV now (native)" to { selectNativeProvider(LiveProvider.JJTV) })
         choices.add("Play TG TV now (native)" to { selectNativeProvider(LiveProvider.TG) })
         choices.add((if (prefs.getBoolean("native_force_tv", false)) "TV compatibility: return to automatic detection" else "TV compatibility: force TV mode (generic boxes)") to {
@@ -1955,16 +1978,38 @@ class MainActivity : AppCompatActivity() {
 
     private fun shortOk() {
         if (!playbackActive) { showPlaybackDetails(); return }
+        if (!playerActionFocused()) {
+            showInfo()
+            infoGuideAction.requestFocus()
+            return
+        }
         if (nativeSources.size > 1 && infoCard.alpha > 0.5f) switchServer() else showInfo()
     }
+
+    private fun playerActionFocused(): Boolean = ::infoGuideAction.isInitialized &&
+        listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).any { it.isFocused && it.isShown }
 
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (intro.visibility == View.VISIBLE) { if (e.action == KeyEvent.ACTION_DOWN) intro.skip(); return true }
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && programmeGuideShown) return programmeGuideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && guideShown) return guideKey(e) || super.dispatchKeyEvent(e)
+        if (layer.visibility == View.VISIBLE && PlayerRemoteKeyPolicy.delegateToFocusedAction(
+                e.keyCode, playerActionFocused(),
+                firstActionFocused = ::infoGuideAction.isInitialized && infoGuideAction.isFocused,
+                lastActionFocused = ::infoRetryAction.isInitialized && infoRetryAction.isFocused
+            )) {
+            if (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER) {
+                if (e.action == KeyEvent.ACTION_DOWN) {
+                    if (e.repeatCount == 0) okLong = false
+                    else if (e.repeatCount >= 8 && !okLong) { okLong = true; reloadStream(); return true }
+                }
+                if (okLong) return true
+            }
+            return super.dispatchKeyEvent(e)
+        }
         if (layer.visibility == View.VISIBLE && (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER)) {
-            // tap OK = info / next native source, hold OK = fetch a fresh stream
+            // OK on a visible control activates it; otherwise reveal/focus player actions. Hold OK refreshes streams.
             if (e.action == KeyEvent.ACTION_DOWN) {
                 if (e.repeatCount == 0) okLong = false
                 else if (e.repeatCount == 8 && !okLong) { okLong = true; reloadStream() }

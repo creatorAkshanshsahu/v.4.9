@@ -30,5 +30,5 @@ internal object LiveMetadataRequests {
                 if (cause is Exception) throw cause
                 throw IllegalStateException("Live metadata request failed", cause)
             }
-        }
+        }.let { WebsiteRequestParity.playbackSources(provider, it) }
 }

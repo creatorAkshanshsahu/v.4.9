@@ -179,12 +179,13 @@ async function trace(browser, channel, entrypoint = "TG-embedded") {
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-dev-shm-usage'] });
   try {
-    const cases = ['165', '872', '1108', '1106', '362'].map(channel => [channel, 'TG-embedded']);
+    // Target the two reported TG Server 1 channels as well as the existing known-good controls.
+    const cases = ['165', '156', '892', '872', '1108', '1106', '362'].map(channel => [channel, 'TG-embedded']);
     const results = await Promise.all(cases.map(([channel, entrypoint]) => trace(browser, channel, entrypoint)));
     for (const result of results) {
       const channel = result.channel;
       // Keep the final state and actual requests, not thirteen duplicate video-state snapshots.
-      // Five cases x at most two notices: do not lose the last channel to GitHub's step notice limit.
+      // Seven cases x at most two notices: do not lose the last channel to GitHub's step notice limit.
       const report = compactTrace(result);
       for (let start = 0; start < Math.min(report.length, 6000); start += 3000) {
         const text = report.slice(start, start + 3000).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
