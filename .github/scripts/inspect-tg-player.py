@@ -10,7 +10,8 @@ import urllib.request
 import xml.etree.ElementTree as ET
 
 SITE = "https://livetgtv.lovable.app"
-CHANNEL = "872"
+CHANNELS = ("156", "892", "165")
+CHANNEL = "892"
 UA = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 MAX = 4 * 1024 * 1024
 
@@ -158,37 +159,45 @@ def records(body, content_type):
                     yield json.loads(line)
 
 
+def website_media_headers():
+    """Browser trace observed TG media fetches with Origin but an empty Referer."""
+    return {'User-Agent': UA, 'Origin': SITE}
+
+
 def probe_media(config):
-    """The current website's manifest request filter, for comparison with the native transport."""
+    """Probe every advertised media URL with a bound; inventory always includes unprobed URLs."""
     reports = []
-    for server in [config] + (config.get('backups') or [])[:3]:
-        for source in (server.get('urls') or [])[:2]:
-            report = {'host': urllib.parse.urlsplit(source).hostname, 'policy': 'website-manifest-filter'}
-            url = source
-            if server.get('cookie') and 'allinonereborn' not in source:
-                url = source.split('?')[0] + '?' + server['cookie']
-            headers = {'User-Agent': UA, 'Origin': SITE, 'Referer': SITE + '/'}
-            try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=12) as response:
-                    body = response.read(512 * 1024)
-                    report.update(status=response.status, finalHost=urllib.parse.urlsplit(response.url).hostname, bytes=len(body))
-                    text = body.lstrip()
-                    if text.startswith(b'#EXTM3U'):
-                        report.update(format='hls', encrypted=b'#EXT-X-KEY:' in text)
-                    elif text.startswith(b'<') and b'<MPD' in text:
-                        root = ET.fromstring(body)
-                        protections = [node for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'ContentProtection']
-                        bases = [node.text for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'BaseURL' and node.text]
-                        report.update(format='dash', encrypted=bool(protections),
-                                      drmSchemes=sorted(set(node.get('schemeIdUri', '') for node in protections)),
-                                      mediaHosts=sorted(set(urllib.parse.urlsplit(urllib.parse.urljoin(response.url, base)).hostname for base in bases)))
-                    else:
-                        report['format'] = 'not-a-manifest'
-            except urllib.error.HTTPError as error:
-                report['status'] = error.code
-            except Exception as error:
-                report['error'] = type(error).__name__
-            reports.append(sanitize(report))
+    sources = [(server, source) for server in [config] + (config.get('backups') or [])
+               for source in (server.get('urls') or []) if isinstance(source, str)]
+    for server, source in sources[:24]:
+        report = {'host': urllib.parse.urlsplit(source).hostname, 'policy': 'website-browser-no-referer'}
+        url = source
+        if server.get('cookie') and 'allinonereborn' not in source:
+            url = source.split('?')[0] + '?' + server['cookie']
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=website_media_headers()), timeout=12) as response:
+                body = response.read(512 * 1024)
+                report.update(status=response.status, finalHost=urllib.parse.urlsplit(response.url).hostname, bytes=len(body))
+                text = body.lstrip()
+                if text.startswith(b'#EXTM3U'):
+                    report.update(format='hls', encrypted=b'#EXT-X-KEY:' in text)
+                elif text.startswith(b'<') and b'<MPD' in text:
+                    root = ET.fromstring(body)
+                    protections = [node for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'ContentProtection']
+                    bases = [node.text for node in root.iter() if node.tag.rsplit('}', 1)[-1] == 'BaseURL' and node.text]
+                    report.update(format='dash', encrypted=bool(protections),
+                                  drmSchemes=sorted(set(node.get('schemeIdUri', '') for node in protections)),
+                                  mediaHosts=sorted(set(urllib.parse.urlsplit(urllib.parse.urljoin(response.url, base)).hostname for base in bases)))
+                else:
+                    report['format'] = 'not-a-manifest'
+        except urllib.error.HTTPError as error:
+            report['status'] = error.code
+        except Exception as error:
+            report['error'] = type(error).__name__
+        reports.append(sanitize(report))
+    if len(sources) > 24:
+        reports.append({'probeLimit': 24, 'unprobedSourceCount': len(sources) - 24,
+                        'note': 'All sources are listed in websiteServers; only the first 24 were probed.'})
     return reports
 
 
@@ -209,12 +218,29 @@ def credential_window(value, clock):
 
 def source_credential_status(config, clock):
     rows = []
-    for index, source in enumerate([config] + (config.get('backups') or [])[:3]):
-        urls = [url for url in (source.get('urls') or [])[:2] if isinstance(url, str)]
+    for index, source in enumerate([config] + (config.get('backups') or [])):
+        urls = [url for url in (source.get('urls') or []) if isinstance(url, str)]
         rows.append({'sourceIndex': index + 1, 'providedCookie': credential_window(source.get('cookie', ''), clock),
                      'urls': [{'host': urllib.parse.urlsplit(url).hostname,
                                'relayOwnsQuery': 'allinonereborn' in (urllib.parse.urlsplit(url).hostname or ''),
                                'embeddedCredential': credential_window(url, clock)} for url in urls]})
+    return rows
+
+
+def website_server_inventory(config):
+    """Mirror the deployed player's Server 1 + backup list, without exposing auth or DRM values."""
+    rows = []
+    servers = [config] + (config.get('backups') or [])
+    for index, server in enumerate(servers):
+        urls = [url for url in (server.get('urls') or []) if isinstance(url, str)]
+        rows.append({
+            'server': f'Server {index + 1}',
+            'urlCount': len(urls),
+            'urls': [safe_url(url) for url in urls],
+            'cookiePresent': bool(server.get('cookie')),
+            'clearKeyCount': len(server.get('clearKeys') or {}) if isinstance(server.get('clearKeys'), dict) else 0,
+            'keyPairPresent': bool(server.get('keyId') and server.get('key')),
+        })
     return rows
 
 
@@ -254,7 +280,7 @@ def inspect():
     if not player_ids:
         emit('TG RPC', {'error': 'No function found in the deployed servers chunk'})
         raise SystemExit(1)
-    for channel in ('165', '872', '1106', '1108', '362'):
+    for channel in CHANNELS:
         inner = {'t': 10, 'i': 0, 'p': {'k': ['data'], 'v': [
             {'t': 10, 'i': 1, 'p': {'k': ['id'], 'v': [{'t': 1, 's': channel}]}, 'o': 0}]}, 'o': 0}
         payload = urllib.parse.quote(json.dumps({'t': inner, 'f': 127, 'm': []}, separators=(',', ':')))
@@ -268,12 +294,12 @@ def inspect():
                 for record in decoded:
                     config = record.get('result') if isinstance(record, dict) else None
                     if isinstance(config, dict) and 'urls' in config:
+                        report['websiteServers'] = website_server_inventory(config)
                         report['credentialStatus'] = source_credential_status(config, report['checkedUtcEpoch'])
                         report['manifests'] = probe_media(config)
             except Exception as error:
                 report['decodeError'] = type(error).__name__
             emit('TG RPC', report)
-
 
 
 if __name__ == '__main__':

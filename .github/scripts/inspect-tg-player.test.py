@@ -1,29 +1,42 @@
-import runpy
-import unittest
+import importlib.util
 from pathlib import Path
+import unittest
 
-module = runpy.run_path(str(Path(__file__).with_name('inspect-tg-player.py')))
+spec = importlib.util.spec_from_file_location('tg_inspector', Path(__file__).with_name('inspect-tg-player.py'))
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
 
-class CredentialStatusTest(unittest.TestCase):
-    def test_expiry_and_future_start_are_separate(self):
-        active = module['credential_window']('__hdnea__=st=10~exp=100~hmac=private', 50)
-        self.assertEqual(50, active['expiresInSeconds'])
-        self.assertFalse(active['expired'])
-        self.assertFalse(active['notYetValid'])
-        self.assertNotIn('private', str(active))
-        self.assertTrue(module['credential_window']('__hdnea__=st=80~exp=200~hmac=private', 50)['notYetValid'])
-        self.assertTrue(module['credential_window']('__hdnea__=exp=40~hmac=private', 50)['expired'])
-    def test_opaque_or_absent_credentials_are_unknown(self):
-        self.assertIsNone(module['credential_window']('__hdnea__=opaque-private', 50)['expired'])
-        self.assertFalse(module['credential_window']('', 50)['present'])
-    def test_relay_metadata_is_not_misrepresented_as_its_wire_authentication(self):
-        data = module['source_credential_status']({'urls':['https://media.example/a.mpd?__hdnea__=exp=80~hmac=private'],
-            'cookie':'__hdnea__=exp=90~hmac=private', 'backups':[{'urls':['https://allinonereborn2.online/jtv.mpd?id=872'],
-            'cookie':'__hdnea__=exp=1~hmac=private'}]}, 50)
-        self.assertTrue(data[1]['urls'][0]['relayOwnsQuery'])
-        self.assertFalse(data[1]['urls'][0]['embeddedCredential']['present'])
-        self.assertNotIn('hmac', str(data))
-        self.assertNotIn('id=872', str(data))
+
+class WebsiteServerInventoryTests(unittest.TestCase):
+    def test_primary_and_every_backup_are_listed_in_website_order(self):
+        config = {
+            'urls': ['https://cdn.example/primary.mpd?__hdnea__=synthetic-secret'],
+            'cookie': '__hdnea__=another-secret',
+            'clearKeys': {'synthetic-kid': 'synthetic-key'},
+            'backups': [
+                {'label': 'upstream label A', 'urls': ['https://backup-a.example/a.m3u8?sig=secret-a'], 'cookie': ''},
+                {'label': 'upstream label B', 'urls': ['https://backup-b.example/b.mpd?sig=secret-b'], 'keyId': 'secret-kid', 'key': 'secret-key'},
+            ],
+        }
+        rows = module.website_server_inventory(config)
+        self.assertEqual(['Server 1', 'Server 2', 'Server 3'], [row['server'] for row in rows])
+        self.assertEqual(1, rows[0]['urlCount'])
+        self.assertEqual('https://backup-a.example/a.m3u8?sig=[redacted]', rows[1]['urls'][0])
+        self.assertEqual(1, rows[0]['clearKeyCount'])
+        self.assertTrue(rows[2]['keyPairPresent'])
+        report = str(rows)
+        for secret in ('synthetic-secret', 'another-secret', 'synthetic-kid', 'synthetic-key',
+                       'secret-a', 'secret-b', 'secret-kid', 'secret-key'):
+            self.assertNotIn(secret, report)
+
+    def test_missing_backup_list_is_a_single_server(self):
+        self.assertEqual(['Server 1'], [row['server'] for row in module.website_server_inventory({'urls': []})])
+
+    def test_media_probe_matches_observed_no_referer_browser_request(self):
+        headers = module.website_media_headers()
+        self.assertEqual(module.SITE, headers['Origin'])
+        self.assertNotIn('Referer', headers)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -155,12 +155,17 @@ class TgProtocolTest {
     @Test fun `deployed flat config keeps URL alternatives together then renumbers advertised servers`() {
         val streams = parse("""{"urls":["https://media.example/first.mpd","https://media.example/second.mpd"],
             "cookie":"__hdnea__=primary", "headers":{"Authorization":"primary-only"},
-            "backups":[{"label":"Server 3","urls":["https://relay.example/third.mpd"],"cookie":"__hdnea__=relay","clearKeys":{}}]}""")
-        assertEquals(listOf("https://media.example/first.mpd", "https://media.example/second.mpd", "https://relay.example/third.mpd"), streams.map { it.url })
-        assertEquals(listOf("Server 1", "Server 1", "Server 2"), streams.map { it.label })
+            "backups":[{"label":"Server 3","urls":["https://relay.example/third.mpd"],"cookie":"__hdnea__=relay","clearKeys":{}},
+                {"label":"Server 4","urls":["https://backup.example/fourth.mpd"],"cookie":"__hdnea__=backup","clearKeys":{}}]}""")
+        assertEquals(listOf("https://media.example/first.mpd", "https://media.example/second.mpd",
+            "https://relay.example/third.mpd", "https://backup.example/fourth.mpd"), streams.map { it.url })
+        assertEquals(listOf("Server 1", "Server 1", "Server 2", "Server 3"), streams.map { it.label })
         assertEquals("__hdnea__=relay", streams[2].cookie)
         assertTrue(streams[2].headers.isEmpty())
         assertNull(streams[2].drm)
+        assertEquals("__hdnea__=backup", streams[3].cookie)
+        assertTrue(streams[3].headers.isEmpty())
+        assertNull(streams[3].drm)
     }
 
     @Test fun `an empty primary list starts at the first advertised native server`() {
