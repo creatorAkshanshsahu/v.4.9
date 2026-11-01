@@ -30,7 +30,7 @@ class MoviePlayerUiTest {
             val views = views(activity.findViewById(android.R.id.content))
             assertEquals(1, views.count { it is PlayerView })
             assertFalse(views.any { it.javaClass.name.contains("gecko", true) })
-            for (label in listOf("Back", "Sources", "Audio / Subtitles", "Retry", "Details")) {
+            for (label in listOf("Exit", "Change source", "Audio & subtitles", "Retry", "Playback details")) {
                 assertTrue(label, views.filterIsInstance<TextView>().any { it.text.toString() == label && it.isFocusable && it.isClickable })
             }
             assertTrue(views.filterIsInstance<TextView>().any { it.text.toString() == "Sample film" })
