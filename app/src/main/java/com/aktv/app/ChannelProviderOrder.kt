@@ -8,10 +8,13 @@ internal object ChannelProviderOrder {
         rememberedWebsite: String?,
         requested: LiveProvider? = null
     ): List<LiveProvider> {
-        // Sony YAY (V1 ID 872) has a confirmed JJTV/Media3 success on mobile, while its recent
-        // TV TG attempt reported no supported tracks. Try that observed working provider first
-        // instead of letting an old TV-side TG preference delay it. Keep TG as automatic fallback.
-        val remembered = if (!v2 && channelId == "872" && requested == null) JjtvResolver.SITE else rememberedWebsite
+        // Respect the user's JJTV-first preference for Sony YAY (872) and Sony Ten 3 HD (892).
+        // Recent HTTP 403 reports do not establish that either provider is generally unavailable;
+        // keep TG as native fallback. Explicit source choices still take priority.
+        val remembered = if (!v2 && requested == null) when (channelId) {
+            "872", "892" -> JjtvResolver.SITE
+            else -> rememberedWebsite
+        } else rememberedWebsite
         return LiveProviders.order(v2, remembered, requested)
     }
 }

@@ -4,10 +4,25 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ChannelProviderOrderTest {
-    @Test fun `Sony YAY prefers its phone-confirmed JJTV source over a remembered TV TG source`() {
+    @Test fun `Sony YAY respects JJTV first even when a different device remembered TG`() {
         assertEquals(
             listOf(LiveProvider.JJTV, LiveProvider.TG),
             ChannelProviderOrder.order("872", v2 = false, rememberedWebsite = TgResolver.SITE)
+        )
+    }
+
+    @Test fun `Sony Ten 3 HD tries JJTV first as requested and retains TG fallback`() {
+        assertEquals(
+            listOf(LiveProvider.JJTV, LiveProvider.TG),
+            ChannelProviderOrder.order("892", v2 = false, rememberedWebsite = TgResolver.SITE)
+        )
+    }
+
+    @Test fun `explicit TG selection still overrides Sony Ten 3 HD automatic preference`() {
+        assertEquals(
+            listOf(LiveProvider.TG, LiveProvider.JJTV),
+            ChannelProviderOrder.order("892", v2 = false, rememberedWebsite = JjtvResolver.SITE,
+                requested = LiveProvider.TG)
         )
     }
 

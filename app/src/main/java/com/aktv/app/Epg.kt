@@ -11,7 +11,7 @@ data class Programme(
     val desc: String, val category: String, val image: String
 )
 
-data class Guide(val now: Programme?, val next: Programme?, val upcoming: List<Programme>)
+data class Guide(val now: Programme?, val next: Programme?, val upcoming: List<Programme>, val source: String = "TG public guide")
 
 /**
  * Programme guide from GET /api/public/guide/{id} (V1 channels only).
@@ -23,10 +23,11 @@ object Epg {
     private val cache = HashMap<String, Hit>()
     private const val TTL = 45_000L          // the API itself caches for ~30 s
 
-    fun cached(id: String): Guide? =
+    @Synchronized fun cached(id: String): Guide? =
         cache[id]?.takeIf { System.currentTimeMillis() - it.at < TTL }?.g
 
-    fun put(id: String, g: Guide) { cache[id] = Hit(System.currentTimeMillis(), g) }
+    @Synchronized fun put(id: String, g: Guide) { cache[id] = Hit(System.currentTimeMillis(), g) }
+    @Synchronized fun invalidate(id: String) { cache.remove(id) }
 
     private fun str(o: JSONObject, k: String) = if (o.isNull(k)) "" else o.optString(k, "").trim()
 

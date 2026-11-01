@@ -23,4 +23,21 @@
         <item name="android:drawablePadding">5dp</item><item name="android:paddingTop">8dp</item><item name="android:paddingBottom">8dp</item>
         <item name="android:textColor">@color/text_dim</item><item name="android:maxLines">1</item>
     </style>
+    <style name="Widget.AKTV.PhonePill" parent="@android:style/Widget.TextView">
+        <item name="android:layout_width">wrap_content</item><item name="android:layout_height">36dp</item>
+        <item name="android:layout_marginEnd">8dp</item><item name="android:gravity">center</item>
+        <item name="android:focusable">true</item><item name="android:clickable">true</item>
+        <item name="android:paddingStart">14dp</item><item name="android:paddingEnd">14dp</item>
+        <item name="android:textSize">11sp</item><item name="android:fontFamily">@font/sora_semibold</item>
+        <item name="android:textColor">@color/text_dim</item><item name="android:maxLines">1</item>
+    </style>
+    <style name="Widget.AKTV.PlayerAction" parent="@android:style/Widget.TextView">
+        <item name="android:layout_width">wrap_content</item><item name="android:layout_height">32dp</item>
+        <item name="android:layout_marginEnd">7dp</item><item name="android:gravity">center</item>
+        <item name="android:focusable">true</item><item name="android:clickable">true</item>
+        <item name="android:paddingStart">12dp</item><item name="android:paddingEnd">12dp</item>
+        <item name="android:textSize">10sp</item><item name="android:fontFamily">@font/sora_semibold</item>
+        <item name="android:textColor">@color/text</item><item name="android:maxLines">1</item>
+        <item name="android:background">@drawable/player_action</item>
+    </style>
 </resources>

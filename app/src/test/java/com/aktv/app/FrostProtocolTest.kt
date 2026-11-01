@@ -11,6 +11,9 @@ class FrostProtocolTest {
     private fun source(url: String = "https://media.example.test/play?token=synthetic", type: String = "dash") =
         JSONObject().put("id", "moviebox-source").put("type", type).put("url", url).put("quality", "1080p").put("language", "English")
     private fun parse(vararg entries: JSONObject) = FrostProtocol.parse(JSONObject().put("sources", JSONArray(entries.toList())).toString(), FrostProvider.FROST)
+    private fun vodSource(identity: String, url: String) = FrostSource(
+        FrostProvider.FROST, identity, url, VodFormat.DASH, "1080p", "English", null, emptyMap(), emptyList()
+    )
 
     @Test fun `movie lookup uses the observed resolver contract without episode parameters`() {
         val url = FrostProtocol.endpoint(FrostProtocol.SITE.toHttpUrl(), FrostProvider.FROST, FrostTitle(1288069, "movie"))
@@ -128,6 +131,15 @@ class FrostProtocolTest {
         assertNull(VodProgress.next(FrostTitle(1, "tv", 9, 1), episodes))
         assertNull(VodProgress.next(FrostTitle(1, "movie"), episodes))
     }
+    @Test fun `a refreshed 404 source is tried after other advertised movie servers`() {
+        val first = vodSource("server-1", "https://media.example.test/one.mpd")
+        val second = vodSource("server-2", "https://media.example.test/two.m3u8")
+        assertEquals(listOf("server-2", "server-1"),
+            VodSourceOrder.prioritize(listOf(first, second), avoidIdentity = first.identity).map { it.identity })
+        assertEquals(listOf("server-1", "server-2"),
+            VodSourceOrder.prioritize(listOf(first, second), preferredIdentity = first.identity).map { it.identity })
+    }
+
     @Test fun `recovery visits each URL once and never spins on unchanged refreshed metadata`() {
         val source = parse(source()).single()
         val recovery = VodRecovery()
@@ -135,11 +147,27 @@ class FrostProtocolTest {
         assertTrue(recovery.take(source)); assertFalse(recovery.take(source))
         assertTrue(recovery.refresh(FrostProvider.FROST, 403)); assertFalse(recovery.refresh(FrostProvider.FROST, 403))
         assertFalse(recovery.refresh(FrostProvider.OUT, 451))
+        val sourceRecovery = VodStartupPolicy()
+        assertTrue(sourceRecovery.refreshNotFound(FrostProvider.OUT, 404))
+        assertFalse(sourceRecovery.refreshNotFound(FrostProvider.OUT, 404))
         assertEquals(FrostProvider.OUT, recovery.alternative())
         recovery.visit(FrostProvider.OUT)
         assertNull(recovery.alternative())
         recovery.reset(); assertTrue(recovery.take(source))
     }
+    @Test fun `transient metadata failures get one same-provider retry before native fallback`() {
+        val policy = VodStartupPolicy()
+        assertTrue(policy.retryMetadata(FrostProvider.FROST, 404, "unavailable"))
+        assertFalse(policy.retryMetadata(FrostProvider.FROST, 404, "unavailable"))
+        assertFalse(policy.retryMetadata(FrostProvider.FROST, 403, "unavailable"))
+        assertFalse(policy.retryMetadata(FrostProvider.FROST, 451, "unavailable"))
+        assertTrue(policy.retryMetadata(FrostProvider.OUT, 503, "unavailable"))
+        assertFalse(policy.retryMetadata(FrostProvider.OUT, 429, "unavailable"))
+        policy.reset()
+        assertTrue(policy.retryMetadata(FrostProvider.OUT, null, "timeout"))
+        assertFalse(policy.retryMetadata(FrostProvider.OUT, null, "timeout"))
+    }
+
     @Test fun `recovery has a hard source-attempt ceiling even if server endlessly changes URLs`() {
         val recovery = VodRecovery()
         for (i in 1..16) assertTrue(recovery.take(parse(source("https://media.example.test/$i.mpd")).single()))

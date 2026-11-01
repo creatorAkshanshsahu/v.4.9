@@ -20,8 +20,10 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -33,6 +35,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
 import java.util.concurrent.Executors
@@ -73,6 +76,7 @@ class MoviePlayerActivity : Activity() {
     private var sources = emptyList<FrostSource>()
     private var currentSource: FrostSource? = null
     private val recovery = VodRecovery()
+    private val sourceRecovery = VodStartupPolicy()
     private val softwareRetried = HashSet<FrostProvider>()
     private var compatible = false
     private var diagnostics = PlaybackDiagnostics()
@@ -92,13 +96,16 @@ class MoviePlayerActivity : Activity() {
     private var lastFailure = ""
 
     private lateinit var view: PlayerView
-    private lateinit var overlay: LinearLayout
+    private lateinit var overlay: FrameLayout
     private lateinit var heading: TextView
+    private lateinit var episodeLine: TextView
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
     private lateinit var nextButton: TextView
+    private lateinit var sourcesButton: TextView
     private lateinit var episodesButton: TextView
     private lateinit var autoNextButton: TextView
+    private val actionButtons = mutableListOf<TextView>()
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
@@ -111,6 +118,8 @@ class MoviePlayerActivity : Activity() {
             finish(); return
         }
         titleName = intent.getStringExtra("name").orEmpty().take(180)
+        provider = FrostProvider.values().firstOrNull { it.id == prefs.getString("vod_provider_${title.progressKey}", null) }
+            ?: FrostProvider.FROST
         episodes = VodProgress.episodes(intent.getIntArrayExtra("episodes"))
         desiredPlay = saved?.getBoolean("play", true) ?: true
         restoreProgress()
@@ -122,30 +131,89 @@ class MoviePlayerActivity : Activity() {
     private fun buildUi() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemUi()
-        val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val root = FrameLayout(this).apply { setBackgroundColor(Accent.ABYSS) }
         view = PlayerView(this).apply {
             useController = true
-            controllerShowTimeoutMs = 5000
+            controllerShowTimeoutMs = 5200
             controllerAutoShow = true
             setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
             setShowSubtitleButton(true)
             setShowNextButton(false); setShowPreviousButton(false)
             setKeepContentOnPlayerReset(false)
-            setShutterBackgroundColor(Color.BLACK)
+            setShutterBackgroundColor(Accent.ABYSS)
+            setDefaultArtwork(getDrawable(R.drawable.home_hero_cinematic))
+            useArtwork = true
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        overlay = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(px(22), px(15), px(22), px(24))
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0xE6000000.toInt(), 0xA6000000.toInt(), Color.TRANSPARENT))
+        view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
+            setPlayedColor(Accent.SIGNAL); setScrubberColor(Accent.TEXT)
+            setBufferedColor(0x887F8A99.toInt()); setUnplayedColor(0x557F8A99)
         }
-        heading = TextView(this).apply { textSize = 21f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); maxLines = 2 }
-        status = TextView(this).apply { textSize = 13f; setTextColor(0xFFDDDDDD.toInt()); maxLines = 4; setPadding(0, px(5), 0, px(8)) }
-        overlay.addView(heading); overlay.addView(status)
+
+        overlay = FrameLayout(this)
+        overlay.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(0xF005070C.toInt(), 0xB805070C.toInt(), 0x3805070C, Color.TRANSPARENT))
+        }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
+        overlay.addView(View(this).apply {
+            background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+                intArrayOf(0xF505070C.toInt(), 0xC505070C.toInt(), 0x3205070C, Color.TRANSPARENT))
+        }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
+
+        val brand = ImageView(this).apply {
+            setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "AK TV"; alpha = 0.94f
+        }
+        overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {
+            leftMargin = px(42); topMargin = px(30)
+        })
+        val clock = android.widget.TextClock(this).apply {
+            format12Hour = "h:mm"; format24Hour = "HH:mm"
+            textSize = 16f; setTextColor(Accent.TEXT)
+            setShadowLayer(px(10).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
+        }
+        overlay.addView(clock, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+            rightMargin = px(40); topMargin = px(34)
+        })
+
+        val info = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, px(8))
+        }
+        info.addView(TextView(this).apply {
+            text = if (title.isSeries) "AK SERIES  /  NOW PLAYING" else "AK CINEMA  /  NOW PLAYING"
+            textSize = 10f; letterSpacing = 0.17f
+            setTextColor(if (title.isSeries) Accent.ION else Accent.SIGNAL)
+            setTypeface(null, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(9) })
+        heading = TextView(this).apply {
+            textSize = 34f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
+            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(heading, LinearLayout.LayoutParams(-1, -2))
+        episodeLine = TextView(this).apply {
+            textSize = 13f; letterSpacing = 0.02f; setTextColor(0xFFD6DCE5.toInt()); maxLines = 1
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(episodeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(7) })
+        status = TextView(this).apply {
+            textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
+            setPadding(px(12), px(7), px(12), px(7))
+            background = GradientDrawable().apply {
+                cornerRadius = px(14).toFloat(); setColor(0xD005070C.toInt())
+                setStroke(px(1), 0x50F8F9FC)
+            }
+        }
+        info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
+        val maxInfoWidth = (resources.displayMetrics.widthPixels - px(90)).coerceAtLeast(px(260)).coerceAtMost(px(860))
+        overlay.addView(info, FrameLayout.LayoutParams(maxInfoWidth, -2, Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(42); bottomMargin = px(190)
+        })
+
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(button("Back") { finish() })
-        row.addView(button("Sources") { showSources() })
-        row.addView(button("Audio / Subtitles") { showTracks() })
+        row.addView(button("Exit") { finish() })
+        sourcesButton = button("Change source") { showSources() }.also(row::addView)
+        row.addView(button("Audio & subtitles") { showTracks() })
         episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
         nextButton = button("Next episode") { nextEpisode() }.also(row::addView)
         autoNextButton = button("") {
@@ -153,34 +221,82 @@ class MoviePlayerActivity : Activity() {
             updateTitle()
         }.also(row::addView)
         row.addView(button("Retry") { desiredPlay = true; begin(provider) })
-        row.addView(button("Details") { showDetails() })
-        val scroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row) }
-        overlay.addView(scroll, LinearLayout.LayoutParams(-1, -2))
-        root.addView(overlay, FrameLayout.LayoutParams(-1, -2, Gravity.TOP))
-        spinner = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Accent.SIGNAL) }
+        row.addView(button("Playback details") { showDetails() })
+        val scroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
+        }
+        overlay.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = px(36); rightMargin = px(36); bottomMargin = px(104)
+        })
+        root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
+        spinner = ProgressBar(this).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.ION else Accent.SIGNAL)
+        }
         root.addView(spinner, FrameLayout.LayoutParams(px(48), px(48), Gravity.CENTER))
         setContentView(root)
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
-            overlay.visibility = if (visibility == View.VISIBLE || failed || spinner.visibility == View.VISIBLE) View.VISIBLE else View.GONE
+            setOverlayVisible(visibility == View.VISIBLE || failed || spinner.visibility == View.VISIBLE || actionHasFocus())
         })
         updateTitle()
         view.requestFocus()
     }
 
-    private fun px(value: Int) = (value * dp).toInt()
-    private fun button(label: String, click: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 13f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-        isFocusable = true; isClickable = true; setPadding(px(16), px(11), px(16), px(11))
-        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) }
-        fun style(focused: Boolean) {
-            background = GradientDrawable().apply { cornerRadius = px(8).toFloat(); setColor(if (focused) Accent.SIGNAL else 0xCC162532.toInt()) }
-            setTextColor(if (focused) Color.BLACK else Color.WHITE)
+    private fun actionHasFocus() = actionButtons.any { it.isFocused && it.isShown }
+
+    private fun setOverlayVisible(visible: Boolean) {
+        val keepVisible = visible || actionHasFocus()
+        overlay.animate().cancel()
+        if (keepVisible) {
+            if (overlay.visibility != View.VISIBLE) {
+                overlay.alpha = 0f; overlay.translationY = px(12).toFloat(); overlay.visibility = View.VISIBLE
+            }
+            overlay.animate().alpha(1f).translationY(0f).setDuration(240)
+                .setInterpolator(DecelerateInterpolator(1.6f)).start()
+        } else {
+            overlay.animate().alpha(0f).translationY(px(10).toFloat()).setDuration(220)
+                .withEndAction {
+                    if (!failed && spinner.visibility != View.VISIBLE && !actionHasFocus()) {
+                        overlay.visibility = View.GONE; overlay.alpha = 1f; overlay.translationY = 0f
+                    }
+                }.start()
         }
-        style(false); setOnFocusChangeListener { _, focused -> style(focused) }; setOnClickListener { click() }
+    }
+
+    private fun px(value: Int) = (value * dp).toInt()
+    private fun button(label: String, click: () -> Unit): TextView {
+        val action = TextView(this).apply {
+            text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
+            isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
+            val accent = Accent.SIGNAL
+            fun style(focused: Boolean) {
+                background = GradientDrawable().apply {
+                    cornerRadius = px(16).toFloat()
+                    setColor(if (focused) accent else 0xE1151C2D.toInt())
+                    setStroke(px(if (focused) 2 else 1), if (focused) 0xFFEFF6FF.toInt() else 0x4AFFFFFF)
+                }
+                setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
+                elevation = if (focused) px(9).toFloat() else 0f
+            }
+            style(false)
+            setOnFocusChangeListener { v, focused ->
+                style(focused)
+                v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f).setDuration(150).start()
+                if (focused) {
+                    setOverlayVisible(true)
+                    if (!failed) view.showController()
+                }
+            }
+            setOnClickListener { click() }
+        }
+        actionButtons += action
+        return action
     }
 
     private fun updateTitle() {
-        heading.text = titleName.ifBlank { "TMDB ${title.id}" } + if (title.isSeries) " · S${title.season} E${title.episode}" else ""
+        heading.text = titleName.ifBlank { "TMDB ${title.id}" }
+        episodeLine.text = if (title.isSeries) "SEASON ${title.season}  ·  EPISODE ${title.episode}" else ""
+        episodeLine.visibility = if (title.isSeries) View.VISIBLE else View.GONE
         episodesButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
         episodesButton.isEnabled = true
         nextButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
@@ -192,7 +308,7 @@ class MoviePlayerActivity : Activity() {
     private fun message(text: String, loading: Boolean = false) {
         status.text = text
         spinner.visibility = if (loading) View.VISIBLE else View.GONE
-        overlay.visibility = View.VISIBLE
+        setOverlayVisible(true)
         view.showController()
     }
 
@@ -207,7 +323,7 @@ class MoviePlayerActivity : Activity() {
 
     private fun begin(nextProvider: FrostProvider, selected: FrostSource? = null) {
         captureProgress()
-        recovery.reset(); softwareRetried.clear(); diagnostics = PlaybackDiagnostics()
+        recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); diagnostics = PlaybackDiagnostics()
         failed = false; lastFailure = ""; compatible = false; startupAt = SystemClock.elapsedRealtime()
         if (selected == null) resolve(nextProvider)
         else {
@@ -218,7 +334,7 @@ class MoviePlayerActivity : Activity() {
         }
     }
 
-    private fun resolve(nextProvider: FrostProvider, preferred: String? = null) {
+    private fun resolve(nextProvider: FrostProvider, preferred: String? = null, avoidIdentity: String? = null) {
         captureProgress(); releasePlayer(); dialog?.dismiss()
         provider = nextProvider; recovery.visit(provider); currentSource = null
         val request = title
@@ -231,14 +347,19 @@ class MoviePlayerActivity : Activity() {
             ui.post {
                 if (!foreground || token != generation || request != title) return@post
                 result.fold(onSuccess = { list ->
-                    sources = list.sortedBy { if (preferred != null && it.identity == preferred) 0 else 1 }
+                    val remembered = prefs.getString("vod_source_${request.progressKey}", null)
+                    val favored = preferred ?: remembered?.takeUnless { it == avoidIdentity }
+                    sources = VodSourceOrder.prioritize(list, favored, avoidIdentity)
                     nextSource()
                 }, onFailure = { error ->
                     diagnostics.metadataFailed(PlaybackProblems.from(error))
                     val problem = error as? FrostResolveException
                     lastFailure = problem?.message ?: "Movie source lookup failed."
-                    if (problem?.status in listOf(401, 403, 429)) fail(lastFailure)
-                    else recovery.alternative()?.let { resolve(it) } ?: fail(lastFailure)
+                    when {
+                        problem?.status == 429 -> fail(lastFailure)
+                        sourceRecovery.retryMetadata(nextProvider, problem?.status, problem?.kind) -> resolve(nextProvider)
+                        else -> recovery.alternative()?.let { resolve(it) } ?: fail(lastFailure)
+                    }
                 })
             }
         }
@@ -330,6 +451,10 @@ class MoviePlayerActivity : Activity() {
             if (player !== owner) return
             frame = true; failed = false; startupAt = 0; attemptAt = 0; bufferingAt = 0
             attempt.frameRendered(); spinner.visibility = View.GONE
+            currentSource?.let {
+                prefs.edit().putString("vod_source_${title.progressKey}", it.identity)
+                    .putString("vod_provider_${title.progressKey}", it.provider.id).apply()
+            }
             status.text = "Native Media3 · ${currentSource?.label.orEmpty()}"
             view.hideController()
         }
@@ -371,7 +496,9 @@ class MoviePlayerActivity : Activity() {
                 if (startupAt == 0L) startupAt = SystemClock.elapsedRealtime()
                 when {
                     problem.family == PlaybackDiagnostics.Family.DECODER && retrySoftware(source) -> Unit
-                    recovery.refresh(source.provider, problem.http) -> resolve(source.provider, source.identity)
+                    sourceRecovery.refreshNotFound(source.provider, problem.http) ->
+                        resolve(source.provider, avoidIdentity = source.identity)
+                    recovery.refresh(source.provider, problem.http) -> resolve(source.provider, preferred = source.identity)
                     else -> nextSource()
                 }
             }
@@ -510,7 +637,10 @@ class MoviePlayerActivity : Activity() {
     private fun fail(reason: String) {
         captureProgress(); generation++; lookup?.cancel(true); resolver.cancel(); releasePlayer()
         failed = true; startupAt = 0; attemptAt = 0; bufferingAt = 0
-        message("$reason\n${diagnostics.summary()}\nSources: choose an alternative · Details: device/codec/HTTP report")
+        message("$reason\n${diagnostics.summary()}\nChoose Change source to try another stream, or Retry to reload.")
+        view.hideController()
+        setOverlayVisible(true)
+        sourcesButton.requestFocus()
     }
     private fun releasePlayer() {
         surfaceWait?.let { (holder, callback) -> holder.removeCallback(callback) }; surfaceWait = null
@@ -522,6 +652,10 @@ class MoviePlayerActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (!initialized) return super.dispatchKeyEvent(event)
+        // Dialogs own Back/DPAD while open; otherwise Back on a TV remote closes the whole player.
+        if (dialog?.isShowing == true) return super.dispatchKeyEvent(event)
+        if (VodPlayerRemoteKeyPolicy.focusedActionOwns(event.keyCode, actionHasFocus()))
+            return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> { finish(); return true }
@@ -547,12 +681,7 @@ class MoviePlayerActivity : Activity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private fun hideSystemUi() {
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-    }
+    private fun hideSystemUi() = ImmersiveUi.hide(window)
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) hideSystemUi() }
     override fun onSaveInstanceState(out: Bundle) {
         if (initialized) { captureProgress(); out.putInt("season", title.season); out.putInt("episode", title.episode)

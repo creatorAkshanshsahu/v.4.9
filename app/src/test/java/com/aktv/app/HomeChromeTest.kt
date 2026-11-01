@@ -35,6 +35,11 @@ class HomeChromeTest {
         assertTrue(content.left >= rail.right)
         val media = root.findViewById<View>(R.id.heroMedia)
         assertTrue(media.left >= rail.right); assertTrue(media.right <= root.width)
+        assertEquals("native gradient field begins at the top edge", 0, media.top)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.heroBackdrop).visibility)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.heroPreview).visibility)
+        assertTrue("native gradient field extends beyond the reserved hero shelf", media.height > root.findViewById<View>(R.id.heroArea).height)
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navProfile).visibility)
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
@@ -42,8 +47,10 @@ class HomeChromeTest {
         }
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
-    fun `short landscape phone keeps search and the content shelf on screen`() = screen(800, 360) { root ->
-        val search = root.findViewById<View>(R.id.searchBtn)
+    fun `short landscape phone keeps horizontal section pills and the content shelf on screen`() = screen(800, 360) { root ->
+        assertEquals(View.GONE, root.findViewById<View>(R.id.navRail).visibility)
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.phoneNavScroll).visibility)
+        val search = root.findViewById<View>(R.id.phoneSearch)
         assertTrue(search.top >= 0); assertTrue(search.bottom <= 360)
         assertTrue(root.findViewById<View>(R.id.rows).height >= 100)
         assertTrue(root.findViewById<View>(R.id.heroTitle).width > 220)
