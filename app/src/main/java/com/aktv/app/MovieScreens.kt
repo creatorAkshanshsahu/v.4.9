@@ -140,7 +140,7 @@ class DetailActivity : Activity() {
         root.addView(contentScroll, FrameLayout.LayoutParams(-1, -1))
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(inset.toInt(), (8 * dp).toInt(), inset.toInt(), (8 * dp).toInt())
-            clipChildren = false; clipToPadding = false; minimumHeight = px(72)
+            clipChildren = false; clipToPadding = false; minimumHeight = (72 * dp).toInt()
             setBackgroundColor(0xFF080B14.toInt())
             elevation = (8 * dp)
         }
@@ -149,7 +149,7 @@ class DetailActivity : Activity() {
             setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "AK TV"
         }, LinearLayout.LayoutParams((64 * dp).toInt(), (52 * dp).toInt()).apply { marginStart = (18 * dp).toInt() })
-        root.addView(toolbar, FrameLayout.LayoutParams(-1, px(76), Gravity.TOP))
+        root.addView(toolbar, FrameLayout.LayoutParams(-1, (76 * dp).toInt(), Gravity.TOP))
         setContentView(root)
 
         body.alpha = 0f; body.translationX = -30 * dp
