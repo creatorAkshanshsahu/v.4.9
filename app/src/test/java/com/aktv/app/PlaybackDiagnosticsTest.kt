@@ -103,6 +103,27 @@ class PlaybackDiagnosticsTest {
         assertTrue(log.summary().contains("Stream lookup: NETWORK"))
         assertFalse(log.hasClearKey())
     }
+    @Test fun `safe metadata stage labels appear in redacted playback reports`() {
+        val log = PlaybackDiagnostics()
+        log.resolving(PlaybackDiagnostics.Provider.JJTV)
+        log.metadataFailed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER), "JJTV Star cookie probe: no exact-channel source for channel ID 1108")
+        assertTrue(log.summary().contains("JJTV Star cookie probe: no exact-channel source for channel ID 1108"))
+        assertTrue(log.report().contains("Metadata lookup: JJTV Star cookie probe: no exact-channel source for channel ID 1108"))
+    }
+    @Test fun `successful exact-channel Star probe is visible without exposing its URL or cookie`() {
+        val log = PlaybackDiagnostics()
+        begin(log)
+        log.metadataStatus("Star cookie probe: channel 1108; 1 exact source")
+        val report = log.report()
+        assertTrue(report.contains("Metadata probe: Star cookie probe: channel 1108; 1 exact source"))
+        assertTrue(report.contains("No stream URLs, cookies, key IDs or keys are included."))
+    }
+    @Test fun `load failures preserve the actual HTTP stage`() {
+        val attempt = begin()
+        attempt.loadError(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.HTTP, http = 451), PlaybackDiagnostics.Load.MANIFEST)
+        assertEquals("MANIFEST", attempt.lastLoadStageName())
+        assertTrue(attempt.summary().contains("MANIFEST download: HTTP 451"))
+    }
     @Test fun `audio advancement is recorded independently from a first video frame`() {
         val attempt = begin(drm = PlaybackDiagnostics.Drm.NONE)
         attempt.audioStarted()

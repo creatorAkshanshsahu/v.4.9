@@ -23,9 +23,11 @@ internal class PlaybackDiagnostics {
     private val attempts = ArrayDeque<Attempt>()
     private var sequence = 0
     private var metadataProblem: Problem? = null
+    private var metadataFailureLabel: String? = null
+    private var metadataStatusLabel: String? = null
     private var resolvingProvider: Provider? = null
     private var resolvingProblem: Problem? = null
-    @Synchronized fun resolving(provider: Provider) { resolvingProvider = provider; resolvingProblem = null }
+    @Synchronized fun resolving(provider: Provider) { resolvingProvider = provider; resolvingProblem = null; metadataFailureLabel = null; metadataStatusLabel = null }
     @Synchronized fun begin(provider: Provider, media: Media, drm: Drm, browserStyle: Boolean, compatible: Boolean): Attempt {
         resolvingProvider = null; resolvingProblem = null
         val attempt = Attempt(++sequence, provider, media, drm, browserStyle, compatible)
@@ -33,18 +35,25 @@ internal class PlaybackDiagnostics {
         attempts.addLast(attempt)
         return attempt
     }
-    @Synchronized fun metadataFailed(problem: Problem) { metadataProblem = problem; resolvingProblem = problem }
+    @Synchronized fun metadataFailed(problem: Problem, safeStage: String? = null) {
+        metadataProblem = problem; resolvingProblem = problem
+        metadataFailureLabel = safeStage?.takeIf { it.matches(Regex("[A-Za-z0-9 _.:;()/-]{1,120}")) }
+    }
+    @Synchronized fun metadataStatus(safeLabel: String?) {
+        metadataStatusLabel = safeLabel?.takeIf { it.matches(Regex("[A-Za-z0-9 _.:;()/-]{1,120}")) }
+    }
     @Synchronized fun hasClearKey() = attempts.any { it.drm == Drm.CLEARKEY }
     @Synchronized fun summary(): String = resolvingProvider?.let { provider ->
-        resolvingProblem?.let { "$provider lookup: ${it.describe()}" } ?: "Resolving $provider configuration (no player yet)"
+        resolvingProblem?.let { metadataFailureLabel ?: "$provider lookup: ${it.describe()}" } ?: "Resolving $provider configuration (no player yet)"
     } ?: attempts.lastOrNull()?.summary()
-        ?: metadataProblem?.let { "Stream lookup: ${it.describe()}" } ?: "Waiting for stream configuration"
+        ?: metadataProblem?.let { metadataFailureLabel ?: "Stream lookup: ${it.describe()}" } ?: "Waiting for stream configuration"
     @Synchronized fun report(): String = buildString {
         if (resolvingProvider != null) append("Current work: ${summary()}\n\nPrevious player attempt:\n")
         append(attempts.lastOrNull()?.report() ?: summary())
         val failures = attempts.mapNotNull { it.failureLine() }.takeLast(5)
         if (failures.isNotEmpty()) append("\n\nRecent attempts (original errors retained):\n" + failures.joinToString("\n"))
-        metadataProblem?.let { append("\nMetadata lookup: ${it.describe()}") }
+        metadataProblem?.let { append("\nMetadata lookup: ${metadataFailureLabel ?: it.describe()}") }
+        metadataStatusLabel?.let { append("\nMetadata probe: $it") }
         append("\n\nNo stream URLs, cookies, key IDs or keys are included.")
     }
 
@@ -57,6 +66,7 @@ internal class PlaybackDiagnostics {
         private var drmProblem: Problem? = null
         private var terminalProblem: Problem? = null
         private var lastLoadProblem: Problem? = null
+        private var lastLoadType: Load? = null
         private var timedOut = false
         private var manifest = 0; private var initialization = 0; private var segments = 0
         private var loadedBytes = 0L
@@ -75,11 +85,12 @@ internal class PlaybackDiagnostics {
         @Synchronized fun drmError(value: Problem) { drmProblem = value }
         @Synchronized fun failed(value: Problem) { terminalProblem = value }
         @Synchronized fun timeout() { timedOut = true }
-        @Synchronized fun loadError(value: Problem) { lastLoadProblem = value }
+        @Synchronized fun loadError(value: Problem, type: Load = Load.OTHER) { lastLoadProblem = value; lastLoadType = type }
+        @Synchronized fun lastLoadStageName(): String? = lastLoadType?.takeUnless { it == Load.OTHER }?.name
         @Synchronized fun loaded(type: Load, bytes: Long, skewSeconds: Long? = null) {
             when (type) { Load.MANIFEST -> manifest++; Load.INITIALIZATION -> initialization++; Load.MEDIA -> segments++; else -> Unit }
             loadedBytes += bytes.coerceAtLeast(0)
-            lastLoadProblem = null
+            lastLoadProblem = null; lastLoadType = null
             if (type == Load.MANIFEST && skewSeconds != null) clockSkewSeconds = skewSeconds
         }
         @Synchronized fun surfaceReady() { surface = true }
@@ -115,7 +126,7 @@ internal class PlaybackDiagnostics {
             firstFrame -> "Media3 reported a video frame; visible picture still requires device verification"
             drmSupported == false && step.ordinal < DrmStep.SESSION_OPEN.ordinal -> "Android reports no support for $drm"
             drmProblem != null && step != DrmStep.KEYS_LOADED -> "Android DRM: ${drmProblem!!.describe()}"
-            lastLoadProblem != null -> "Media download: ${lastLoadProblem!!.describe()}"
+            lastLoadProblem != null -> "${lastLoadType?.name ?: "Media"} download: ${lastLoadProblem!!.describe()}"
             manifest == 0 && media != Media.FILE -> "No manifest download has completed"
             unsupportedDrm > 0 && selectedVideo == 0 && selectedAudio == 0 -> "No tracks selected: Android reports unsupported DRM"
             drm != Drm.NONE && step != DrmStep.KEYS_LOADED -> "Waiting for Android $drm keys (stage ${step.name})"

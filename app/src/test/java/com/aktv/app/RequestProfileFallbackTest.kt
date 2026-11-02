@@ -13,6 +13,13 @@ class RequestProfileFallbackTest {
     private val browser = source(jjtv, true, "JJTV · Server 1 · browser request")
     private val native = source(jjtv, false, "JJTV · Server 1 · native request")
 
+    @Test fun `JJTV starts with the observed browser profile instead of a remembered failing native profile`() {
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = 1))
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = -1))
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(browser, native), rememberedIndex = 0))
+        assertEquals(0, RequestProfileFallback.initialIndex(listOf(native), rememberedIndex = 0))
+    }
+
     @Test fun `a refused browser-style request moves to the declared native style`() {
         assertEquals(1, RequestProfileFallback.alternative(listOf(browser, native), browser))
     }
@@ -31,9 +38,22 @@ class RequestProfileFallbackTest {
         assertEquals(0, RequestProfileFallback.preferredIndex(only, browser) { it.label == browser.label })
     }
 
+    @Test fun `a single advertised style clamps a missing previous identity to index zero`() {
+        val only = listOf(browser)
+        assertEquals(0, RequestProfileFallback.preferredIndex(only, browser) { false })
+    }
+
     @Test fun `the alternative style wins over the same source when both exist`() {
         val sources = listOf(browser, native)
         assertEquals(1, RequestProfileFallback.preferredIndex(sources, browser) { it.label == browser.label })
+    }
+
+    @Test fun `when no alternate header style exists a refused TG server advances to another advertised server`() {
+        val first = source(TgResolver.SITE, false, "Server 1").copy(url = "https://media.example/server1.mpd")
+        val second = source(TgResolver.SITE, false, "Server 2").copy(url = "https://media.example/server2.m3u8")
+        val sources = listOf(first, second)
+        assertEquals(1, RequestProfileFallback.preferredIndex(sources, first) { it.label == first.label })
+        assertEquals(0, RequestProfileFallback.preferredIndex(sources, second) { it.label == second.label })
     }
 
     @Test fun `no refused source falls back to the previous identity instead of crashing`() {

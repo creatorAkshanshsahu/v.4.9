@@ -25,6 +25,7 @@ jobs:
         run: |
           node --test .github/scripts/compact-tg-trace.test.cjs
           python3 -B .github/scripts/inspect-jjtv-player.test.py
+          python3 -B .github/scripts/inspect-tg-player.test.py
       - name: Inspect live player metadata without saving credentials
         run: python3 .github/scripts/inspect-tg-player.py
       - name: Inspect the user-provided JJTV native stream contract
@@ -56,12 +57,26 @@ jobs:
       - name: Publish native TV layout preview
         if: always()
         run: python3 .github/scripts/report-ui-previews.py home-tv
-      - name: Publish native phone layout preview
+      - name: Publish native logo mark preview
         if: always()
-        run: python3 .github/scripts/report-ui-previews.py home-phone
-      - name: Publish native movies layout preview
+        run: python3 .github/scripts/report-ui-previews.py brand-mark
+      - name: Publish native entrance preview
         if: always()
-        run: python3 .github/scripts/report-ui-previews.py home-movies
+        run: python3 .github/scripts/report-ui-previews.py entrance
+      - name: Publish native VOD player preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py vod-player
+      - name: Publish native live player preview
+        if: always()
+        run: python3 .github/scripts/report-ui-previews.py live-player
+      - name: Upload native home, entrance and player previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-native-ui-previews
+          path: app/build/reports/ui-preview/*.webp
+          if-no-files-found: error
+          retention-days: 14
       - name: Check current TG, JJTV and Frost native configuration
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true
@@ -81,7 +96,21 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
           cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+      - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
+        run: |
+          python3 .github/scripts/verify-apk-archives.test.py
+          python3 .github/scripts/verify-apk-archives.py out
       - uses: actions/upload-artifact@v4
         with:
           name: AK-TV-apks
-          path: out/*.apk
+          path: |
+            out/*.apk
+            out/SHA256SUMS
+            out/apk-validation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-arm32-install
+          path: |
+            out/AK-TV-arm32.apk
+            out/SHA256SUMS
+            out/apk-validation.json

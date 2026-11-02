@@ -1,20 +1,26 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="124dp" android:layout_height="wrap_content" android:layout_margin="6dp"
-    android:orientation="vertical" android:padding="6dp"
-    android:focusable="true" android:clickable="true"
-    android:background="@drawable/poster_card_bg">
-    <FrameLayout android:layout_width="112dp" android:layout_height="150dp"
-        android:background="@drawable/poster_round" android:clipToOutline="true">
-        <TextView android:id="@+id/posterName" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:gravity="center" android:padding="10dp" android:textColor="@color/text_dim" android:textSize="12sp"
-            android:fontFamily="@font/sora_semibold"/>
-        <ImageView android:id="@+id/poster" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:scaleType="centerCrop"/>
-    </FrameLayout>
-    <TextView android:id="@+id/posterTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="9dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text"
-        android:textSize="12sp" android:fontFamily="@font/sora_semibold"/>
-    <TextView android:id="@+id/posterMeta" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_marginTop="2dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text_faint"
-        android:textSize="10sp" android:fontFamily="@font/sora_regular"/>
-</LinearLayout>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="148dp" android:layout_height="wrap_content" android:layout_margin="6dp"
+    android:focusable="true" android:clickable="true" android:clipChildren="false" android:clipToPadding="false"
+    android:background="@drawable/poster_card_bg" android:foreground="@drawable/focus_ring_poster">
+    <TextView android:id="@+id/posterRank" android:layout_width="54dp" android:layout_height="184dp"
+        android:layout_gravity="start|top" android:gravity="center_vertical|start" android:includeFontPadding="false"
+        android:textColor="#5598B7B5" android:textSize="62sp" android:fontFamily="@font/sora_bold"
+        android:visibility="gone"/>
+    <LinearLayout android:id="@+id/posterContent" android:layout_width="124dp" android:layout_height="wrap_content"
+        android:layout_gravity="end|top" android:orientation="vertical" android:padding="4dp">
+        <FrameLayout android:id="@+id/posterFrame" android:layout_width="116dp" android:layout_height="174dp"
+            android:background="@drawable/poster_round" android:clipToOutline="true">
+            <TextView android:id="@+id/posterName" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:gravity="center" android:padding="10dp" android:textColor="@color/text_dim" android:textSize="12sp"
+                android:fontFamily="@font/sora_semibold"/>
+            <ImageView android:id="@+id/poster" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:scaleType="centerCrop"/>
+        </FrameLayout>
+        <TextView android:id="@+id/posterTitle" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="7dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text"
+            android:textSize="11sp" android:fontFamily="@font/sora_semibold"/>
+        <TextView android:id="@+id/posterMeta" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="2dp" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text_faint"
+            android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
+    </LinearLayout>
+</FrameLayout>

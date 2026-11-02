@@ -5,13 +5,13 @@ import sys
 import xml.etree.ElementTree as ET
 
 name = sys.argv[1]
-assert name in ('home-tv', 'home-phone', 'home-movies')
+assert name in ('home-tv', 'home-phone', 'home-movies', 'brand-mark', 'entrance', 'vod-player', 'live-player')
 path=Path('app/build/reports/ui-preview')/(name+'.webp')
 if not path.exists():
     print(f'::warning title=Native UI preview::{name} was not produced; no visual assertion is made.')
 else:
     encoded=base64.b64encode(path.read_bytes()).decode('ascii')
-    if len(encoded)>38000:
+    if len(encoded)>42000:
         print(f'::warning title=Native UI preview::{name} exceeds the bounded preview transport size ({len(encoded)} chars).')
     else:
         count=(len(encoded)+3799)//3800
