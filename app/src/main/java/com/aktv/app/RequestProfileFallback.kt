@@ -19,9 +19,28 @@ internal object RequestProfileFallback {
         }
     }
 
-    /** Index to try next: the other style when one exists, otherwise the previous source identity. */
+    /** Start JJTV with the observed browser/no-Referer profile even if an old build saved native headers. */
+    fun initialIndex(sources: List<TgStream>, rememberedIndex: Int): Int {
+        val remembered = rememberedIndex.takeIf { it in sources.indices }
+        val browser = sources.indexOfFirst { it.omitReferrer }.takeIf { it >= 0 }
+        return when {
+            browser == null -> remembered ?: 0
+            remembered == null || !sources[remembered].omitReferrer -> browser
+            else -> remembered
+        }
+    }
+
+    /** Index to try next: the other style when one exists, otherwise a valid source index. */
     fun preferredIndex(sources: List<TgStream>, refused: TgStream?, sameAsBefore: (TgStream) -> Boolean): Int {
+        // First try the same advertised server with its alternate request profile (JJTV). If
+        // that is unavailable, move to a different advertised server rather than replaying the
+        // refused TG Server 1/source URL after a fresh metadata lookup.
         alternative(sources, refused).takeIf { it >= 0 }?.let { return it }
-        return sources.indexOfFirst(sameAsBefore).coerceAtLeast(0)
+        if (refused != null) {
+            val differentSource = sources.indexOfFirst { !sameAsBefore(it) }
+            if (differentSource >= 0) return differentSource
+        }
+        val previous = sources.indexOfFirst(sameAsBefore)
+        return if (previous >= 0) previous else 0
     }
 }

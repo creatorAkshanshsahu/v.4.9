@@ -1,1 +1,4 @@
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android" android:src="@drawable/ic_logo" android:gravity="fill"/>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><color android:color="@color/abyss"/></item>
+    <item android:drawable="@drawable/aktv_mark_cinematic" android:inset="24dp"/>
+</layer-list>

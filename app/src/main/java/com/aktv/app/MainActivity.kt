@@ -45,6 +45,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -64,10 +65,11 @@ class MainActivity : AppCompatActivity() {
         data class Mv(val m: Movies.Title) : Tile()
         object Hint : Tile()
     }
-    class Row(val title: String, var tiles: List<Tile>)
+    class Row(val title: String, var tiles: List<Tile>, val landscape: Boolean = false)
 
     // movie & series shelves (filled the first time the tab opens)
     private val vodRows = arrayOf(listOf<Row>(), listOf<Row>()); private val vodLoading = booleanArrayOf(false, false)   // [0] Movies, [1] Series
+    private val vodError = arrayOfNulls<String>(2)
     private val RECENT = "Recently watched"; private val CONTINUE = "Continue watching"
     private lateinit var heroBackdrop: ImageView; private lateinit var heroPreview: View; private lateinit var previewPv: PlayerView
     private var previewPlayer: ExoPlayer? = null; private var previewToken = 0
@@ -87,7 +89,9 @@ class MainActivity : AppCompatActivity() {
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var shown = listOf<Channel>()
+    private var v1CatalogLoaded = false; private var v2CatalogLoaded = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
+    private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
     private var favs = setOf<String>(); private var heroTile: Tile? = null
     private val accents = HashMap<String, Int>()
     private var tab = 0; private var current = -1
@@ -98,6 +102,10 @@ class MainActivity : AppCompatActivity() {
     private var playToken = 0
     private var resolveJob: Future<*>? = null
     private val playbackIo = Executors.newFixedThreadPool(2)
+    private val sourceWarmupGate = LiveSourceWarmupGate()
+    private var pendingWarmupChannel: Channel? = null
+    private var sourceWarmupRunning = false
+    private val sourceWarmupRunnable = Runnable { runSourceWarmup() }
     private var nativeSources = emptyList<TgStream>()
     private var serverIdx = 0
     private var nativeProviders = listOf(LiveProvider.TG)
@@ -108,10 +116,10 @@ class MainActivity : AppCompatActivity() {
     private val providerWindow = NativeProviderWindow()
     private val decoderRetries = NativeDecoderRetries()
     private val authRecovery = PlaybackAuthRecovery()
+    private val freshCredentialProviders = HashSet<LiveProvider>()
     private val recovery = PlaybackRecovery()
-    // A transient provider refusal is retried once on the provider that actually plays this
-    // channel, instead of spending the remaining tuning budget on a source with broken DRM.
-    private var refusalRetried = false
+    // A transient refusal gets two paced, fresh-metadata retries inside the existing 60 s budget.
+    private var refusalRetryCount = 0
     private var okLong = false
     private var renderedFrame = false
     private val television get() = NativePlaybackPolicy.isTelevision(this)
@@ -119,6 +127,18 @@ class MainActivity : AppCompatActivity() {
     private var playbackActive = false
     private val startupBudget = PlaybackStartupBudget()
     private var playbackHealth: PlaybackHealth? = null
+    private val channelPlaybackResults = LinkedHashMap<String, ChannelPlaybackResult>()
+    private var healthScanActive = false
+    private var healthScanComplete = false
+    private var healthScanChannels = emptyList<Channel>()
+    private var healthScanIndex = -1
+    private var healthScanOriginalShown = emptyList<Channel>()
+    private var healthScanOriginalCurrentKey: String? = null
+    private var healthScanOriginalShownCat = ""
+    private var healthScanAudioStartedAt = 0L
+    private var healthScanAudioStartPosition = 0L
+    private val healthScanTimeout = Runnable { onHealthScanTimeout() }
+    private val healthScanAdvance = Runnable { advanceHealthScan() }
     private var surfaceWait: Pair<SurfaceHolder, SurfaceHolder.Callback>? = null
     private var diagnostics = PlaybackDiagnostics()
     private var activeAttempt: PlaybackDiagnostics.Attempt? = null
@@ -147,22 +167,32 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
     private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
-    private val segs by lazy { listOf(segLive, segV2, segSites, segSeries) }   // 0 Live, 1 24/7, 2 Movies, 3 Series
-    // top navigation (Google TV style): flat pills, white while focused, grey for the open tab
+    private val segs by lazy { listOf(segLive, segV2, segSites, segSeries) }   // TV rail: Live, Always on, Movies, Series
+    private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
     private val segBgs by lazy { List(4) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
+    private val phoneSegBgs by lazy { List(5) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
     private lateinit var heroText: View; private lateinit var heroDot: View; private lateinit var heroBadge: TextView
-    private lateinit var heroTitle: TextView; private lateinit var heroChips: LinearLayout
+    private lateinit var heroTitle: TextView; private lateinit var heroSubheading: TextView; private lateinit var heroChips: LinearLayout; private lateinit var heroTagline: View
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
-    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Accent.ABYSS, Accent.ABYSS)) }
+    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF091521.toInt(), 0xFF0C1D2A.toInt(), 0xFF07111B.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
-    private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View
+    private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
-    private lateinit var infoDesc: TextView; private lateinit var infoNext: TextView; private lateinit var playStatus: TextView
+    private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
+    private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
+    private lateinit var infoGuideAction: TextView
+    private lateinit var playStatus: TextView; private var currentGuideNow: Programme? = null
+    private var currentGuideData: Guide? = null
+    private lateinit var programmeGuidePanel: ViewGroup; private lateinit var programmeGuideScrim: View
+    private lateinit var programmeGuideClose: TextView; private lateinit var programmeGuideChannel: TextView
+    private lateinit var programmeGuideStatus: TextView; private lateinit var programmeGuideEntries: LinearLayout
+    private lateinit var programmeGuideCredit: TextView; private var programmeGuideShown = false
+    private var programmeGuideCurrentChannel: String? = null
     // channel guide
     private val FAV = "Favorites"
     private lateinit var home: ViewGroup; private var homeFocusMode = 0; private var lastHomeFocus: View? = null
@@ -170,6 +200,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var catList: RecyclerView; private lateinit var chList: RecyclerView
     private lateinit var chCol: View; private lateinit var chHeader: TextView; private lateinit var channelSearch: EditText
     private var guideShown = false; private var shownCat = ""
+    private val guideWaiters = HashMap<String, MutableList<(Guide?) -> Unit>>()
     private var guideCats = listOf<String>(); private var catCounts = mapOf<String, Int>()
     private var guideCat = ""; private var guideChannels = listOf<Channel>(); private var categoryChannels = listOf<Channel>()
     // search
@@ -187,19 +218,58 @@ class MainActivity : AppCompatActivity() {
             edit.putBoolean("native_only_v2", true).apply()
         }
         setContentView(R.layout.activity_main)
+        loadChannelPlaybackResults()
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
         segLive = findViewById(R.id.segLive); segV2 = findViewById(R.id.segV2); segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
         searchBtn = findViewById(R.id.searchBtn)
+        phoneSegs = listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
+        phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
-        heroTitle = findViewById(R.id.heroTitle); heroChips = findViewById(R.id.heroChips)
+        heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
+        heroChips = findViewById(R.id.heroChips); heroTagline = findViewById(R.id.heroTagline)
         heroOrb = findViewById(R.id.heroOrb); heroLogo = findViewById(R.id.heroLogo); heroMono = findViewById(R.id.heroMono)
         heroProg = findViewById(R.id.heroProg); heroProgress = findViewById(R.id.heroProgress)
         heroDesc = findViewById(R.id.heroDesc); heroNext = findViewById(R.id.heroNext)
         infoCard = findViewById(R.id.infoCard); infoLogo = findViewById(R.id.infoLogo); infoName = findViewById(R.id.infoName)
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
+        playerBrand = findViewById(R.id.playerBrand)
         infoMono = findViewById(R.id.infoMono); infoNow = findViewById(R.id.infoNow); infoProgress = findViewById(R.id.infoProgress)
-        infoDesc = findViewById(R.id.infoDesc); infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus)
+        infoDesc = findViewById(R.id.infoDesc); infoScheduleNext = findViewById(R.id.infoScheduleNext)
+        infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus); infoActions = findViewById(R.id.infoActions)
+        infoSourceAction = findViewById(R.id.infoSourceAction); infoQualityAction = findViewById(R.id.infoQualityAction); infoRetryAction = findViewById(R.id.infoRetryAction)
+        infoGuideAction = findViewById(R.id.infoGuideAction)
+        infoSourceAction.setOnClickListener { showNativeSourceMenu() }
+        infoQualityAction.setOnClickListener { showPictureMenu() }
+        infoRetryAction.setOnClickListener { reloadStream() }
+        infoGuideAction.setOnClickListener { showProgrammeGuide() }
+        listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+            action.background = Ui.pill(dp, 0xB31C2432.toInt(), 18f)
+            action.setOnFocusChangeListener { v, focused ->
+                val text = v as TextView
+                text.background = Ui.pill(dp, if (focused) Accent.ION else 0xB30A111B.toInt(), 18f).apply {
+                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) Accent.TEXT else 0x55FFFFFF)
+                }
+                text.setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
+                v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f)
+                    .translationZ(if (focused) 8 * dp else 0f).setDuration(180).start()
+            }
+        }
+        programmeGuidePanel = findViewById(R.id.programmeGuidePanel)
+        programmeGuideScrim = findViewById(R.id.programmeGuideScrim)
+        programmeGuideClose = findViewById(R.id.programmeGuideClose)
+        programmeGuideChannel = findViewById(R.id.programmeGuideChannel)
+        programmeGuideStatus = findViewById(R.id.programmeGuideStatus)
+        programmeGuideEntries = findViewById(R.id.programmeGuideEntries)
+        programmeGuideCredit = findViewById(R.id.programmeGuideCredit)
+        programmeGuideClose.setOnClickListener { closeProgrammeGuide() }
+        programmeGuideScrim.setOnClickListener { closeProgrammeGuide() }
+        val scheduleWidth = minOf(440f * dp, (resources.displayMetrics.widthPixels - 32f * dp).coerceAtLeast(280f * dp)).toInt()
+        (programmeGuidePanel.layoutParams as? FrameLayout.LayoutParams)?.let { lp ->
+            lp.width = scheduleWidth; lp.gravity = Gravity.END; lp.setMargins((16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt(), (16 * dp).toInt())
+            programmeGuidePanel.layoutParams = lp
+        }
+
         // Phones have no MENU/OK remote keys: make the visible source/status lines actionable.
         infoNext.setOnClickListener { if (!guideShown) showNativeSourceMenu() }
         playStatus.setOnClickListener { showPlaybackDetails() }
@@ -208,15 +278,55 @@ class MainActivity : AppCompatActivity() {
         intro = findViewById(R.id.splash)
         heroBackdrop = findViewById(R.id.heroBackdrop); heroPreview = findViewById(R.id.heroPreview); previewPv = findViewById(R.id.heroPreviewPv)
 
-        // flat surfaces (no glass: it made the UI laggy)
+        // Use selective translucent panels, not blur/backdrop filters; this stays cheap on 32-bit TVs.
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        infoCard.background = Ui.pill(dp, 0xEB0D1925.toInt(), 18f)
-        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f)
+        infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(0xE5080B11.toInt(), 0xD90D121A.toInt())).apply {
+            cornerRadius = 16 * dp
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
+        }
+        infoCard.elevation = 10 * dp
+        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
+        }
+        val playerDock = findViewById<View>(R.id.playerInfoDock)
+        val phoneWidth = resources.configuration.screenWidthDp < 600
+        val dockLp = playerDock.layoutParams as FrameLayout.LayoutParams
+        if (phoneWidth) {
+            val margin = (16 * dp).toInt()
+            dockLp.width = (resources.displayMetrics.widthPixels - 2 * margin).coerceAtLeast(1)
+            dockLp.setMargins(margin, 0, margin, margin); dockLp.marginStart = margin; dockLp.marginEnd = margin
+            playerDock.layoutParams = dockLp
+            val card = infoCard as LinearLayout
+            card.orientation = LinearLayout.VERTICAL; card.minimumWidth = 0
+            card.setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
+            (card.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.height = LinearLayout.LayoutParams.WRAP_CONTENT; lp.weight = 0f
+                card.layoutParams = lp
+            }
+            findViewById<View>(R.id.infoLogoBox).visibility = View.GONE
+            (card.getChildAt(1).layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+                lp.marginStart = 0; lp.width = LinearLayout.LayoutParams.MATCH_PARENT; lp.weight = 0f
+                card.getChildAt(1).layoutParams = lp
+            }
+            infoName.maxWidth = dockLp.width - (28 * dp).toInt()
+            listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+                action.textSize = 9f; action.setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), 0)
+                (action.layoutParams as? LinearLayout.LayoutParams)?.let { lp -> lp.marginEnd = (4 * dp).toInt(); action.layoutParams = lp }
+            }
+        } else {
+            dockLp.width = (resources.displayMetrics.widthPixels * 0.84f).toInt()
+            dockLp.setMargins((40 * dp).toInt(), 0, 0, (28 * dp).toInt())
+            dockLp.marginStart = (40 * dp).toInt(); dockLp.marginEnd = 0
+            playerDock.layoutParams = dockLp
+            findViewById<View>(R.id.infoHint).visibility = View.GONE
+        }
         findViewById<TextView>(R.id.infoHint).text = SpannableStringBuilder().apply {
             key(this, "▲ ▼", "Channel"); append("     "); key(this, "▶", "All channels"); append("     ")
-            key(this, "Hold OK", "Reload"); append("     "); key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
+            key(this, "GUIDE", "Schedule"); append("     "); key(this, "Hold OK", "Reload"); append("     ")
+            key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
         }
         val track = ColorStateList.valueOf(Color.argb(60, 255, 255, 255))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
@@ -225,12 +335,20 @@ class MainActivity : AppCompatActivity() {
         searchBtn.background = searchBg
         searchBtn.setOnFocusChangeListener { _, _ -> styleSegs() }
         searchBtn.setOnClickListener { openSearch() }
+        phoneSegs.forEachIndexed { i, tv ->
+            tv.background = phoneSegBgs[i]
+            tv.setOnClickListener { switchTab(i) }
+            tv.setOnFocusChangeListener { _, _ -> styleSegs() }
+        }
+        phoneSearchBtn.background = phoneSegBgs[4]
+        phoneSearchBtn.setOnClickListener { openSearch() }
+        phoneSearchBtn.setOnFocusChangeListener { _, _ -> styleSegs() }
 
         home = findViewById(R.id.home); homeFocusMode = home.descendantFocusability
         guide = findViewById(R.id.guide); guideScrim = findViewById(R.id.guideScrim); guideDivider = findViewById(R.id.guideDivider)
         catList = findViewById(R.id.catList); chList = findViewById(R.id.chList)
         chCol = findViewById(R.id.chCol); chHeader = findViewById(R.id.chHeader); channelSearch = findViewById(R.id.channelSearch)
-        guide.background = Ui.pill(dp, 0xF21A1C21.toInt(), 22f)
+        guide.background = Ui.pill(dp, 0xF20E1422.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         listOf(catList to catAdapter, chList to chAdapter).forEach { (rv, ad) ->
             rv.layoutManager = LinearLayoutManager(this); rv.adapter = ad; rv.itemAnimator = null
@@ -282,11 +400,18 @@ class MainActivity : AppCompatActivity() {
         styleSegs(); fillHero(null); loadChannels()
 
         // A short, skippable reveal. No hidden movie-catalogue warm-up competing with live decoding.
-        intro.wordmark = fSemi
         home.alpha = 0f; home.translationY = 0f
         intro.onReveal = { home.alpha = 1f }
-        intro.onDone = { home.alpha = 1f; intro.visibility = View.GONE; segs[tab].requestFocus() }
-        Movies.diskDir = cacheDir
+        intro.onDone = {
+            home.alpha = 1f; intro.visibility = View.GONE
+            if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs[tab].requestFocus()
+            else segs[tab].requestFocus()
+        }
+        Movies.diskDir = File(filesDir, "tmdb").apply { mkdirs() }
+        Movies.timingListener = { event -> android.util.Log.i("AKTV-VOD", "${event.stage} ${event.elapsedMs}ms cache=${event.cacheHit}") }
+        loadHomeTrending()
+        // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
+        ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
         findViewById<TextView>(R.id.navVersion).text = appVersion
         intro.start()
     }
@@ -301,16 +426,37 @@ class MainActivity : AppCompatActivity() {
     private fun keyHint(k: String, label: String) = SpannableStringBuilder().also { key(it, k, label) }
 
     /** Hero button: [primary] is the white pill (Watch / Details), the rest are soft grey pills. */
+    private fun heroMetaChip(text: String) = TextView(this).apply {
+        this.text = text; textSize = if (compact) 9f else 10f; typeface = fSemi; setTextColor(Accent.TEXT)
+        isFocusable = false; setPadding((10 * dp).toInt(), (6 * dp).toInt(), (10 * dp).toInt(), (6 * dp).toInt())
+        background = Ui.pill(dp, 0x7733424D, 18f)
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (7 * dp).toInt() }
+    }
+
+    private fun showHomeChannelDetails(channel: Channel) {
+        val guide = Epg.cached(channel.id)
+        val text = buildString {
+            append(channel.category)
+            if (channel.v2) append("  ·  Always on")
+            guide?.now?.let { append("\n\nNOW  ·  ${it.title}") }
+            guide?.next?.let { append("\nNEXT  ·  ${it.title}") }
+            if (guide?.now == null && guide?.next == null) append("\n\nProgramme details will appear when the guide has a listing.")
+        }
+        AlertDialog.Builder(this).setTitle(channel.name).setMessage(text).setPositiveButton("Done", null).show()
+    }
+
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
         setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
-        val bg = Ui.pill(dp, if (primary) Accent.SIGNAL else 0xB31C2B39.toInt(), 10f)
+        val accent = sectionAccent()
+        val bg = Ui.pill(dp, if (primary) Color.WHITE else 0xB30A111B.toInt(), 12f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (focused) Color.WHITE else if (primary) Accent.SIGNAL else 0xB31C2B39.toInt())
-            setTextColor(if (focused || primary) Accent.ABYSS else Accent.TEXT)
+            bg.setColor(if (primary) Color.WHITE else if (focused) Ui.mix(Accent.ABYSS, accent, 0.32f) else 0xB30A111B.toInt())
+            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, accent)
+            setTextColor(if (primary || focused) Accent.ABYSS else Accent.TEXT)
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
@@ -324,11 +470,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.home).requestLayout()
     }
 
+    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2 -> Accent.SIGNAL; else -> Accent.INDIGO }
+
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
-        bg.setColor(when { focused -> Color.WHITE; active -> 0xFF163B39.toInt(); else -> Color.TRANSPARENT })
-        val fg = when { focused -> Accent.ABYSS; active -> Accent.SIGNAL; else -> Accent.DIM }
+        val accent = sectionAccent()
+        bg.setColor(when { focused -> Ui.mix(Accent.ABYSS, accent, 0.23f); active -> Ui.mix(Accent.ABYSS, accent, 0.12f); else -> Color.TRANSPARENT })
+        val fg = when { focused -> Accent.TEXT; active -> accent; else -> Accent.DIM }
         tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
-        bg.setStroke(if (active && !focused) (1 * dp).toInt().coerceAtLeast(1) else 0, 0xFF285C55.toInt())
+        bg.setStroke((if (focused) 2 * dp else if (active) 1 * dp else 0f).toInt(), if (focused || active) accent else Color.TRANSPARENT)
     }
     private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
 
@@ -337,17 +486,24 @@ class MainActivity : AppCompatActivity() {
         searchBtn.contentDescription = when (tab) { 2 -> "Search movies"; 3 -> "Search series"; else -> "Search channels" }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tab == i) }
         navStyle(searchBtn, searchBg, searchBtn.isFocused, false)
+        phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tab == i) }
+        phoneSearchBtn.contentDescription = when (tab) { 2 -> "Search movies"; 3 -> "Search series"; else -> "Search channels" }
+        navStyle(phoneSearchBtn, phoneSegBgs[4], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "Movies"; else -> "Series" }
-        findViewById<TextView>(R.id.sectionKicker).text = if (tab < 2) "YOUR FRONT ROW" else "FIND YOUR NEXT FAVORITE"
+        findViewById<TextView>(R.id.sectionKicker).apply {
+            text = when (tab) { 0 -> "LIVE, RIGHT NOW"; 1 -> "PLAY ANYTIME · 24/7"; 2 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING" }
+            setTextColor(sectionAccent())
+        }
         val count = when (tab) { 0 -> all.size; 1 -> allV2.size; else -> vodRows[tab - 2].sumOf { it.tiles.size } }
         findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 2) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
 
-    /** Focused card grows a little; the white ring comes from the view's own foreground state. No shadows, no glow. */
+    /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
     private fun focusAnim(x: View, f: Boolean, color: Int = 0) {
-        val s = if (f) 1.035f else 1f
+        val s = if (f) 1.045f else 1f
         x.animate().cancel()
-        x.animate().setStartDelay(0).scaleX(s).scaleY(s).setDuration(150).setInterpolator(DecelerateInterpolator(1.6f)).start()
+        x.animate().setStartDelay(0).scaleX(s).scaleY(s).translationZ(if (f) 12 * dp else 0f)
+            .setDuration(180).setInterpolator(DecelerateInterpolator(1.6f)).start()
     }
     /**
      * Rows without focus step back so the active row reads first. Only the row's title steps back:
@@ -454,6 +610,7 @@ class MainActivity : AppCompatActivity() {
     private fun seedAccents(list: List<Channel>) { for (c in list) if (c.logo.isBlank()) accents[c.key] = Accent.fromName(c.name) }
 
     private fun applyV1(list: List<Channel>) {
+        v1CatalogLoaded = true
         if (list == all) return
         all = list; seedAccents(list); updateStatus()
         list.firstOrNull()?.let { TgServers.refreshSite(it.id) }
@@ -461,6 +618,7 @@ class MainActivity : AppCompatActivity() {
         if (searchShown) updateResults()
     }
     private fun applyV2(list: List<Channel>) {
+        v2CatalogLoaded = true
         if (list == allV2) return
         allV2 = list; seedAccents(list); updateStatus()
         if (tab == 1) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
@@ -468,9 +626,31 @@ class MainActivity : AppCompatActivity() {
     }
     private fun updateStatus() {
         val msg = when { tab == 0 && all.isEmpty() -> v1Msg; tab == 1 && allV2.isEmpty() -> "Loading 24/7 channels…"
-            tab >= 2 && vodRows[tab - 2].isEmpty() -> { val w = if (tab == 3) "series" else "movies"; if (vodLoading[tab - 2]) "Loading $w…" else "Couldn't load $w. Check the connection and open the tab again." }
+            tab >= 2 && vodRows[tab - 2].isEmpty() -> {
+                val idx = tab - 2; val w = if (tab == 3) "series" else "movies"
+                if (vodLoading[idx]) "Loading $w…"
+                else vodError[idx]?.let { "Couldn't load $w ($it). Select this tab again to retry." }
+                    ?: "Couldn't load $w. Select this tab again to retry."
+            }
             else -> "" }
         status.text = msg; status.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    /** Populate the home-only trending strip from the existing TMDB catalogue without blocking the intro or live list. */
+    private fun loadHomeTrending() {
+        if (trendingLoading || trendingTitles.isNotEmpty()) return
+        trendingLoading = true
+        io.execute {
+            val loaded = try { Movies.shelf(Movies.MOVIE_SHELVES.first()).take(20) } catch (_: Exception) { emptyList() }
+            runOnUiThread {
+                trendingLoading = false
+                trendingFailed = loaded.isEmpty()
+                if (!isFinishing && !isDestroyed) {
+                    if (loaded.isNotEmpty()) trendingTitles = loaded
+                    if (tab == 0) refreshRowsKeepFocus(requestFocus = false)
+                }
+            }
+        }
     }
 
     /** Shows the saved lists instantly, then re-reads both update links so new / changed channels arrive on their own. */
@@ -518,6 +698,31 @@ class MainActivity : AppCompatActivity() {
         val keys = listOf(c.key) + prefs.getString("recent_ch", "")!!.split(",").filter { it.isNotEmpty() && it != c.key }
         prefs.edit().putString("recent_ch", keys.take(20).joinToString(",")).apply()
     }
+    private fun featuredChannels(channels: List<Channel>): List<Channel> = channels.sortedWith(
+        compareBy<Channel> {
+            val label = "${it.name} ${it.category}".lowercase()
+            when {
+                "news" in label -> 0
+                listOf("sport", "cricket", "football", "tennis").any { it in label } -> 1
+                listOf("entertain", "movie", "drama", "serial").any { it in label } -> 2
+                listOf("kids", "child", "cartoon").any { it in label } -> 3
+                "music" in label -> 4
+                else -> 5
+            }
+        }.thenBy { it.name.lowercase() }
+    ).take(24)
+
+    private fun liveRows(channels: List<Channel>, alwaysOn: Boolean = false): List<Row> {
+        val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
+        return buildList {
+            if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
+            if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
+            add(Row(FAV, favTiles()))
+            addAll(recentRow())
+            addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+        }
+    }
+
     private fun continueRow(): List<Row> {
         val type = if (tab == 3) "series" else "movie"
         val l = Movies.recent(prefs).filter { it.type == type }.map { Tile.Mv(it) }
@@ -527,15 +732,30 @@ class MainActivity : AppCompatActivity() {
      * Loads the shelves of one VOD tab (2 = Movies, 3 = Series) in parallel and shows each one the moment it (and those above it) are ready.
      * A title is shown only in the first shelf that has it, so the same poster no longer repeats down the page.
      */
+    private fun catalogFailureLabel(error: Exception): String {
+        val message = error.message.orEmpty()
+        if (message.matches(Regex("HTTP [0-9]{3}"))) return message.replace(' ', '_')
+        return when (error) {
+            is javax.net.ssl.SSLException -> "TLS"
+            is java.net.UnknownHostException -> "DNS"
+            is java.net.SocketTimeoutException -> "timeout"
+            is java.net.ConnectException -> "connect"
+            else -> "network"
+        }
+    }
+
     private fun loadVod(t: Int) {
         val idx = t - 2
         if (idx !in 0..1 || vodLoading[idx] || vodRows[idx].isNotEmpty()) return
-        vodLoading[idx] = true; updateStatus()
+        vodLoading[idx] = true; vodError[idx] = null; updateStatus()
         val shelves = Movies.shelves(if (idx == 1) "series" else "movie")
         Thread {
             val n = shelves.size
             val res = arrayOfNulls<List<Movies.Title>>(n); val done = BooleanArray(n)
-            val pool = Executors.newFixedThreadPool(6)
+            // TMDB's public API is contacted by many shelves. Keep TV/mobile network pressure
+            // bounded so Android TV hotspots don't starve the first visible catalogue rows.
+            val pool = Executors.newFixedThreadPool(2)
+            val firstError = java.util.concurrent.atomic.AtomicReference<String?>(null)
             var published = 0
             val publish = {
                 runOnUiThread {
@@ -561,24 +781,29 @@ class MainActivity : AppCompatActivity() {
             }
             shelves.forEachIndexed { i, sh ->
                 pool.execute {
-                    try { val l = Movies.shelf(sh); if (l.isNotEmpty()) synchronized(res) { res[i] = l } } catch (_: Exception) {}
+                    try { val l = Movies.shelf(sh); if (l.isNotEmpty()) synchronized(res) { res[i] = l } }
+                    catch (error: Exception) { firstError.compareAndSet(null, catalogFailureLabel(error)) }
                     synchronized(res) { done[i] = true }
                     publish()
                 }
             }
             pool.shutdown(); pool.awaitTermination(40, java.util.concurrent.TimeUnit.SECONDS)
-            runOnUiThread { vodLoading[idx] = false; updateStatus() }
+            runOnUiThread {
+                vodLoading[idx] = false
+                if (vodRows[idx].isEmpty()) vodError[idx] = firstError.get() ?: "empty"
+                updateStatus()
+            }
         }.start()
     }
 
-    /** Builds the rows for the first [upTo] shelves, giving each title to the first shelf that has it. Shelves left with too few new titles are skipped. */
+    /** Builds rows for the first [upTo] shelves, giving each title to its first matching shelf and skipping only fully deduplicated rows. */
     private fun dedupeShelves(shelves: List<Movies.Shelf>, res: Array<List<Movies.Title>?>, upTo: Int, old: List<Row>): List<Row> {
         val seen = HashSet<String>(); val out = ArrayList<Row>()
         val byTitle = old.associateBy { it.title }
         for (i in 0 until upTo) {
             val l = res[i] ?: continue
             val keep = l.filter { seen.add(it.imdb) }.take(50)
-            if (keep.size < 6) { keep.forEach { seen.remove(it.imdb) }; continue }
+            if (keep.isEmpty()) continue
             val tiles = keep.map { Tile.Mv(it) }
             val title = shelves[i].title
             out.add(byTitle[title]?.takeIf { it.tiles == tiles } ?: Row(title, tiles))   // same Row object when nothing changed
@@ -588,16 +813,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshRows() {
         rows = when (tab) {
-            0 -> listOf(Row(FAV, favTiles())) + recentRow() + all.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
-            1 -> listOf(Row(FAV, favTiles())) + recentRow() + allV2.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
+            0 -> liveRows(all)
+            1 -> liveRows(allV2, alwaysOn = true)
             else -> { loadVod(tab); continueRow() + vodRows[tab - 2] }
         }
         setHeroCollapsed(false)
         inner.clear()
         rowAdapter.notifyDataSetChanged()
         val first: Tile? = when (tab) {
-            0 -> pool().firstOrNull()?.let { Tile.Ch(it) }
-            1 -> pool().firstOrNull()?.let { Tile.Ch(it) }
+            0, 1 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
             else -> rows.firstOrNull()?.tiles?.firstOrNull()
         }
         setHero(first, immediate = true)
@@ -608,16 +832,20 @@ class MainActivity : AppCompatActivity() {
         val s = favs.toMutableSet(); val added = s.add(c.key); if (!added) s.remove(c.key)
         favs = s; prefs.edit().putStringSet("favs", s).apply()
         Toast.makeText(this, if (added) "Added to favorites" else "Removed from favorites", Toast.LENGTH_SHORT).show()
-        for ((ri, ad) in inner) if (ri > 0) {
+        for ((ri, ad) in inner) {
             val idx = rows.getOrNull(ri)?.tiles?.indexOfFirst { it is Tile.Ch && it.c.key == c.key } ?: -1
             if (idx >= 0) ad.notifyItemChanged(idx, "fav")
         }
-        if (rows.firstOrNull()?.title == FAV) { rows[0].tiles = favTiles(); rowAdapter.notifyItemChanged(0) }
+        val favRow = rows.indexOfFirst { it.title == FAV }
+        if (favRow >= 0) { rows[favRow].tiles = favTiles(); rowAdapter.notifyItemChanged(favRow) }
         (heroTile as? Tile.Ch)?.let { if (it.c.key == c.key) fillHero(it) }
     }
 
     private fun switchTab(t: Int) {
-        if (t == tab) return
+        if (t == tab) {
+            if (t >= 2 && vodRows[t - 2].isEmpty() && !vodLoading[t - 2]) loadVod(t)
+            return
+        }
         val dir = if (t > tab) 1 else -1
         tab = t; layoutHero(); styleSegs(); stopPreview()
         val shift = 28 * dp * dir
@@ -659,40 +887,83 @@ class MainActivity : AppCompatActivity() {
     }
     private fun applyHero(t: Tile?) {
         heroText.animate().cancel()
-        heroText.animate().alpha(0f).translationX(-10 * dp).setDuration(110).withEndAction {
-            fillHero(t); heroText.translationX = 16 * dp
-            heroText.animate().alpha(1f).translationX(0f).setDuration(300).setInterpolator(DecelerateInterpolator(2f)).start()
+        heroText.animate().alpha(0f).translationX(-14 * dp).setDuration(150).withEndAction {
+            fillHero(t); heroText.translationX = 20 * dp
+            heroText.animate().alpha(1f).translationX(0f).setDuration(380).setInterpolator(DecelerateInterpolator(1.7f)).start()
         }.start()
     }
-    /** Tints the still hero panel (shown until the live preview is ready) with the channel's colour. */
+    /** Tints the dark hero treatment with the selected section's accent. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(Accent.ABYSS, c, 0.24f), Ui.mix(Accent.ABYSS, partner, 0.12f))
+        orbBg.colors = intArrayOf(Ui.mix(0xFF091521.toInt(), partner, 0.12f), Ui.mix(0xFF0C1D2A.toInt(), c, 0.16f), 0xFF07111B.toInt())
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
-    private fun showBackdrop(url: String?) {
-        if (url.isNullOrEmpty()) { heroBackdrop.animate().alpha(0f).setDuration(300).start(); heroOrb.animate().alpha(1f).setDuration(250).start(); return }
-        heroOrb.animate().alpha(0f).setDuration(200).start()
-        heroBackdrop.load(url) {
-            crossfade(180)
-            listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.background == url) heroBackdrop.animate().alpha(1f).setDuration(260).start() })
+    /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
+    private fun showCinematicFallback(forTile: Tile?) {
+        heroBackdrop.animate().cancel(); heroOrb.animate().cancel()
+        if (forTile !is Tile.Mv) {
+            heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+            heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
         }
+        heroBackdrop.visibility = View.VISIBLE
+        heroOrb.alpha = if (forTile is Tile.Mv) 0.30f else 0.72f
+        heroPreview.visibility = View.GONE
+        stopPreview()
+    }
+
+    /** Use the selected film's real TMDB backdrop for a full-bleed streaming-service hero. */
+    private fun showHeroArtwork(title: Movies.Title) {
+        val artwork = title.background.ifBlank { title.poster }.let {
+            if (lowEnd || television) it.replace("/w1280/", "/w780/") else it
+        }
+        if (artwork.isBlank()) {
+            heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+            heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+            return
+        }
+        heroBackdrop.animate().cancel()
+        heroBackdrop.visibility = View.VISIBLE; heroBackdrop.alpha = 1f
+        val pushIn = if (lowEnd) 1f else 1.035f
+        heroBackdrop.scaleX = pushIn; heroBackdrop.scaleY = pushIn
+        heroBackdrop.load(artwork) {
+            crossfade(360)
+            listener(onSuccess = { _, _ ->
+                if ((heroTile as? Tile.Mv)?.m?.imdb == title.imdb && !heroCollapsed) {
+                    heroBackdrop.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                        .setDuration(if (lowEnd) 280 else 700).setInterpolator(DecelerateInterpolator(1.4f)).start()
+                }
+            }, onError = { _, _ ->
+                if ((heroTile as? Tile.Mv)?.m?.imdb == title.imdb) {
+                    heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
+                    heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+                }
+            })
+        }
+        heroOrb.animate().alpha(0.30f).setDuration(420).setInterpolator(DecelerateInterpolator()).start()
     }
     private fun fillHero(t: Tile?) {
         heroChips.removeAllViews()
-        if (t !is Tile.Mv) showBackdrop(null)
-        schedulePreview((t as? Tile.Ch)?.c)
+        heroBadge.setPadding((9 * dp).toInt(), (3 * dp).toInt(), (9 * dp).toInt(), (3 * dp).toInt())
+        heroBadge.setTextColor(Accent.TEXT)
+        heroBadge.background = Ui.pill(dp, 0x2424D3D0, 16f).apply {
+            setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
+        }
+        showCinematicFallback(t)
+        heroTagline.visibility = if (tab < 2 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
+        heroSubheading.text = if (tab < 2) "A clearer view of what’s next." else "Find your next story."
         when (t) {
             is Tile.Ch -> {
-                heroDot.visibility = View.VISIBLE; heroDot.backgroundTintList = ColorStateList.valueOf(Accent.LIVE)
+                heroLogo.alpha = 1f
+                heroDot.visibility = View.VISIBLE
+                (heroDot as? TextView)?.text = if (t.c.v2) "●  ALWAYS ON" else "●  LIVE NOW"
+                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.ION else Accent.LIVE)
+                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
-                heroChips.addView(chip("▶   Watch live", true).apply { setOnClickListener {
+                heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
                     shown = (if (t.c.v2) allV2 else all).ifEmpty { listOf(t.c) }; shownCat = t.c.category
                     play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
                 } })
-                heroChips.addView(chip(if (t.c.key in favs) "♥  Saved" else "+  My favorites").apply {
-                    setOnClickListener { toggleFav(t.c); heroChips.getChildAt(1)?.requestFocus() }
-                })
+                heroChips.addView(chip("ⓘ   Details").apply { setOnClickListener { showHomeChannelDetails(t.c) } })
                 if (t.c.logo.isBlank()) {
                     heroLogo.visibility = View.GONE; heroMono.visibility = View.VISIBLE
                     heroMono.text = initials(t.c.name); heroMono.textSize = if (heroMono.text.length > 1) 62f else 84f
@@ -710,38 +981,66 @@ class MainActivity : AppCompatActivity() {
                 scheduleHeroGuide(t.c)
             }
             is Tile.Mv -> {
-                val red = Accent.SIGNAL
-                heroDot.visibility = View.GONE
+                val accent = sectionAccent()
+                heroDot.visibility = View.VISIBLE
+                (heroDot as? TextView)?.apply {
+                    text = if (t.m.isSeries) "SERIES SPOTLIGHT" else "FEATURED MOVIE"
+                    setTextColor(accent); backgroundTintList = ColorStateList.valueOf(accent)
+                }
                 heroTitle.text = t.m.name
-                heroBadge.text = listOfNotNull(
-                    if (t.m.isSeries) "Series" else "Movie",
-                    t.m.year.ifEmpty { null },
-                    if (t.m.rating.isNotEmpty()) "★ ${t.m.rating}" else null,
-                    t.m.genres.take(2).joinToString(" · ").ifEmpty { null }
-                ).joinToString("   ·   ")
-                heroChips.addView(chip("▶   Explore title", true).apply { setOnClickListener {
+                showHeroArtwork(t.m)
+                heroSubheading.text = if (t.m.isSeries) "Stories that keep going." else "Your next movie night starts here."
+                heroBadge.text = if (t.m.isSeries) "SERIES  /  ON DEMAND" else "MOVIE  /  ON DEMAND"
+                heroChips.addView(chip("▶   More info", true).apply { setOnClickListener {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)
                 } })
+                listOfNotNull(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
+                    .plus(t.m.genres.take(2)).forEach { heroChips.addView(heroMetaChip(it)) }
+                heroMono.visibility = View.GONE; heroLogo.setImageDrawable(null); heroLogo.visibility = View.GONE
+                if (t.m.logo.isNotBlank()) {
+                    heroLogo.visibility = View.VISIBLE; heroLogo.alpha = 0f
+                    heroLogo.load(t.m.logo) {
+                        crossfade(220); listener(onSuccess = { _, _ -> if ((heroTile as? Tile.Mv)?.m?.imdb == t.m.imdb) heroLogo.animate().alpha(1f).setDuration(260).start() })
+                    }
+                }
                 heroProg.visibility = View.GONE; heroProgress.visibility = View.GONE; heroNext.visibility = View.GONE
-                heroDesc.text = t.m.description; heroDesc.visibility = View.GONE // full synopsis lives in the responsive detail page
+                heroDesc.text = t.m.description
+                heroDesc.visibility = if (!compact && t.m.description.isNotBlank()) View.VISIBLE else View.GONE
                 ui.removeCallbacks(heroGuideRunnable)
-                glowHero(red, 0xFF0E5362.toInt()); showBackdrop(t.m.background.ifEmpty { t.m.poster })
+                glowHero(accent, if (t.m.isSeries) 0xFF493A8A.toInt() else 0xFF815331.toInt())
             }
             else -> {
-                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "Your world. On screen."
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.ic_mark)
+                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
+                heroSubheading.text = "A clearer view of what’s next."
+                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.aktv_logo_cinematic)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
         }
     }
 
     // ---------- programme details ----------
+    private fun guideHasSchedule(g: Guide?) = g != null && (g.now != null || g.next != null || g.upcoming.isNotEmpty())
+
     private fun fetchGuide(c: Channel, cb: (Guide?) -> Unit) {
         if (c.v2) { cb(null); return }
         Epg.cached(c.id)?.let { cb(it); return }
+        val leader = synchronized(guideWaiters) {
+            val existing = guideWaiters[c.id]
+            if (existing != null) { existing.add(cb); false }
+            else { guideWaiters[c.id] = mutableListOf(cb); true }
+        }
+        if (!leader) return
         io.execute {
-            val g = try { Epg.parse(get("$GUIDE/${c.id}", 2)).also { Epg.put(c.id, it) } } catch (e: Exception) { null }
-            runOnUiThread { cb(g) }
+            val community = try { ExternalEpg.guide(applicationContext, c.id) } catch (_: Exception) { null }
+            val tgFallback = if (guideHasSchedule(community)) null
+                else try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
+            val guide = community?.takeIf(::guideHasSchedule)
+                ?: tgFallback?.takeIf(::guideHasSchedule)
+                ?: community ?: tgFallback
+                ?: Guide(null, null, emptyList(), "No schedule currently published")
+            Epg.put(c.id, guide)
+            val callbacks = synchronized(guideWaiters) { guideWaiters.remove(c.id).orEmpty() }
+            runOnUiThread { callbacks.forEach { it(guide) } }
         }
     }
     private fun span(sb: SpannableStringBuilder, from: Int, color: Int) {
@@ -778,24 +1077,44 @@ class MainActivity : AppCompatActivity() {
         heroProg.visibility = if (n != null) View.VISIBLE else View.GONE
         heroProgress.visibility = heroProg.visibility
         if (n != null) { heroProg.text = progLine("NOW", n); heroProgress.progress = (Epg.progress(n) * 1000).toInt() }
-        val d = n?.desc.orEmpty()
-        heroDesc.text = d; heroDesc.visibility = if (compact || d.isEmpty()) View.GONE else View.VISIBLE
+        val channel = (heroTile as? Tile.Ch)?.c
+        val channelLabel = "${channel?.name.orEmpty()} ${channel?.category.orEmpty()}".lowercase()
+        val fallback = if ("news" in channelLabel) "Live. Global. Independent. Breaking news, bigger perspectives."
+            else "Live TV, curated for your next moment."
+        val d = n?.desc?.takeIf { it.isNotBlank() } ?: fallback
+        heroDesc.text = d
+        heroDesc.visibility = if (compact || tab >= 2) View.GONE else View.VISIBLE
         heroNext.visibility = if (nx != null && !compact) View.VISIBLE else View.GONE
         if (nx != null) heroNext.text = progLine("NEXT", nx, range = false)
     }
 
     // ---------- player overlay ----------
+    private val guideProgressTick = object : Runnable {
+        override fun run() {
+            val active = currentGuideNow
+            if (active != null && layer.visibility == View.VISIBLE && infoCard.alpha > 0.02f) {
+                infoProgress.progress = (Epg.progress(active) * 1000).toInt()
+                ui.postDelayed(this, 60_000)
+            }
+        }
+    }
     private val hideInfo = Runnable {
-        infoCard.animate().alpha(0f).translationY(14 * dp).setDuration(450).start()
+        if (programmeGuideShown || healthScanActive) return@Runnable
+        ui.removeCallbacks(guideProgressTick)
+        infoCard.animate().alpha(0f).translationY(14 * dp).setDuration(450).withEndAction { infoActions.visibility = View.GONE }.start()
         playerScrim.animate().alpha(0f).setDuration(450).start()
         playerClock.animate().alpha(0f).setDuration(450).start()
+        playerBrand.animate().alpha(0f).setDuration(450).start()
     }
     private fun showInfo() {
         ui.removeCallbacks(hideInfo)
+        infoActions.visibility = View.VISIBLE
         infoCard.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
         playerScrim.animate().alpha(1f).setDuration(260).start()
         playerClock.animate().alpha(1f).setDuration(260).start()
-        ui.postDelayed(hideInfo, 5000)
+        playerBrand.animate().alpha(1f).setDuration(260).start()
+        ui.removeCallbacks(guideProgressTick); ui.postDelayed(guideProgressTick, 60_000)
+        if (!healthScanActive) ui.postDelayed(hideInfo, 5000)
     }
     private fun bindInfo(ch: Channel) {
         infoName.text = ch.name
@@ -804,19 +1123,144 @@ class MainActivity : AppCompatActivity() {
         val ac = accentOf(ch.key)
         spinner.indeterminateTintList = ColorStateList.valueOf(ac)
         infoProgress.progressTintList = ColorStateList.valueOf(ac)
-        infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE; infoNext.visibility = View.GONE
-        if (ch.v2) { infoNow.text = "24/7 live channel"; infoNow.visibility = View.VISIBLE }
+        currentGuideNow = null; currentGuideData = null; programmeGuideCurrentChannel = ch.key
+        infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE
+        infoScheduleNext.visibility = View.GONE; infoNext.visibility = View.GONE
+        if (ch.v2) { infoNow.text = "24/7 live channel · programme schedule unavailable"; infoNow.visibility = View.VISIBLE }
         else fetchGuide(ch) { g -> if (shown.getOrNull(current)?.key == ch.key) fillInfoGuide(g) }
         showInfo()
+        if (television) infoGuideAction.requestFocus()
     }
     private fun fillInfoGuide(g: Guide?) {
         val n = g?.now
-        if (n == null) { infoNow.visibility = View.GONE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE; return }
-        infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
-        infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
-        infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
-        // infoNext belongs to native source selection. A late EPG callback must not replace or hide
-        // the active provider label while a different provider is resolving.
+        currentGuideData = g
+        currentGuideNow = n
+        if (n == null) {
+            infoNow.text = if (g?.next != null) "No current programme listing · see Guide for what’s next"
+                else "Programme schedule unavailable · live playback continues"
+            infoNow.visibility = View.VISIBLE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE
+            infoScheduleNext.visibility = View.GONE
+        } else {
+            infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
+            infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
+            infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
+            val next = g?.next
+            infoScheduleNext.visibility = if (next == null) View.GONE else View.VISIBLE
+            if (next != null) infoScheduleNext.text = progLine("NEXT", next)
+        }
+        if (programmeGuideShown && programmeGuideCurrentChannel == shown.getOrNull(current)?.key) {
+            shown.getOrNull(current)?.let { renderProgrammeGuide(g, it, loading = false) }
+        }
+    }
+
+    private fun showProgrammeGuide() {
+        val ch = shown.getOrNull(current) ?: return
+        if (guideShown) closeGuide()
+        ui.removeCallbacks(hideInfo)
+        programmeGuideShown = true; programmeGuideCurrentChannel = ch.key
+        programmeGuideScrim.visibility = View.VISIBLE; programmeGuideScrim.alpha = 0f
+        programmeGuidePanel.visibility = View.VISIBLE; programmeGuidePanel.alpha = 0f; programmeGuidePanel.translationX = 24 * dp
+        programmeGuideScrim.animate().alpha(1f).setDuration(180).start()
+        programmeGuidePanel.animate().alpha(1f).translationX(0f).setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
+        renderProgrammeGuide(currentGuideData, ch, loading = !ch.v2 && currentGuideData == null)
+        programmeGuideClose.requestFocus()
+        if (!ch.v2 && currentGuideData == null) fetchGuide(ch) { guideData ->
+            if (programmeGuideShown && programmeGuideCurrentChannel == ch.key) renderProgrammeGuide(guideData, ch, loading = false)
+        }
+    }
+
+    private fun renderProgrammeGuide(g: Guide?, ch: Channel, loading: Boolean) {
+        programmeGuideChannel.text = ch.name
+        programmeGuideEntries.removeAllViews()
+        if (ch.v2) {
+            programmeGuideStatus.text = "This always-on channel does not publish a programme schedule."
+            programmeGuideCredit.text = "Live playback is unaffected. V2 channels currently have no schedule feed."
+            return
+        }
+        val available = g?.now != null || g?.next != null || !g?.upcoming.isNullOrEmpty()
+        programmeGuideStatus.text = when {
+            loading -> "Checking the channel schedule…"
+            !available -> "No current or upcoming listings are available for this channel."
+            g?.now == null -> "Now on air is not listed. Upcoming programmes are shown below."
+            else -> "Now on air and the next programmes"
+        }
+        if (g?.now != null) programmeGuideEntries.addView(programmeEntry("NOW ON", g.now, true))
+        if (g?.next != null) programmeGuideEntries.addView(programmeEntry("UP NEXT", g.next, false))
+        g?.upcoming.orEmpty().forEachIndexed { index, programme ->
+            programmeGuideEntries.addView(programmeEntry(if (g?.next == null && index == 0) "UP NEXT" else "LATER", programme, false))
+        }
+        programmeGuideCredit.text = if (guideHasSchedule(g))
+            "Schedule source: ${g?.source}. Listings are informational; the live stream stays native."
+            else "Checked the TG guide and the community JioTV XMLTV fallback. Live playback is unaffected."
+    }
+
+    private fun programmeEntry(label: String, p: Programme, currentProgramme: Boolean): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
+            background = Ui.pill(dp, 0x66151C2D, 14f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x2AFFFFFF) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (10 * dp).toInt() }
+        }
+        val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val badge = TextView(this).apply {
+            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.ION else Accent.SIGNAL)
+            letterSpacing = 0.08f
+        }
+        val time = TextView(this).apply {
+            text = Epg.range(p); textSize = 10f; typeface = fSemi; setTextColor(Accent.DIM); gravity = Gravity.END
+            maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        top.addView(badge, LinearLayout.LayoutParams(0, -2, 1f)); top.addView(time, LinearLayout.LayoutParams(0, -2, 1.5f))
+        card.addView(top)
+        card.addView(TextView(this).apply {
+            text = p.title; textSize = 16f; typeface = fSemi; setTextColor(Accent.TEXT); maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END; setPadding(0, (7 * dp).toInt(), 0, 0)
+        })
+        if (p.desc.isNotBlank()) card.addView(TextView(this).apply {
+            text = p.desc; textSize = 11f; setTextColor(Accent.DIM); maxLines = 3; ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, (5 * dp).toInt(), 0, 0)
+        })
+        if (currentProgramme) card.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000; progress = (Epg.progress(p) * 1000).toInt(); progressTintList = ColorStateList.valueOf(Accent.ION)
+            progressBackgroundTintList = ColorStateList.valueOf(0x55FFFFFF); minimumHeight = (3 * dp).toInt()
+        }, LinearLayout.LayoutParams(-1, (3 * dp).toInt()).apply { topMargin = (10 * dp).toInt() })
+        return card
+    }
+
+    private fun closeProgrammeGuide() {
+        if (!programmeGuideShown) return
+        programmeGuideShown = false; programmeGuideCurrentChannel = null
+        programmeGuidePanel.animate().cancel(); programmeGuideScrim.animate().cancel()
+        programmeGuidePanel.animate().alpha(0f).translationX(24 * dp).setDuration(170).withEndAction {
+            if (!programmeGuideShown) programmeGuidePanel.visibility = View.GONE
+        }.start()
+        programmeGuideScrim.animate().alpha(0f).setDuration(170).withEndAction {
+            if (!programmeGuideShown) programmeGuideScrim.visibility = View.GONE
+        }.start()
+        if (layer.visibility == View.VISIBLE && !guideShown) {
+            showInfo()
+            infoGuideAction.requestFocus()
+        }
+    }
+
+    private fun resetProgrammeGuide() {
+        programmeGuideShown = false; programmeGuideCurrentChannel = null
+        if (::programmeGuidePanel.isInitialized) {
+            programmeGuidePanel.animate().cancel(); programmeGuideScrim.animate().cancel()
+            programmeGuidePanel.visibility = View.GONE; programmeGuideScrim.visibility = View.GONE
+            programmeGuidePanel.alpha = 1f; programmeGuidePanel.translationX = 0f; programmeGuideScrim.alpha = 1f
+        }
+    }
+
+    private fun programmeGuideKey(e: KeyEvent): Boolean {
+        if (e.action != KeyEvent.ACTION_DOWN) return false
+        when (e.keyCode) {
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_GUIDE -> { closeProgrammeGuide(); return true }
+            KeyEvent.KEYCODE_CHANNEL_UP -> { closeProgrammeGuide(); play(current - 1); return true }
+            KeyEvent.KEYCODE_CHANNEL_DOWN -> { closeProgrammeGuide(); play(current + 1); return true }
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> return true
+        }
+        return false
     }
     private fun playMsg(msg: String?) {
         if (msg == null) playStatus.visibility = View.GONE else { playStatus.text = msg; playStatus.visibility = View.VISIBLE }
@@ -828,6 +1272,7 @@ class MainActivity : AppCompatActivity() {
         if (shown.isEmpty()) return
         if (drmProbeRunning) { playMsg("The local DRM check is still running. Please wait, or restart the app if the system service is stuck."); return }
         current = (index + shown.size) % shown.size
+        healthScanAudioStartedAt = 0L; healthScanAudioStartPosition = 0L
         requestedNativeProvider = null
         val ch = shown[current]
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
@@ -837,8 +1282,16 @@ class MainActivity : AppCompatActivity() {
         nativeSources = emptyList(); serverIdx = 0
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = true
         if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
+        ImmersiveUi.hide(window)
         playMsg(null); bindInfo(ch)
         resolveAndStart(ch)
+        if (healthScanActive) {
+            ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+            ui.postDelayed(healthScanTimeout, ChannelPlaybackScan.CHANNEL_DEADLINE_MS)
+            infoNext.text = "CHECKING ${healthScanIndex + 1}/${healthScanChannels.size} · Resolving native stream"
+            infoNext.visibility = View.VISIBLE
+            showInfo()
+        }
     }
 
     /** Resolve the last working native provider first; never wait for a web player or bundled playlist. */
@@ -849,38 +1302,38 @@ class MainActivity : AppCompatActivity() {
         nativeProviders = providerOrder(ch); nextNativeProvider = 1; nativePassFresh = fresh
         val provider = nativeProviders.first()
         enterNativeProvider(ch, provider)
-        releasePlayer(); spinner.visibility = View.VISIBLE
-        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        releasePlayer(); spinner.visibility = View.GONE
+        infoNext.text = "${providerMode(ch)} · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg(if (fresh) "Refreshing ${providerName(provider)} stream…" else "Connecting to ${providerName(provider)}…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             try {
-                val sources = TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2)
+                val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = fresh, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                     nativeSources = sources
                     val saved = prefs.getString("source_${ch.key}", null)
-                    serverIdx = sources.indexOfFirst { sourceKey(it) == saved }.coerceAtLeast(0)
+                    val rememberedIndex = sources.indexOfFirst { sourceKey(it) == saved }
+                    serverIdx = RequestProfileFallback.initialIndex(sources, rememberedIndex)
                     if (sources.isEmpty()) advanceNative("No native stream was advertised") else startNative()
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     if (token == playToken && layer.visibility == View.VISIBLE) {
-                        diagnostics.metadataFailed(PlaybackProblems.from(e))
+                        diagnostics.metadataFailed(PlaybackProblems.from(e), metadataFailureReason(provider, ch, e))
                         nativeSources = emptyList()
-                        advanceNative(if (e is TgResolveException) e.message.orEmpty() else "Couldn't load ${providerName(provider)}'s current streams")
+                        advanceNative(metadataFailureReason(provider, ch, e))
                     }
                 }
             }
         }
     }
 
-    private fun providerOrder(ch: Channel) = ChannelProviderOrder.order(
-        ch.id,
-        ch.v2,
-        prefs.getString("source_provider_${ch.key}", null),
-        requestedNativeProvider?.takeIf { it.first == ch.key }?.second
+    private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
+    private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
+        ch.id, ch.v2, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch)
     )
+    private fun providerMode(ch: Channel) = if (requestedProvider(ch) == null) "Auto" else "Selected"
     private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(
         "native_compat_${ch.key}_${provider.name}",
         prefs.getString("source_provider_${ch.key}", null) == provider.website && prefs.getBoolean("native_compat_${ch.key}", false))
@@ -905,15 +1358,15 @@ class MainActivity : AppCompatActivity() {
         enterNativeProvider(ch, provider)
         val token = ++playToken
         resolveJob?.cancel(true)
-        spinner.visibility = View.VISIBLE
-        infoNext.text = "Auto · ${providerName(provider)} · resolving live configuration…"
+        spinner.visibility = View.GONE
+        infoNext.text = "${providerMode(ch)} · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg("Automatically trying ${providerName(provider)} native streams…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             var failureReason = reason
-            val extra = try { TgServers.fetchFrom(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
-                runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error)) }
-                failureReason = "Couldn't load ${providerName(provider)}'s current native stream configuration"
+            val extra = try { LiveMetadataRequests.fetch(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
+                runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error), metadataFailureReason(provider, ch, error)) }
+                failureReason = metadataFailureReason(provider, ch, error)
                 emptyList()
             }
             runOnUiThread {
@@ -971,10 +1424,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun startNative() {
         val source = nativeSources.getOrNull(serverIdx) ?: return
-        spinner.visibility = View.VISIBLE
+        spinner.visibility = View.GONE
+        val channel = shown.getOrNull(current) ?: return
         val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG) "TG TV · ${source.label}" else source.label
-        infoNext.text = "Auto · $sourceLabel · ${serverIdx + 1} of ${nativeSources.size}" +
-            if (nativeSources.size > 1) "   ·   OK switches server" else ""
+        val probeStatus = starProbeStatus(currentNativeProvider, channel, nativeSources)
+        infoNext.text = (if (healthScanActive) "CHECKING ${healthScanIndex + 1}/${healthScanChannels.size} · " else "CONNECTING · ") +
+            "${providerMode(channel)} · $sourceLabel · server ${serverIdx + 1} of ${nativeSources.size}" +
+            (if (nativeSources.size > 1) "   ·   SOURCE chooses server · LEFT cycles" else "") + (probeStatus?.let { "   ·   $it" } ?: "")
         infoNext.visibility = View.VISIBLE
         val trace = diagnostics.begin(
             if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG,
@@ -983,6 +1439,7 @@ class MainActivity : AppCompatActivity() {
                 ClearKey.license(source.drm) != null -> PlaybackDiagnostics.Drm.CLEARKEY
                 else -> PlaybackDiagnostics.Drm.WIDEVINE },
             source.omitReferrer, compatiblePlayback)
+        diagnostics.metadataStatus(probeStatus)
         try { attach(nativeMediaSource(source, trace), trace) }
         catch (error: Exception) { trace.failed(PlaybackProblems.from(error)); advanceNative("This source could not be opened by the native player") }
     }
@@ -996,11 +1453,17 @@ class MainActivity : AppCompatActivity() {
         val ts = NativePlaybackPolicy.tracks(this, profile, shown.getOrNull(current)?.name?.contains("Hindi", true) == true)
         val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
             .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
-        val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
-            .setLoadControl(if (stable) androidx.media3.exoplayer.DefaultLoadControl.Builder()
+        val loadControl = when {
+            stable -> androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(10_000, 30_000, 1500, 4000).setBackBuffer(0, false)
                 .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()
-                else NativePlaybackPolicy.buffers(profile)).setTrackSelector(ts).setBandwidthMeter(bw).build()
+            currentNativeProvider == LiveProvider.TG -> androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(profile.minBufferMs, profile.maxBufferMs, 750, 4000).setBackBuffer(0, false)
+                .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()
+            else -> NativePlaybackPolicy.buffers(profile)
+        }
+        val p = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
+            .setLoadControl(loadControl).setTrackSelector(ts).setBandwidthMeter(bw).build()
         p.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         trackSel = ts; activeAttempt = trace
         val controller = NativePictureController(p, ts, { player === p && playbackActive },
@@ -1025,7 +1488,7 @@ class MainActivity : AppCompatActivity() {
     private fun prepareOnSurface(owner: ExoPlayer) {
         val view = pv.videoSurfaceView as? SurfaceView
         if (view == null || view.holder.surface.isValid) { activeAttempt?.surfaceReady(); owner.prepare(); return }
-        playMsg("Waiting for the TV video surface…")
+        playMsg(null)
         val holder = view.holder
         val callback = object : SurfaceHolder.Callback {
             private val gate = SurfaceStartGate(
@@ -1062,11 +1525,11 @@ class MainActivity : AppCompatActivity() {
                         spinner.visibility = View.GONE; playMsg(null)
                         if (!expectsVideo()) { startupBudget.rendered(); providerWindow.rendered() }
                     } else {
-                        spinner.visibility = View.VISIBLE
-                        playMsg("Stream connected — waiting for the first picture…")
+                        spinner.visibility = View.GONE
+                        playMsg(null)
                     }
                 }
-                Player.STATE_BUFFERING -> spinner.visibility = View.VISIBLE
+                Player.STATE_BUFFERING -> spinner.visibility = View.GONE
                 Player.STATE_ENDED -> { trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded")); advanceNative("The live stream ended") }
             }
         }
@@ -1078,16 +1541,30 @@ class MainActivity : AppCompatActivity() {
             startupBudget.rendered(); providerWindow.rendered()
             if (owner.playbackState == Player.STATE_READY) { spinner.visibility = View.GONE; playMsg(null) }
             val ch = shown.getOrNull(current) ?: return
-            nativeSources.getOrNull(serverIdx)?.let { rememberNativeSource(ch, it) }
+            val source = nativeSources.getOrNull(serverIdx)
+            source?.let { rememberNativeSource(ch, it) }
+            val provider = providerName(currentNativeProvider)
+            recordChannelPlayback(ch, ChannelPlaybackOutcome.WORKING, "Rendered first video frame", provider, serverIdx + 1)
+            infoNext.text = (if (healthScanActive) "CHECKING ${healthScanIndex + 1}/${healthScanChannels.size} · " else "PLAYING · ") +
+                "$provider · server ${serverIdx + 1} · ${source?.type?.uppercase() ?: "STREAM"}" +
+                if (healthScanActive) " · frame confirmed" else ""
+            infoNext.visibility = View.VISIBLE
+            if (healthScanActive) {
+                ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+                ui.postDelayed(healthScanAdvance, ChannelPlaybackScan.FRAME_SETTLE_MS)
+            }
         }
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
             trace.failed(PlaybackProblems.from(error, error.errorCode))
             val code = httpCode(error)
             val provider = if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) "JJTV" else "TG TV"
+            val stage = trace.lastLoadStageName()?.lowercase()?.replaceFirstChar { it.uppercase() }
             val message = when {
-                code == 451 -> "$provider's upstream blocked this stream (HTTP 451)"
-                code != null -> "$provider's stream returned HTTP $code"
+                code == 451 && stage != null -> "$stage HTTP 451"
+                code == 451 -> "$provider upstream HTTP 451"
+                code != null && stage != null -> "$stage HTTP $code"
+                code != null -> "$provider stream HTTP $code"
                 error.errorCode in 6000..6999 -> "$provider DRM could not be opened (code ${error.errorCode})"
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
                 else -> "The live stream stopped responding (code ${error.errorCode})"
@@ -1109,12 +1586,41 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
+    /** Report only whether the exact Star channel yielded an advertised native source; never echo its URL or cookie. */
+    private fun starProbeStatus(provider: LiveProvider, channel: Channel?, sources: List<TgStream>): String? {
+        if (provider != LiveProvider.JJTV || channel == null || channel.id !in setOf("1108", "362")) return null
+        val count = sources.count { source ->
+            LiveProviders.provider(source) == LiveProvider.JJTV && try { JjtvProtocol.isStarUrl(source.url) } catch (_: Exception) { false }
+        }
+        return "Star cookie probe: channel ${channel.id}; ${if (count == 0) "no exact source" else "$count exact source${if (count == 1) "" else "s"}"}"
+    }
+
+    private fun metadataFailureReason(provider: LiveProvider, channel: Channel, error: Throwable): String = when {
+        error is LiveMetadataTimeoutException -> "${providerName(provider)} metadata failed: ${LiveMetadataRequests.deadlineSeconds(provider)}-second resolution deadline reached"
+        error is JjtvHttpException -> "JJTV metadata HTTP ${error.status}"
+        error is TgResolveException -> "TG metadata failed${error.status?.let { " (HTTP $it)" }.orEmpty()}"
+        error is java.net.SocketTimeoutException -> "${providerName(provider)} metadata timed out"
+        error is java.net.UnknownHostException -> "${providerName(provider)} metadata host unavailable"
+        error is javax.net.ssl.SSLException -> "${providerName(provider)} metadata TLS failed"
+        provider == LiveProvider.JJTV && channel.id in setOf("1108", "362") ->
+            "JJTV Star cookie probe: no exact-channel native source returned for channel ID ${channel.id}"
+        provider == LiveProvider.TG -> "TG metadata failed; no native stream configuration was returned"
+        else -> "JJTV metadata failed; no native stream configuration was returned"
+    }
+
+    /** Classify a relay stall without retaining or displaying the stream URL itself. */
+    private fun relayStallReason(): String {
+        val source = nativeSources.getOrNull(serverIdx) ?: return "The live stream stopped responding"
+        val relay = try { URI(source.url).host.orEmpty().contains("allinonereborn", true) } catch (_: Exception) { false }
+        return if (relay && LiveProviders.provider(source) == LiveProvider.TG) "TG relay stalled" else "The live stream stopped responding"
+    }
+
     private fun expectsVideo() = shown.getOrNull(current)?.category?.equals("Radio", true) != true
 
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
-        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); providerWindow.clear()
-        refusalRetried = false
+        diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); freshCredentialProviders.clear(); providerWindow.clear()
+        refusalRetryCount = 0
         compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -1151,16 +1657,36 @@ class MainActivity : AppCompatActivity() {
                     else -> PlaybackHealth.State.IDLE
                 }
                 val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady)
+                if (!expectsVideo() && state == PlaybackHealth.State.READY && p.isPlaying) {
+                    if (healthScanAudioStartedAt == 0L) {
+                        healthScanAudioStartedAt = now; healthScanAudioStartPosition = p.currentPosition
+                    } else if (now - healthScanAudioStartedAt >= 1_500 && p.currentPosition - healthScanAudioStartPosition >= 1_000) {
+                        shown.getOrNull(current)?.let { ch ->
+                            if (channelPlaybackResults[ch.key]?.outcome != ChannelPlaybackOutcome.WORKING) {
+                                recordChannelPlayback(ch, ChannelPlaybackOutcome.WORKING, "Audio playback position advanced", providerName(currentNativeProvider), serverIdx + 1)
+                                infoNext.text = (if (healthScanActive) "CHECKING ${healthScanIndex + 1}/${healthScanChannels.size} · " else "PLAYING · ") +
+                                    "${providerName(currentNativeProvider)} · server ${serverIdx + 1} · audio confirmed"
+                                infoNext.visibility = View.VISIBLE
+                                if (healthScanActive) {
+                                    ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+                                    ui.postDelayed(healthScanAdvance, ChannelPlaybackScan.FRAME_SETTLE_MS)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    healthScanAudioStartedAt = 0L; healthScanAudioStartPosition = 0L
+                }
                 if (result.failure != null) activeAttempt?.timeout()
                 when (result.failure) {
                     PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
-                        val reason = if (surfaceWait != null) "The TV video surface is not ready" else "No picture from ${providerName(currentNativeProvider)}"
+                        val reason = if (surfaceWait != null) "The TV video surface is not ready" else relayStallReason()
                         if (activeAttempt?.canRetryDecoder() != true || !retryCompatibleDecoder(reason)) advanceNative(reason)
                     }
                     PlaybackHealth.Failure.STARTUP, PlaybackHealth.Failure.BUFFERING, PlaybackHealth.Failure.ENDED ->
-                        advanceNative("The live stream stopped responding")
+                        advanceNative(relayStallReason())
                     null -> if (result.stable) {
-                        recovery.reset(); authRecovery.reset(); refusalRetried = false
+                        recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); refusalRetryCount = 0
                         shown.getOrNull(current)?.let { ch ->
                             prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
@@ -1183,7 +1709,7 @@ class MainActivity : AppCompatActivity() {
         startupBudget.recover(SystemClock.elapsedRealtime())
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
-        playMsg("$reason. Trying native TV compatibility mode…")
+        playMsg(null)
         ui.post { if (playbackActive && token == playToken && layer.visibility == View.VISIBLE) startNative() }
         return true
     }
@@ -1196,6 +1722,7 @@ class MainActivity : AppCompatActivity() {
         val provider = currentNativeProvider
         if (startupBudget.expired(SystemClock.elapsedRealtime()) || providerWindow.expired(SystemClock.elapsedRealtime()) ||
             !authRecovery.retry(provider, code)) return false
+        freshCredentialProviders.add(provider)
         startupBudget.recover(SystemClock.elapsedRealtime()); providerWindow.recover(SystemClock.elapsedRealtime())
         val refusedSource = nativeSources.getOrNull(serverIdx)
         val previousKey = refusedSource?.let(::sourceKey)
@@ -1203,13 +1730,13 @@ class MainActivity : AppCompatActivity() {
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
         diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
-        spinner.visibility = View.VISIBLE
-        infoNext.text = "Auto · ${providerName(provider)} · refreshing rejected credentials…"
+        spinner.visibility = View.GONE
+        infoNext.text = "${providerMode(ch)} · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg("${providerName(provider)} returned HTTP $code — fetching fresh stream credentials once…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
             try {
-                val sources = TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2)
+                val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = true, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
                     if (sources.isEmpty()) advanceNative("The provider supplied no refreshed stream")
@@ -1230,41 +1757,47 @@ class MainActivity : AppCompatActivity() {
             } catch (error: Exception) {
                 runOnUiThread {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
-                    diagnostics.metadataFailed(PlaybackProblems.from(error))
-                    advanceNative("Could not refresh ${providerName(provider)} credentials")
+                    diagnostics.metadataFailed(PlaybackProblems.from(error), metadataFailureReason(provider, ch, error))
+                    advanceNative(metadataFailureReason(provider, ch, error))
                 }
             }
         }
         return true
     }
 
-    /** The TV is refused on some requests and accepted seconds later. Give the provider that
-     * actually plays this channel one delayed, freshly credentialed retry before moving to a
-     * provider whose advertised DRM cannot be opened. Bounded to once per playback session; every
-     * other HTTP result keeps the existing immediate fallback.
+    /** A transient TG refusal gets two paced fresh retries. A JJTV 403 after its fresh lookup
+     * moves to the other native provider instead of spending the startup budget on a repeated URL.
+     * All retries stay bounded by the existing playback budget and DRM requirements.
      */
     private fun retryRefusedProvider(code: Int?): Boolean {
-        if (code != 403 || refusalRetried || !playbackActive) return false
+        if (code != 403 || !playbackActive) return false
         val ch = shown.getOrNull(current) ?: return false
-        if (layer.visibility != View.VISIBLE || startupBudget.expired(SystemClock.elapsedRealtime())) return false
-        refusalRetried = true
         val provider = currentNativeProvider
+        if (FreshRefusalPolicy.shouldMoveToAlternateProvider(provider, code, provider in freshCredentialProviders)) {
+            // A fresh JJTV source already failed at HTTP 403. Retrying its stale/unchanged media
+            // URL delays a provider that may work; retire this JJTV turn and let native fallback run.
+            recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
+            return false
+        }
+        val delayMs = RefusalRetryBackoff.delayFor(refusalRetryCount) ?: return false
+        if (layer.visibility != View.VISIBLE || startupBudget.expired(SystemClock.elapsedRealtime())) return false
+        refusalRetryCount++
         val refusedSource = nativeSources.getOrNull(serverIdx)
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
-        spinner.visibility = View.VISIBLE
-        infoNext.text = "Auto · ${providerName(provider)} · retrying after a refused request…"
+        spinner.visibility = View.GONE
+        infoNext.text = "${providerMode(ch)} · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
-        playMsg("${providerName(provider)} refused this request — retrying once in a moment…")
+        playMsg(null)
         resolveJob = playbackIo.submit {
-            try { Thread.sleep(4_000) } catch (_: InterruptedException) {
+            try { Thread.sleep(delayMs) } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt(); return@submit
             }
             try {
-                val sources = TgServers.fetchFrom(provider, ch.id, fresh = true, v2 = ch.v2)
+                val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = true, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
-                    if (sources.isEmpty()) advanceNative("Could not refresh ${providerName(provider)} after the refused request")
+                    if (sources.isEmpty()) advanceNative("${providerName(provider)} returned no fresh source after the refused request")
                     else {
                         // A new attempt has its own single credential refresh and provider window.
                         authRecovery.reset()
@@ -1272,15 +1805,18 @@ class MainActivity : AppCompatActivity() {
                         nativeSources = sources
                         // Same rule as the credential refresh: do not replay the style that was
                         // just refused when the provider advertises another one for this channel.
-                        serverIdx = RequestProfileFallback.preferredIndex(sources, refusedSource) { false }
+                        val refusedKey = refusedSource?.let(::sourceKey)
+                        serverIdx = RequestProfileFallback.preferredIndex(sources, refusedSource) {
+                            refusedKey != null && sourceKey(it) == refusedKey
+                        }
                         startNative()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     if (token == playToken && playbackActive) {
-                        diagnostics.metadataFailed(PlaybackProblems.from(e))
-                        advanceNative("Could not refresh ${providerName(provider)} after the refused request")
+                        diagnostics.metadataFailed(PlaybackProblems.from(e), metadataFailureReason(provider, ch, e))
+                        advanceNative(metadataFailureReason(provider, ch, e))
                     }
                 }
             }
@@ -1300,7 +1836,7 @@ class MainActivity : AppCompatActivity() {
                 serverIdx = action.index
                 val provider = LiveProviders.provider(nativeSources[serverIdx])
                 if (provider != currentNativeProvider) enterNativeProvider(ch, provider)
-                playMsg("Automatically trying ${nativeSources[serverIdx].label}…")
+                playMsg(null)
                 val token = playToken
                 ui.post { if (token == playToken && layer.visibility == View.VISIBLE) startNative() }
             }
@@ -1313,16 +1849,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Left / OK switches native sources, not players; a single-source channel simply reloads. */
+    /** Left cycles native sources; SOURCE also opens this exact, directly selectable server list. */
     private fun switchServer() {
         if (drmProbeRunning) return
         if (nativeSources.size < 2) { reloadStream(); return }
+        selectNativeServer((serverIdx + 1) % nativeSources.size)
+    }
+
+    private fun selectNativeServer(index: Int) {
+        val ch = shown.getOrNull(current) ?: return
+        if (drmProbeRunning || index !in nativeSources.indices) return
+        sourceMenu?.dismiss()
+        if (index == serverIdx) return
         playToken++; resolveJob?.cancel(true); recovery.reset()
-        shown.getOrNull(current)?.let { beginNativeSession(it) }
+        beginNativeSession(ch)
         releasePlayer()
-        serverIdx = (serverIdx + 1) % nativeSources.size
-        shown.getOrNull(current)?.let { enterNativeProvider(it, LiveProviders.provider(nativeSources[serverIdx])) }
-        playMsg("Switching to ${nativeSources[serverIdx].label}…")
+        serverIdx = index
+        enterNativeProvider(ch, LiveProviders.provider(nativeSources[serverIdx]))
+        playMsg(null)
         startNative()
     }
 
@@ -1339,8 +1883,16 @@ class MainActivity : AppCompatActivity() {
         if (sourceMenu?.isShowing == true) return
         val choices = ArrayList<Pair<String, () -> Unit>>()
         choices.add("Automatic native source" to { selectNativeProvider(null) })
-        if (!ch.v2) choices.add("Play JJTV now (native)" to { selectNativeProvider(LiveProvider.JJTV) })
-        choices.add("Play TG TV now (native)" to { selectNativeProvider(LiveProvider.TG) })
+        choices.add("Channel playback status / report" to { showChannelHealthReport() })
+        choices.add("Check all live and 24/7 channels on this device" to { startChannelHealthScan() })
+        nativeSources.forEachIndexed { index, source ->
+            val provider = providerName(LiveProviders.provider(source))
+            val type = source.type.uppercase()
+            val selected = if (index == serverIdx) "Now playing · " else ""
+            choices.add("${selected}Server ${index + 1} · $provider · $type" to { selectNativeServer(index) })
+        }
+        if (!ch.v2) choices.add("${if (requestedProvider(ch) == LiveProvider.JJTV) "Selected · " else ""}Use JJTV only (native)" to { selectNativeProvider(LiveProvider.JJTV) })
+        choices.add("${if (requestedProvider(ch) == LiveProvider.TG) "Selected · " else ""}Use TG TV only (native)" to { selectNativeProvider(LiveProvider.TG) })
         choices.add((if (prefs.getBoolean("native_force_tv", false)) "TV compatibility: return to automatic detection" else "TV compatibility: force TV mode (generic boxes)") to {
             prefs.edit().putBoolean("native_force_tv", !prefs.getBoolean("native_force_tv", false)).apply()
             selectNativeProvider(requestedNativeProvider?.takeIf { it.first == ch.key }?.second)
@@ -1470,7 +2022,199 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun loadChannelPlaybackResults() {
+        channelPlaybackResults.clear()
+        try {
+            val root = JSONObject(prefs.getString("channel_playback_scan", "{}") ?: "{}")
+            healthScanComplete = root.optBoolean("complete", false)
+            val records = root.optJSONArray("results") ?: JSONArray()
+            for (i in 0 until records.length()) {
+                val item = records.optJSONObject(i) ?: continue
+                val outcome = runCatching { ChannelPlaybackOutcome.valueOf(item.optString("outcome")) }
+                    .getOrDefault(ChannelPlaybackOutcome.NOT_CHECKED)
+                val id = item.optString("id")
+                val name = item.optString("name")
+                val key = item.optString("key").ifBlank { id }
+                if (id.isBlank() || name.isBlank() || key.isBlank()) continue
+                channelPlaybackResults[key] = ChannelPlaybackResult(
+                    key, id.take(48), name.take(100), item.optString("category").take(80),
+                    item.optBoolean("alwaysOn", false), outcome, item.optLong("checkedAt"),
+                    ChannelPlaybackScan.safeFinding(item.optString("finding")),
+                    item.optString("provider").take(24), item.optInt("server").coerceIn(0, 100)
+                )
+            }
+        } catch (_: Exception) {
+            channelPlaybackResults.clear(); healthScanComplete = false
+        }
+    }
+
+    private fun persistChannelPlaybackResults() {
+        val items = JSONArray()
+        channelPlaybackResults.values.forEach { record ->
+            items.put(JSONObject().put("key", record.key).put("id", record.id).put("name", record.name)
+                .put("category", record.category).put("alwaysOn", record.alwaysOn)
+                .put("outcome", record.outcome.name).put("checkedAt", record.checkedAt)
+                .put("finding", ChannelPlaybackScan.safeFinding(record.finding))
+                .put("provider", record.provider.take(24)).put("server", record.server.coerceIn(0, 100)))
+        }
+        prefs.edit().putString("channel_playback_scan", JSONObject()
+            .put("complete", healthScanComplete).put("results", items).toString()).apply()
+    }
+
+    private fun recordChannelPlayback(
+        channel: Channel, outcome: ChannelPlaybackOutcome, finding: String,
+        provider: String = "", server: Int = 0
+    ) {
+        val safe = ChannelPlaybackScan.safeFinding(finding)
+        channelPlaybackResults[channel.key] = ChannelPlaybackResult(
+            channel.key, channel.id.take(48), channel.name.take(100), channel.category.take(80), channel.v2,
+            outcome, System.currentTimeMillis(), safe, provider.take(24), server.coerceIn(0, 100)
+        )
+        persistChannelPlaybackResults()
+        refreshHealthBadges()
+    }
+
+    private fun refreshHealthBadges() {
+        if (!::rowsView.isInitialized) return
+        inner.values.forEach { it.notifyDataSetChanged() }
+        if (::searchResults.isInitialized) searchAdapter.notifyDataSetChanged()
+    }
+
+    private fun startChannelHealthScan() {
+        if (healthScanActive) { showChannelHealthReport(); return }
+        if (!v1CatalogLoaded || !v2CatalogLoaded || all.isEmpty()) {
+            loadChannels()
+            Toast.makeText(this, "Live and 24/7 channel lists are still loading. Try the scan again in a moment.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val channels = (all + allV2).distinctBy { it.key }
+        if (channels.isEmpty()) {
+            Toast.makeText(this, "Channel lists have not loaded yet. Try again shortly.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val worstMinutes = (channels.size * ChannelPlaybackScan.CHANNEL_DEADLINE_MS / 60_000.0).toInt() + 1
+        AlertDialog.Builder(this).setTitle("Check all channels on this device")
+            .setMessage("This stops the current stream and tunes through all ${channels.size} live and 24/7 channels using the normal protected player. A channel is WORKING only after a real first video frame (or advancing radio audio). No-frame timeouts are marked inconclusive. Worst case is about $worstMinutes minutes; press Back during the scan to stop.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Start scan") { _, _ -> beginChannelHealthScan(channels) }
+            .show()
+    }
+
+    private fun beginChannelHealthScan(channels: List<Channel>) {
+        healthScanOriginalShown = shown
+        healthScanOriginalCurrentKey = shown.getOrNull(current)?.key
+        healthScanOriginalShownCat = shownCat
+        healthScanChannels = channels
+        healthScanIndex = 0
+        healthScanActive = true
+        healthScanComplete = false
+        channelPlaybackResults.clear()
+        channels.forEach { channel ->
+            channelPlaybackResults[channel.key] = ChannelPlaybackResult(
+                channel.key, channel.id.take(48), channel.name.take(100), channel.category.take(80), channel.v2,
+                ChannelPlaybackOutcome.NOT_CHECKED
+            )
+        }
+        persistChannelPlaybackResults(); refreshHealthBadges()
+        shown = healthScanChannels; shownCat = "All-channel playback check"
+        sourceMenu?.dismiss()
+        play(0)
+    }
+
+    private fun onHealthScanTimeout() {
+        if (!healthScanActive) return
+        val channel = healthScanChannels.getOrNull(healthScanIndex) ?: return
+        val detail = "No first frame within ${ChannelPlaybackScan.CHANNEL_DEADLINE_MS / 1000} seconds; ${diagnostics.summary()}"
+        recordChannelPlayback(channel, ChannelPlaybackOutcome.NO_FRAME, detail, providerName(currentNativeProvider), serverIdx + 1)
+        ui.removeCallbacks(healthScanAdvance)
+        advanceHealthScan()
+    }
+
+    private fun advanceHealthScan() {
+        if (!healthScanActive) return
+        ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+        playToken++; resolveJob?.cancel(true); endNativeSession(); releasePlayer()
+        nativeSources = emptyList(); spinner.visibility = View.GONE
+        healthScanIndex++
+        if (healthScanIndex >= healthScanChannels.size) {
+            finishChannelHealthScan(completed = true, showReport = true)
+        } else {
+            play(healthScanIndex)
+        }
+    }
+
+    private fun restoreHealthScanSelection() {
+        shown = healthScanOriginalShown.ifEmpty { if (tab == 1) allV2 else all }
+        shownCat = healthScanOriginalShownCat
+        current = shown.indexOfFirst { it.key == healthScanOriginalCurrentKey }.takeIf { it >= 0 }
+            ?: if (shown.isEmpty()) -1 else 0
+        healthScanChannels = emptyList(); healthScanIndex = -1
+        healthScanOriginalShown = emptyList(); healthScanOriginalCurrentKey = null; healthScanOriginalShownCat = ""
+    }
+
+    private fun finishChannelHealthScan(completed: Boolean, showReport: Boolean) {
+        if (!healthScanActive) return
+        ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+        healthScanActive = false; healthScanComplete = completed
+        persistChannelPlaybackResults(); refreshHealthBadges()
+        restoreHealthScanSelection()
+        closePlayer()
+        if (showReport) showChannelHealthReport()
+    }
+
+    private fun abortChannelHealthScanForLifecycle() {
+        if (!healthScanActive) return
+        ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+        healthScanActive = false; healthScanComplete = false
+        persistChannelPlaybackResults(); restoreHealthScanSelection()
+    }
+
+    private fun showChannelHealthReport() {
+        val results = channelPlaybackResults.values.toList()
+        if (results.isEmpty()) {
+            Toast.makeText(this, "No channel playback checks yet. Open a live channel or run Check all channels.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val currentIndex = if (healthScanActive) healthScanIndex else -1
+        val text = TextView(this).apply {
+            this.text = ChannelPlaybackScan.report(results, healthScanComplete, healthScanActive, currentIndex)
+            textSize = 13f; setTextColor(Color.WHITE); typeface = Typeface.MONOSPACE
+            setPadding((18 * dp).toInt(), (10 * dp).toInt(), (18 * dp).toInt(), (10 * dp).toInt())
+        }
+        val scroll = ScrollView(this).apply { addView(text); isFocusable = true }
+        val dialog = AlertDialog.Builder(this).setTitle("Channel playback status")
+            .setView(scroll).setNegativeButton("Close", null)
+            .setNeutralButton("Copy report", null)
+            .setPositiveButton(if (healthScanActive) "Stop scan" else "Check all") { _, _ ->
+                if (healthScanActive) finishChannelHealthScan(completed = false, showReport = true)
+                else startChannelHealthScan()
+            }.create()
+        dialog.setOnShowListener {
+            dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.92f).toInt(),
+                (resources.displayMetrics.heightPixels * 0.82f).toInt())
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("AK TV channel playback status", text.text))
+                Toast.makeText(this, "Report copied — no stream URLs or keys", Toast.LENGTH_SHORT).show()
+            }
+        }
+        dialog.show()
+    }
+
     private fun fail(message: String) {
+        if (healthScanActive) {
+            healthScanChannels.getOrNull(healthScanIndex)?.let { channel ->
+                recordChannelPlayback(channel, ChannelPlaybackOutcome.FAILED, "$message · ${diagnostics.summary()}",
+                    providerName(currentNativeProvider), serverIdx + 1)
+            }
+            ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
+            ui.post(healthScanAdvance)
+            return
+        }
+        shown.getOrNull(current)?.let { channel ->
+            recordChannelPlayback(channel, ChannelPlaybackOutcome.FAILED, "$message · ${diagnostics.summary()}",
+                providerName(currentNativeProvider), serverIdx + 1)
+        }
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
         playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
         ui.removeCallbacks(hideInfo); hideInfo.run()
@@ -1487,9 +2231,10 @@ class MainActivity : AppCompatActivity() {
     private fun closePlayer() {
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null)
-        releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide()
+        releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide(); resetProgrammeGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
         layer.animate().cancel(); layer.visibility = View.GONE; home.visibility = View.VISIBLE
+        ImmersiveUi.show(window)
         home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
             if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
         } }
@@ -1498,15 +2243,48 @@ class MainActivity : AppCompatActivity() {
 
     private fun shortOk() {
         if (!playbackActive) { showPlaybackDetails(); return }
+        if (!playerActionFocused()) {
+            showInfo()
+            infoGuideAction.requestFocus()
+            return
+        }
         if (nativeSources.size > 1 && infoCard.alpha > 0.5f) switchServer() else showInfo()
     }
+
+    private fun playerActionFocused(): Boolean = ::infoGuideAction.isInitialized &&
+        listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).any { it.isFocused && it.isShown }
 
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (intro.visibility == View.VISIBLE) { if (e.action == KeyEvent.ACTION_DOWN) intro.skip(); return true }
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
+        if (layer.visibility == View.VISIBLE && healthScanActive && e.action == KeyEvent.ACTION_DOWN) {
+            when (e.keyCode) {
+                KeyEvent.KEYCODE_BACK -> { finishChannelHealthScan(completed = false, showReport = true); return true }
+                KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO -> { showChannelHealthReport(); return true }
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_CHANNEL_DOWN,
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> return true
+            }
+        }
+        if (layer.visibility == View.VISIBLE && programmeGuideShown) return programmeGuideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && guideShown) return guideKey(e) || super.dispatchKeyEvent(e)
+        if (layer.visibility == View.VISIBLE && PlayerRemoteKeyPolicy.delegateToFocusedAction(
+                e.keyCode, playerActionFocused(),
+                firstActionFocused = ::infoGuideAction.isInitialized && infoGuideAction.isFocused,
+                lastActionFocused = ::infoRetryAction.isInitialized && infoRetryAction.isFocused
+            )) {
+            if (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER) {
+                if (e.action == KeyEvent.ACTION_DOWN) {
+                    if (e.repeatCount == 0) okLong = false
+                    else if (e.repeatCount >= 8 && !okLong) { okLong = true; reloadStream(); return true }
+                }
+                if (okLong) return true
+            }
+            return super.dispatchKeyEvent(e)
+        }
         if (layer.visibility == View.VISIBLE && (e.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || e.keyCode == KeyEvent.KEYCODE_ENTER)) {
-            // tap OK = info / next native source, hold OK = fetch a fresh stream
+            // OK on a visible control activates it; otherwise reveal/focus player actions. Hold OK refreshes streams.
             if (e.action == KeyEvent.ACTION_DOWN) {
                 if (e.repeatCount == 0) okLong = false
                 else if (e.repeatCount == 8 && !okLong) { okLong = true; reloadStream() }
@@ -1516,6 +2294,7 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility == View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) when (e.keyCode) {
             KeyEvent.KEYCODE_BACK -> { closePlayer(); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
+            KeyEvent.KEYCODE_GUIDE -> { showProgrammeGuide(); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
             KeyEvent.KEYCODE_MENU -> { showNativeSourceMenu(); return true }
@@ -1578,23 +2357,50 @@ class MainActivity : AppCompatActivity() {
         }
         return super.dispatchKeyEvent(e)
     }
-    /** While the app is open, quietly re-reads both channel lists every few minutes (never while a channel is playing), so website changes arrive without a restart. */
+    /** Downloads a changed community feed off-main; only refreshes the visible V1 guide after a new file lands. */
+    private fun refreshProgrammeFeed() {
+        io.execute {
+            val changed = ExternalEpg.refreshIfDue(applicationContext)
+            if (changed) ui.post {
+                val ch = if (layer.visibility == View.VISIBLE) shown.getOrNull(current) else (heroTile as? Tile.Ch)?.c
+                if (ch != null && !ch.v2) {
+                    Epg.invalidate(ch.id)
+                    fetchGuide(ch) { g ->
+                        if (layer.visibility == View.VISIBLE && shown.getOrNull(current)?.key == ch.key) fillInfoGuide(g)
+                        if ((heroTile as? Tile.Ch)?.c?.key == ch.key) applyHeroGuide(g)
+                    }
+                }
+            }
+        }
+    }
+
+    /** While the app is open, quietly refreshes channel lists and checks the guide feed on its own cadence. */
     private val autoRefresh = object : Runnable {
         override fun run() {
             if (layer.visibility != View.VISIBLE && !searchShown && System.currentTimeMillis() - lastRefresh > 4 * 60_000L) loadChannels()
             TgServers.refreshSite()
+            refreshProgrammeFeed()
             ui.postDelayed(this, 5 * 60_000L)
         }
     }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && ::layer.isInitialized) {
+            if (layer.visibility == View.VISIBLE) ImmersiveUi.hide(window) else ImmersiveUi.show(window)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
+        refreshProgrammeFeed()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
         if (tab >= 2 && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
+        abortChannelHealthScanForLifecycle()
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
-        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; layer.keepScreenOn = false; resetGuide()
+        super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; ImmersiveUi.show(window); layer.keepScreenOn = false; resetGuide(); resetProgrammeGuide()
         if (searchShown) hideSearch(false)
     }
 
@@ -1953,6 +2759,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- focus-driven stream prefetch (metadata only, no second decoder) ----------
+    private fun scheduleSourceWarmup(channel: Channel) {
+        if (layer.visibility == View.VISIBLE || searchShown) return
+        pendingWarmupChannel = channel
+        ui.removeCallbacks(sourceWarmupRunnable)
+        ui.postDelayed(sourceWarmupRunnable, 260)
+    }
+
+    private fun runSourceWarmup() {
+        val channel = pendingWarmupChannel ?: return
+        if (sourceWarmupRunning) return
+        if (layer.visibility == View.VISIBLE || searchShown || isFinishing || isDestroyed) {
+            pendingWarmupChannel = null
+            return
+        }
+        val provider = providerOrder(channel).firstOrNull() ?: return
+        val key = "${provider.name}:${channel.key}"
+        if (!sourceWarmupGate.begin(key, SystemClock.elapsedRealtime())) {
+            pendingWarmupChannel = null
+            return
+        }
+        pendingWarmupChannel = null
+        sourceWarmupRunning = true
+        io.submit {
+            try { LiveMetadataRequests.fetch(provider, channel.id, v2 = channel.v2) } catch (_: Exception) { }
+            finally {
+                sourceWarmupGate.finish(key)
+                ui.post {
+                    sourceWarmupRunning = false
+                    if (pendingWarmupChannel != null && layer.visibility != View.VISIBLE && !searchShown) {
+                        ui.removeCallbacks(sourceWarmupRunnable)
+                        ui.postDelayed(sourceWarmupRunnable, 100)
+                    }
+                }
+            }
+        }
+    }
+
     // ---------- live channel preview (hero window, muted) ----------
     private val previewRunnable = Runnable { startPreview() }
     private fun schedulePreview(c: Channel?) {
@@ -1986,7 +2830,7 @@ class MainActivity : AppCompatActivity() {
         releasePreviewPlayer()
         val provider = providers.getOrNull(providerIndex) ?: run { stopPreview(); return }
         previewJob = io.submit {
-            val sources = try { TgServers.fetchFrom(provider, ch.id, v2 = ch.v2) } catch (_: Exception) { emptyList() }
+            val sources = try { LiveMetadataRequests.fetch(provider, ch.id, v2 = ch.v2) } catch (_: Exception) { emptyList() }
             runOnUiThread {
                 if (!previewIsCurrent(ch, token)) return@runOnUiThread
                 // Put a previously rendered source first without removing the other native candidates.
@@ -2052,31 +2896,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Rebuilds the rows (e.g. a new "Recently watched" entry) without losing the scroll position. */
-    private fun refreshRowsKeepFocus() {
+    private fun refreshRowsKeepFocus(requestFocus: Boolean = true) {
         val lm = rowsView.layoutManager as LinearLayoutManager
         val pos = lm.findFirstVisibleItemPosition()
         val top = lm.findViewByPosition(pos)?.top ?: 0
         val old = rows.map { it.title }
         rows = when (tab) {
-            0 -> listOf(Row(FAV, favTiles())) + recentRow() + all.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
-            1 -> listOf(Row(FAV, favTiles())) + recentRow() + allV2.groupBy { it.category }.toSortedMap().map { (k, v) -> Row(k, v.map { Tile.Ch(it) }) }
+            0 -> liveRows(all)
+            1 -> liveRows(allV2, alwaysOn = true)
             else -> continueRow() + vodRows[tab - 2]
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()
         val shift = rows.size - old.size
         if (pos >= 0) lm.scrollToPositionWithOffset((pos + if (pos > 0) shift else 0).coerceAtLeast(0), top)
-        rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
+        if (requestFocus) rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
     }
 
     // ---------- adapters ----------
     private inner class TileAdapter(val row: Row) : RecyclerView.Adapter<VH>() {
         override fun getItemCount() = row.tiles.size
-        override fun getItemViewType(i: Int) = when (row.tiles[i]) { is Tile.Ch -> 0; is Tile.Mv -> 1; else -> 2 }
+        override fun getItemViewType(i: Int) = when {
+            row.landscape && row.tiles[i] is Tile.Mv -> 3
+            row.tiles[i] is Tile.Ch -> 0
+            row.tiles[i] is Tile.Mv -> 1
+            else -> 2
+        }
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
-            val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; else -> R.layout.item_hint }
+            val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
-            HomeChrome.styleTile(v, t == 1, compact, dp)
-            if (t != 1) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }   // posters carry their own card background
+            HomeChrome.styleTile(v, poster = t == 1, landscape = t == 3, compact = compact, dp = dp)
+            if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }
             return VH(v)
         }
         override fun onBindViewHolder(h: VH, i: Int, payloads: MutableList<Any>) {
@@ -2091,6 +2940,22 @@ class MainActivity : AppCompatActivity() {
                     val bg = v.background as GradientDrawable
                     v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c.key), 0.12f))
                     v.findViewById<TextView>(R.id.name).text = t.c.name
+                    val playingNow = layer.visibility == View.VISIBLE && renderedFrame && shown.getOrNull(current)?.key == t.c.key
+                    val result = channelPlaybackResults[t.c.key]
+                    val (badgeText, badgeColor) = when {
+                        playingNow -> "PLAYING" to 0xFF16885D.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.WORKING -> "WORKING" to 0xFF16885D.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.FAILED -> "FAILED" to 0xFF9F3339.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.NO_FRAME -> "NO FRAME" to 0xFF987126.toInt()
+                        else -> "NOT CHECKED" to 0xFF4E5C6D.toInt()
+                    }
+                    v.findViewById<TextView>(R.id.liveBadge).apply {
+                        text = badgeText; background = Ui.pill(dp, badgeColor, 7f)
+                    }
+                    v.findViewById<View>(R.id.healthDot).backgroundTintList = ColorStateList.valueOf(badgeColor)
+                    val nowCaption = v.findViewById<TextView>(R.id.nowCaption)
+                    nowCaption.tag = t.c.key
+                    nowCaption.text = if (t.c.v2) "Always-on · no schedule feed" else Epg.cached(t.c.id)?.now?.title ?: "Programme guide on focus"
                     val logo = v.findViewById<ImageView>(R.id.logo); val mono = v.findViewById<TextView>(R.id.mono)
                     if (t.c.logo.isBlank()) {
                         logo.setImageDrawable(null); logo.visibility = View.GONE
@@ -2110,7 +2975,14 @@ class MainActivity : AppCompatActivity() {
                     }
                     v.findViewById<View>(R.id.fav).visibility = if (t.c.key in favs) View.VISIBLE else View.GONE
                     v.setOnFocusChangeListener { x, f ->
-                        focusAnim(x, f); if (f) setHero(t)
+                        focusAnim(x, f)
+                        if (f) {
+                            setHero(t)
+                            if (tab < 2) scheduleSourceWarmup(t.c)
+                            fetchGuide(t.c) { guide ->
+                                if (nowCaption.tag == t.c.key) nowCaption.text = if (t.c.v2) "Always-on · no schedule feed" else guide?.now?.title ?: "Programme information unavailable"
+                            }
+                        }
                     }
                     v.setOnClickListener {
                         shown = row.tiles.filterIsInstance<Tile.Ch>().map { it.c }; shownCat = row.title
@@ -2119,12 +2991,28 @@ class MainActivity : AppCompatActivity() {
                     v.setOnLongClickListener { toggleFav(t.c); true }
                 }
                 is Tile.Mv -> {
-                    val img = v.findViewById<ImageView>(R.id.poster)
-                    v.findViewById<TextView>(R.id.posterName).text = t.m.name
-                    img.load(t.m.poster) { crossfade(120); size(300, 400); placeholder(null) }
-                    v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
-                    v.findViewById<TextView>(R.id.posterMeta).text =
-                        (listOf(t.m.year) + t.m.genres.take(1) + listOf(t.m.runtime)).filter { it.isNotEmpty() }.joinToString("  •  ")
+                    if (row.landscape) {
+                        v.findViewById<ImageView>(R.id.trendingImage).load(t.m.background.ifEmpty { t.m.poster }) {
+                            crossfade(180); size(660, 426); placeholder(null)
+                        }
+                        v.findViewById<TextView>(R.id.trendingTitle).text = t.m.name
+                        v.findViewById<TextView>(R.id.trendingMeta).text =
+                            (listOf(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
+                                .filterNotNull()).joinToString("  ·  ")
+                        v.findViewById<TextView>(R.id.trendingRank).text = "${(i + 1).toString().padStart(2, '0')}  TRENDING"
+                    } else {
+                        val img = v.findViewById<ImageView>(R.id.poster)
+                        v.findViewById<TextView>(R.id.posterName).text = t.m.name
+                        img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
+                        v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
+                        v.findViewById<TextView>(R.id.posterMeta).text =
+                            (listOf(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
+                                .filterNotNull()).joinToString("  ·  ")
+                        v.findViewById<TextView>(R.id.posterRank).apply {
+                            visibility = if (i < 10 && row.title.startsWith("Trending", true)) View.VISIBLE else View.GONE
+                            text = (i + 1).toString()
+                        }
+                    }
                     v.setOnFocusChangeListener { x, f ->
                         focusAnim(x, f)
                         if (f) {
@@ -2138,12 +3026,18 @@ class MainActivity : AppCompatActivity() {
                         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                     }
                 }
-                else -> {}
+                else -> {
+                    v.findViewById<TextView>(R.id.hintText).text = when {
+                        row.title.equals("Trending on AK", true) && trendingFailed -> "Trending titles will appear when the catalogue is available."
+                        row.title.equals("Trending on AK", true) -> "Loading titles from the native catalogue…"
+                        else -> "Hold OK on any channel to keep it here"
+                    }
+                }
             }
         }
     }
 
-    private val tilePool = RecyclerView.RecycledViewPool().apply { setMaxRecycledViews(0, 40); setMaxRecycledViews(1, 40) }
+    private val tilePool = RecyclerView.RecycledViewPool().apply { setMaxRecycledViews(0, 40); setMaxRecycledViews(1, 40); setMaxRecycledViews(3, 24) }
     private val rowAdapter = object : RecyclerView.Adapter<VH>() {
         override fun getItemCount() = rows.size
         override fun onCreateViewHolder(p: ViewGroup, t: Int) =

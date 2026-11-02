@@ -11,7 +11,8 @@ import java.util.concurrent.TimeUnit
 class TgWebsiteRequestParityTest {
     private val root = "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/"
     private fun source(origin: String = TgResolver.SITE) = TgStream("Server 1", root + "index.mpd?__hdnea__=catalog-old", "dash",
-        cookie = "__hdnea__=current-channel", requestOrigin = origin)
+        cookie = "__hdnea__=current-channel", requestOrigin = origin,
+        omitReferrer = origin == TgResolver.SITE)
 
     @Test fun `TG and JJTV reapply current authentication to every request in their advertised Jio channel`() {
         for (origin in listOf(TgResolver.SITE, JjtvResolver.SITE)) {
@@ -22,6 +23,24 @@ class TgWebsiteRequestParityTest {
             }
         }
     }
+    @Test fun `TG website media requests retain Origin and omit Referer`() {
+        val parsed = TgStream("Server 1", root + "index.mpd", "dash",
+            headers = mapOf("Referer" to "https://old-player.example/", "Origin" to TgResolver.SITE),
+            requestOrigin = TgResolver.SITE)
+        val source = WebsiteRequestParity.playbackSources(LiveProvider.TG, listOf(parsed)).single()
+        val request = StreamRequestPolicy(source).request(source.url)
+        assertTrue(source.omitReferrer)
+        assertEquals(TgResolver.SITE, request.headers["Origin"])
+        assertFalse(request.headers.containsKey("Referer"))
+        assertFalse(source.headers.keys.any { it.equals("Referer", ignoreCase = true) })
+    }
+
+    @Test fun `non TG source request metadata is left unchanged by TG website parity`() {
+        val parsed = TgStream("Server 1", root + "index.mpd", "dash", requestOrigin = JjtvResolver.SITE)
+        val source = WebsiteRequestParity.playbackSources(LiveProvider.JJTV, listOf(parsed)).single()
+        assertFalse(source.omitReferrer)
+    }
+
     @Test fun `refreshing Jio authentication retains other signed query bytes and exactly one auth parameter`() {
         val policy = StreamRequestPolicy(source())
         val url = root + "video.m4s?__hdnea__=old&sig=a%2fb%2B+c&track=1&__hdnea__=duplicate#part"
@@ -78,7 +97,8 @@ class TgWebsiteRequestParityTest {
             relay.start(); cdn.start()
             relay.enqueue(MockResponse().setResponseCode(302).setHeader("Location", cdn.url("/index.mpd?__hdnea__=cdn-token")))
             cdn.enqueue(MockResponse().setBody("manifest")); cdn.enqueue(MockResponse().setBody("segment"))
-            val stream = TgStream("Server 2", relay.url("/stream?id=1108").toString(), "dash")
+            val stream = TgStream("Server 2", relay.url("/stream?id=1108").toString(), "dash",
+                requestOrigin = TgResolver.SITE, omitReferrer = true)
             val client = StreamHttp.client(stream)
             client.newCall(Request.Builder().url(stream.url).build()).execute().close()
             client.newCall(Request.Builder().url(cdn.url("/video.m4s")).build()).execute().close()
@@ -88,7 +108,8 @@ class TgWebsiteRequestParityTest {
             assertEquals(TgResolver.SITE, first.getHeader("Origin"))
             assertEquals("null", redirected.getHeader("Origin"))
             assertEquals(TgResolver.SITE, segment.getHeader("Origin"))
-            assertEquals(TgResolver.SITE + "/", redirected.getHeader("Referer"))
+            assertNull(redirected.getHeader("Referer"))
+            assertNull(segment.getHeader("Referer"))
             assertEquals("cdn-token", segment.requestUrl!!.queryParameter("__hdnea__"))
         } }
     }

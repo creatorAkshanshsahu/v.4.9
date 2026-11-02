@@ -89,3 +89,12 @@ The paired result above is carried into a new build rather than a new UI. See
 retry after a refused request, and using the provider's other request style after a refusal), the
 unchanged 4.9.18 request/DRM contract, the captured working TV session on channel 165, and the
 verification that is still outstanding. Version is now `4.9.23` / code `40`.
+
+## 4.9.24 refresh source
+
+The current refresh is version `4.9.24` / code `41`, with the exact 4.9.21 source commit
+`e945dda5fb4d6de9c2e2c7c08078677d7201f6c4` as its Git parent. It carries forward the intervening
+4.9.22/4.9.23 changes while adding the selected rail-led/ambient redesign, catalogue persistence,
+VOD trailers, and playback failure-stage reporting. The 4.9.18 contract guard passes. The updated
+arm32/arm64 APK build and unit-test artifact is pending CI; do not replace the known-good 4.9.21 TV
+installation before the user has reviewed the new APK.
