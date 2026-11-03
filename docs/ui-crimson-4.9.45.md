@@ -21,19 +21,43 @@ That player is **not** a native source:
 - The slugs name ordinary Sony channels that the app's own providers already carry under standard
   Jio channel IDs, with the same logos and names.
 
-So the section is built the way the rest of Live TV works: **exact native channel IDs on the
-existing TG/GioTV ClearKey path**. Nothing is scraped, no web player is opened, no credential is
-borrowed, and no channel is remapped by name.
+So the section is built the way the rest of Live TV works: **native channels on the existing
+TG/GioTV ClearKey path**. Nothing is scraped, no web player is opened, no credential is borrowed, and
+no channel is remapped by name.
 
-`LiveCollections.SONY` lists 22 Sony IDs in the page's own order — SET HD, SAB HD, Sony Marathi,
-Sony Pal, MAX/MAX 2/WAH, PIX, Ten 1–5 (HD and SD), BBC Earth, Sony YAY.
+### Selected by name, not by guessed IDs
 
-**One honest gap:** the page also shows **SONY AATH**. It is left out of the shelf because it has
-not been observed in either provider catalogue, and a tile for a channel no provider advertises
-would only fail. If it appears upstream, add its ID to the list; the tests keep the list honest.
+The first attempt hard-coded 22 Jio channel IDs inferred from a different provider's list. A live
+check against the exact feed the Live tab loads proved it wrong:
 
-The shelf is skipped entirely when the catalogue has none of its IDs, so a bad list degrades to "no
-row" rather than a row of dead tiles.
+| Checked | Result |
+|---|---|
+| IDs that resolved to the intended Sony channel | **1 of 22** (`872` → Sony Yay) |
+| IDs that resolved to a different broadcaster | **14** (Star Sports, Star Gold, Maa HD/Movies, Rozana Spokesman 24x7) |
+| IDs the feed does not carry at all | **7** |
+
+A wrong ID is not cosmetic here: the shelf would have shown Star Sports tiles under a Sony heading,
+and tapping one would have played the wrong channel.
+
+`LiveCollections.SONY` therefore carries **no IDs at all**. It selects from the loaded catalogue by
+the provider's own channel name, in the Sony page's tile order (longest matching token wins, so HD
+leads its plain tile and `Sony MAX2` is not confused with `Sony Max`). Verified against the live feed
+on 2026-11-03: **24 Sony channels selected out of 1255**, in page order, from
+
+`SET HD`, `Sony SAB HD/SD`, `Sony Marathi SD`, `Sony Pal`, **`Sony aath`**, six Sony YAY feeds,
+`Sony Max HD`, `Sony MAX1`, `Sony Wah`, `Sony MAX2`, `Sony Pix HD`, `Sony Ten 1/2/3 HD` and
+`Sony BBC Earth HD` (English, Tamil, Telugu).
+
+Two earlier caveats are now **resolved by evidence**, not assumed:
+
+- *Sony AATH is missing upstream* — false. The feed carries `697 · Sony aath`, and it is on the shelf.
+- *Sony Ten 3 HD is 892* — correct. The guessed `1111` is `Maa Movies`.
+
+`SonyLIV` sports streams are deliberately **excluded**: they are app-only, not on the Sony page, and
+not broadcast feeds.
+
+Any channel that is not advertised is simply not shown. A bad list degrades to "no row", never a row
+of dead tiles.
 
 ## What changed
 
@@ -101,11 +125,25 @@ input hue, must land in the red family.
 - Playback contracts are untouched: `check-playback-baseline.py` still verifies all 16 policy files,
   and this release changes no network, DRM or source-resolution code.
 
+## Verification
+
+| Check | Result |
+|---|---|
+| Offline unit tests, arm64 | **376 run, 370 passed, 6 skipped, 0 failed** |
+| Offline unit tests, arm32 | **376 run, 370 passed, 6 skipped, 0 failed** |
+| Sony shelf against the live feed | **24 selected / 24 named correctly** (`sony shelf selects advertised Sony channels by name`: passed) |
+| APK validation | ZIP, both ABIs, SHA256 — passed |
+
+The live resolver case *"discovers current servers and inspects actual manifests"* flips between
+passed and failed across runs because individual provider tokens expire upstream; it is reported,
+never asserted, and the shelf check is independent of it.
+
 ## What is still unverified
 
-**Playback on the physical TV.** No runner renders a stream. The Sony shelf plays through the same
-verified path as every other channel, but a rendered frame still has to be confirmed on the device.
-If a Sony channel fails, *Playback details → Copy redacted report* names the provider and HTTP code.
+**A rendered frame on the physical TV.** No runner decodes video. The Sony channels use the same
+native path as every other channel in the app, and the feed side is verified, but the final proof is
+one Sony channel playing on the device. If one fails, *Playback details → Copy redacted report*
+names the provider and HTTP code.
 
 ## Branch history note
 
