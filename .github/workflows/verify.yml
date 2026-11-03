@@ -31,6 +31,14 @@ jobs:
       - name: Report build errors
         if: failure()
         run: python3 .github/scripts/report-build-errors.py
+      - name: Report which Sony channels the live feed advertises
+        # Read-only and non-blocking: this answers "will the Sony shelf work", it does not gate the build.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' -PliveTg=true --console=plain 2>&1 | tail -20 || true
+          python3 .github/scripts/report-live-player.py
       - name: Stage APKs
         if: success()
         run: |

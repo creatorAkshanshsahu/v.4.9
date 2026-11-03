@@ -129,9 +129,17 @@ class TgLiveContractTest {
         }
         val found = LiveCollections.SONY.ids.filter { it in present }
         val missing = LiveCollections.SONY.ids.filter { it !in present }
+        // The provider's own name for each ID, so a wrong guess is visible, not just "present".
+        val labels = found.associateWith { present[it].orEmpty() }
+        // Any Sony-ish channel the feed carries that the shelf does NOT list.
+        val omitted = present.filterKeys { it !in LiveCollections.SONY.ids }
+            .filterValues { name -> name?.contains("sony", true) == true || name?.contains("SET HD", true) == true
+                || name?.startsWith("BBC Earth", true) == true }
         println("TG_NATIVE " + JSONObject().put("provider", "LiveCollections").put("step", "sonyShelf")
             .put("declared", LiveCollections.SONY.ids.size).put("advertised", found.size)
-            .put("advertisedIds", JSONArray(found)).put("missingIds", JSONArray(missing)))
+            .put("advertisedIds", JSONArray(found)).put("missingIds", JSONArray(missing))
+            .put("names", JSONObject(labels as Map<*, *>))
+            .put("omittedSonyChannels", JSONObject(omitted as Map<*, *>)))
         assertTrue("The live feed did not advertise a single Sony shelf ID", found.isNotEmpty())
         assertTrue("Sony shelf would render an empty row", LiveCollections.channels(
             LiveCollections.SONY,
