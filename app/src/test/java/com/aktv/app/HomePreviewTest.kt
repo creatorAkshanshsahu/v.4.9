@@ -52,7 +52,7 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.heroBadge).apply {
                 text = if (movies) "MOVIE  /  ON DEMAND" else "NEWS  /  LIVE"
                 setPadding(9, 3, 9, 3)
-                background = Ui.pill(1f, 0x2424D3D0, 16f).apply { setStroke(1, Accent.SIGNAL) }
+                background = Ui.pill(1f, 0x33E11D2E, 16f).apply { setStroke(1, Accent.SIGNAL) }
             }
             root.findViewById<TextView>(R.id.heroSubheading).text = if (movies) "Your next movie night starts here." else "A clearer view of what’s next."
             root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "A story for the long way home." else "Live. Global. Independent. Breaking news, bigger perspectives."
@@ -122,7 +122,10 @@ class HomePreviewTest {
                             val tile = item.itemView
                             val landscape = !movies && position == 1
                             HomeChrome.styleTile(tile, poster = movies, compact = compact, dp = 1f, landscape = landscape)
-                            val colors = listOf(0xFF244D56.toInt(), 0xFF40385A.toInt(), 0xFF5A4532.toInt(), 0xFF294950.toInt(), 0xFF4A2E54.toInt())
+                            // Sample tile tints sampled through the real harmoniser, so the preview shows the
+                            // crimson identity instead of the retired teal/violet palette.
+                            val colors = listOf("#14343C", "#3A2440", "#4A2A22", "#1E3A42", "#42162E")
+                                .map { Accent.normalize(android.graphics.Color.parseColor(it)) }
                             if (landscape) {
                                 tile.findViewById<ImageView>(R.id.trendingImage).setImageResource(listOf(
                                     R.drawable.home_hero_cinematic, R.drawable.home_nature_art,
@@ -137,7 +140,7 @@ class HomePreviewTest {
                                 }
                                 tile.findViewById<TextView>(R.id.posterName).apply {
                                     text = titles[index % 4]; textSize = if (compact) 13f else 18f; setTextColor(Color.WHITE)
-                                    background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[index % 4], 0xFF09131E.toInt()))
+                                    background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[index % 4], 0xFF12060E.toInt()))
                                 }
                                 tile.findViewById<ImageView>(R.id.poster).setImageResource(listOf(
                                     R.drawable.home_hero_cinematic, R.drawable.home_nature_art,
@@ -155,7 +158,7 @@ class HomePreviewTest {
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE; text = "AK"
-                                    setTextColor(0xFFB0F1E8.toInt()); textSize = if (compact) 18f else 23f
+                                    setTextColor(Accent.GLOSS_HI); textSize = if (compact) 18f else 23f
                                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
                                 }
                                 tile.findViewById<TextView>(R.id.name).text = listOf("AK News", "AK Sport", "AK Reality", "AK Kids", "AK Hits")[index % 5]

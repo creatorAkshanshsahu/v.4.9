@@ -113,6 +113,35 @@ class TgLiveContractTest {
     }
 
     /**
+     * Opt-in check of the Sony shelf against the exact feed the Live tab loads. Reports which
+     * declared IDs the provider actually advertises, so a dead tile is caught before a user sees it.
+     * Missing IDs are reported, not failed: the shelf drops them by design.
+     */
+    @Test fun `sony shelf ids are advertised by the live channel feed`() {
+        assumeTrue(System.getProperty("aktv.live.tg") == "true")
+        val response = TgHttp().get("${TgResolver.SITE}/api/public/channels", linkedMapOf("Accept" to "application/json"))
+        assertEquals("live channel feed did not answer 200", 200, response.code)
+        val channels = JSONObject(response.body.toString(Charsets.UTF_8)).getJSONArray("channels")
+        val present = LinkedHashMap<String, String>()
+        for (index in 0 until channels.length()) {
+            val item = channels.optJSONObject(index) ?: continue
+            present[item.optString("id")] = item.optString("name")
+        }
+        val found = LiveCollections.SONY.ids.filter { it in present }
+        val missing = LiveCollections.SONY.ids.filter { it !in present }
+        println("TG_NATIVE " + JSONObject().put("provider", "LiveCollections").put("step", "sonyShelf")
+            .put("declared", LiveCollections.SONY.ids.size).put("advertised", found.size)
+            .put("advertisedIds", JSONArray(found)).put("missingIds", JSONArray(missing)))
+        assertTrue("The live feed did not advertise a single Sony shelf ID", found.isNotEmpty())
+        assertTrue("Sony shelf would render an empty row", LiveCollections.channels(
+            LiveCollections.SONY,
+            channels.let { array -> (0 until array.length()).mapNotNull { i ->
+                array.optJSONObject(i)?.let { MainActivity.Channel(it.optString("id"), it.optString("name"), "", "") }
+            } }
+        ).isNotEmpty())
+    }
+
+    /**
      * Opt-in read of the replacement site's current player page. Names only, so a site that moves its
      * endpoints is reported instead of silently failing; the resolver reads them at runtime anyway.
      */

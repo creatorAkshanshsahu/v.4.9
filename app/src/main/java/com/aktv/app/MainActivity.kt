@@ -494,7 +494,12 @@ class MainActivity : AppCompatActivity() {
         navStyle(phoneSearchBtn, phoneSegBgs[4], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "Movies"; else -> "Series" }
         findViewById<TextView>(R.id.sectionKicker).apply {
-            text = when (tab) { 0 -> "LIVE, RIGHT NOW"; 1 -> "PLAY ANYTIME · 24/7"; 2 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING" }
+            // The curated Sony shelf is the newest part of Live TV, so name it in the header.
+            val sonyLive = tab == 0 && LiveCollections.channels(LiveCollections.SONY, all).isNotEmpty()
+            text = when (tab) {
+                0 -> if (sonyLive) "LIVE · SONY SHELF INCLUDED" else "LIVE, RIGHT NOW"
+                1 -> "PLAY ANYTIME · 24/7"; 2 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
+            }
             setTextColor(sectionAccent())
         }
         val count = when (tab) { 0 -> all.size; 1 -> allV2.size; else -> vodRows[tab - 2].sumOf { it.tiles.size } }
