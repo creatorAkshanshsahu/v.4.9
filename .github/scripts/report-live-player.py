@@ -19,7 +19,9 @@ for path in Path('app/build/test-results').glob('*/TEST-com.aktv.app.TgLiveContr
 # The shelf comparison is the most compact and most useful line: keep it ahead of the per-channel
 # noise so the 24k notice cap cannot truncate it away.
 unique = list(dict.fromkeys(reports))
-shelf = [line for line in unique if '"step":"sonyShelf"' in line or '"step": "sonyShelf"' in line]
+# The shelf line is emitted with `put("provider", ...)` before `put("step", ...)`, so the key order is
+# fixed; match either spelling and either key order rather than assuming one serialisation.
+shelf = [line for line in unique if 'sonyShelf' in line and 'LiveCollections' in line]
 others = [line for line in unique if line not in shelf]
 text = ('LIVE_CASES ' + json.dumps(cases) + '\n' if cases else '') + '\n'.join(shelf + others)
 text = text[:24000]

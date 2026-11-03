@@ -113,40 +113,37 @@ class TgLiveContractTest {
     }
 
     /**
-     * Opt-in check of the Sony shelf against the exact feed the Live tab loads. Reports which
-     * declared IDs the provider actually advertises, so a dead tile is caught before a user sees it.
-     * Missing IDs are reported, not failed: the shelf drops them by design.
+     * Opt-in check of the Sony shelf against the exact feed the Live tab loads.
+     *
+     * The shelf is selected by channel *name*, so what matters is that real Sony channels come back -
+     * not that a hand-written ID list survives. This prints the selection and the provider's own
+     * names for it, plus any Sony-flavoured channel it missed, so a wrong shelf is visible before a
+     * user ever sees it. A missing channel is dropped by design, never shown as a dead tile.
      */
-    @Test fun `sony shelf ids are advertised by the live channel feed`() {
+    @Test fun `sony shelf selects advertised Sony channels by name`() {
         assumeTrue(System.getProperty("aktv.live.tg") == "true")
         val response = TgHttp().get("${TgResolver.SITE}/api/public/channels", linkedMapOf("Accept" to "application/json"))
         assertEquals("live channel feed did not answer 200", 200, response.code)
         val channels = JSONObject(response.body.toString(Charsets.UTF_8)).getJSONArray("channels")
-        val present = LinkedHashMap<String, String>()
+        val catalogue = ArrayList<MainActivity.Channel>()
         for (index in 0 until channels.length()) {
             val item = channels.optJSONObject(index) ?: continue
-            present[item.optString("id")] = item.optString("name")
+            catalogue.add(MainActivity.Channel(item.optString("id"), item.optString("name"), "", item.optString("logo")))
         }
-        val found = LiveCollections.SONY.ids.filter { it in present }
-        val missing = LiveCollections.SONY.ids.filter { it !in present }
-        // The provider's own name for each ID, so a wrong guess is visible, not just "present".
-        val labels = found.associateWith { present[it].orEmpty() }
-        // Any Sony-ish channel the feed carries that the shelf does NOT list.
-        val omitted = present.filterKeys { it !in LiveCollections.SONY.ids }
-            .filterValues { name -> name?.contains("sony", true) == true || name?.contains("SET HD", true) == true
-                || name?.startsWith("BBC Earth", true) == true }
+        val shelf = LiveCollections.channels(LiveCollections.SONY, catalogue)
+        val picked = shelf.associate { it.id to it.name }
+        // Sony-flavoured channels the real catalogue carries that the shelf does NOT list.
+        val omitted = catalogue.filter { channel ->
+            channel.id !in picked && !channel.v2 &&
+                (channel.name.contains("sony", true) || channel.name.startsWith("SET ", true) ||
+                    channel.name.startsWith("BBC Earth", true) || channel.name.startsWith("SAB ", true))
+        }.associate { it.id to it.name }
         println("TG_NATIVE " + JSONObject().put("provider", "LiveCollections").put("step", "sonyShelf")
-            .put("declared", LiveCollections.SONY.ids.size).put("advertised", found.size)
-            .put("advertisedIds", JSONArray(found)).put("missingIds", JSONArray(missing))
-            .put("names", JSONObject(labels as Map<*, *>))
+            .put("catalogueSize", catalogue.size).put("selected", shelf.size)
+            .put("names", JSONObject(picked as Map<*, *>))
             .put("omittedSonyChannels", JSONObject(omitted as Map<*, *>)))
-        assertTrue("The live feed did not advertise a single Sony shelf ID", found.isNotEmpty())
-        assertTrue("Sony shelf would render an empty row", LiveCollections.channels(
-            LiveCollections.SONY,
-            channels.let { array -> (0 until array.length()).mapNotNull { i ->
-                array.optJSONObject(i)?.let { MainActivity.Channel(it.optString("id"), it.optString("name"), "", "") }
-            } }
-        ).isNotEmpty())
+        assertTrue("The live feed advertised no Sony channel at all - the shelf would render empty",
+            shelf.size >= 5)
     }
 
     /**
