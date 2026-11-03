@@ -7,6 +7,7 @@ import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.net.URI
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -69,6 +70,9 @@ class TgLiveContractTest {
             "1141", "1984", "1985", "1389", "3277", "1124", "3278", "1651", "1650", "1122", "3273", "2853", "3274", "2852")
         val resolver = JjtvResolver()
         val missing = ArrayList<String>()
+        // A live catalogue is maintained upstream. An ID it does not list can never be streamed by
+        // this provider, and TG still covers it, so classify it separately from a resolver failure.
+        val absent = ArrayList<String>()
         val missingKeys = ArrayList<String>()
         for (id in ids) {
             val report = JSONObject().put("provider", "JJTV").put("channel", id)
@@ -89,8 +93,10 @@ class TgLiveContractTest {
                     report.put("manifests", JSONArray().apply { sources.take(2).forEach { put(probe(it)) } })
                 }
             } catch (error: Exception) {
-                missing.add(id)
+                if (error is IOException && error.message?.contains("no matching channel ID") == true) absent.add(id)
+                else missing.add(id)
                 report.put("metadataError", error.javaClass.simpleName)
+                    .put("metadataOutcome", if (id in absent) "not-in-catalogue" else "resolve-failed")
                     .put("metadataHttpStatus", when (error) {
                         is TgResolveException -> error.status
                         is JjtvHttpException -> error.status
@@ -99,7 +105,10 @@ class TgLiveContractTest {
             }
             println("TG_NATIVE $report")
         }
-        assertTrue("JJTV metadata unavailable for exact channel IDs: ${missing.joinToString()}", missing.isEmpty())
+        assertTrue("Replacement live site metadata unavailable for channel IDs: ${missing.joinToString()}", missing.isEmpty())
+        if (absent.isNotEmpty()) println("TG_NATIVE " + JSONObject().put("provider", "JJTV")
+            .put("step", "notInCatalogue").put("channels", JSONArray(absent))
+            .put("note", "Upstream catalogue omits these IDs; TG advertises them instead."))
         assertTrue("JJTV omitted expected key data for channel IDs: ${missingKeys.joinToString()}", missingKeys.isEmpty())
     }
 

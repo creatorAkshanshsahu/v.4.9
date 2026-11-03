@@ -75,6 +75,25 @@ amended with the reason and the exact unchanged scope:
 
 `python3 .github/scripts/check-playback-baseline.py` passes.
 
+## Live verification through the app's own code
+
+Build [41583861898](https://github.com/creatorAkshanshsahu/v.4.9/actions/runs/41583861898) ran the
+opt-in live contract tests against the real resolver. Results:
+
+- `replacement live site still advertises the native player constants` — **passed**: the page answered
+  HTTP 200 and both the channel document and the cookie document were parsed from it.
+- The multi-channel resolver sweep returned **DASH ClearKey sources with 1–2 keys, a per-channel
+  cookie and 1 222–50 814 s of token life** for 165, 156, 872, 816, 892, 1106, 1108, 362, 460, 1109,
+  1114, 1123, 1141, 1142, 1389, 1650, 1651, 1984, 1985, 1122, 1124, 2852, 2853, 3273, 3274,
+  3277 and 3278.
+- One catalogue gap: **524** (Sony Ten 3 SD) is not listed by the replacement site. It is classified
+  as `not-in-catalogue` rather than a resolver failure, because no app fix can stream an ID the
+  provider does not advertise, and TG still lists and resolves it.
+
+The same build also shows every actual manifest request in the CI runner returning HTTP 451 from
+`jiotv*.cdn.jio.com` for both providers. That is the runner's geographic restriction, not the app,
+and it matches the pre-existing behaviour documented in earlier investigations.
+
 ## What is verified and what is not
 
 Verified: the new site serves its player page to a plain HTTPS client with no challenge, advertises
