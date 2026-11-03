@@ -26,7 +26,7 @@
         android:gravity="start" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text"
         android:textSize="12sp" android:fontFamily="@font/sora_semibold"/>
     <TextView android:id="@+id/nowCaption" android:layout_width="match_parent" android:layout_height="wrap_content"
-        android:layout_gravity="bottom" android:layout_marginBottom="7dp" android:paddingStart="72dp" android:paddingEnd="12dp"
+        android:layout_gravity="bottom" android:layout_marginBottom="7dp" android:paddingStart="82dp" android:paddingEnd="12dp"
         android:gravity="start" android:maxLines="1" android:ellipsize="end" android:textColor="@color/text_dim"
         android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
 </FrameLayout>

@@ -1,13 +1,22 @@
 <resources>
-    <color name="abyss">#05070C</color>
-    <color name="night">#080C13</color>
-    <color name="surface">#111923</color>
-    <color name="signal">#62E5D4</color>
-    <color name="ion">#64D3E6</color>
-    <color name="indigo">#8178F5</color>
-    <color name="live">#F05E74</color>
+    <!-- Glossy crimson identity: near-black ink, deep wine surfaces, lacquered red accents. -->
+    <color name="abyss">#07040A</color>
+    <color name="night">#0C0710</color>
+    <color name="surface">#17101B</color>
+    <color name="surface_hi">#241528</color>
+    <!-- Primary glossy crimson: focus fills, active pills, live badges. -->
+    <color name="crimson">#E11D2E</color>
+    <color name="crimson_bright">#FF3448</color>
+    <color name="crimson_deep">#8C0F1C</color>
+    <color name="wine">#4A0812</color>
+    <color name="gloss_hi">#FFFFEBEE</color>
+    <!-- Kept names keep existing layout/gradient references valid. -->
+    <color name="signal">#FF3448</color>
+    <color name="ion">#FF5C6B</color>
+    <color name="indigo">#C2185B</color>
+    <color name="live">#FF3448</color>
     <color name="gold">#E7B969</color>
-    <color name="text">#F8F9FC</color>
-    <color name="text_dim">#B7BECA</color>
-    <color name="text_faint">#818A99</color>
+    <color name="text">#FCF7F8</color>
+    <color name="text_dim">#C4B4BA</color>
+    <color name="text_faint">#8E7781</color>
 </resources>

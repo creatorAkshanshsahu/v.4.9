@@ -82,9 +82,12 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
+            // Same wine gradient the player uses in production (0xF0120810 / 0xE00C0710).
+            // The earlier 0xE5080B11 / 0xD90D121A decoded to RGB (8,11,17)/(13,18,26) - dark
+            // cyan, not wine - which is where the live-player preview's teal came from.
             card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xE5080B11.toInt(), 0xD90D121A.toInt())).apply {
-                cornerRadius = 16f; setStroke(1, 0x44FFFFFF)
+                intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
+                cornerRadius = 16f; setStroke(1, 0x59FF3448)
             }
             layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.aktv_logo_cinematic)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"

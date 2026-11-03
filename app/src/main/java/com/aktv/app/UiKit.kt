@@ -36,46 +36,90 @@ internal object ImmersiveUi {
     }
 }
 
-/** AK TV cinema palette: ink-black surfaces, electric blue controls, cyan media cues and violet depth. */
+/**
+ * AK TV glossy-crimson palette: ink-black surfaces, deep wine depth, lacquered red accents and
+ * bright-crimson cues. Names are stable so layouts, players and tests keep one source of truth.
+ */
 object Accent {
-    val ABYSS = 0xFF05070C.toInt()
-    val SURFACE = 0xFF111923.toInt()
-    val SIGNAL = 0xFF62E5D4.toInt()
-    val ION = 0xFF64D3E6.toInt()
-    val INDIGO = 0xFF8178F5.toInt()
-    val DEEP = 0xFF1D2431.toInt()
-    val LIVE = 0xFFF05E74.toInt()
+    val ABYSS = 0xFF07040A.toInt()
+    val NIGHT = 0xFF0C0710.toInt()
+    val SURFACE = 0xFF17101B.toInt()
+    val SURFACE_HI = 0xFF241528.toInt()
+    /** Primary glossy crimson used for focus fills, live badges and active controls. */
+    val CRIMSON = 0xFFE11D2E.toInt()
+    val CRIMSON_BRIGHT = 0xFFFF3448.toInt()
+    val CRIMSON_DEEP = 0xFF8C0F1C.toInt()
+    val WINE = 0xFF4A0812.toInt()
+    /** Near-white with a warm cast; the specular highlight in gloss gradients. */
+    val GLOSS_HI = 0xFFFFEBEE.toInt()
+    val SIGNAL = CRIMSON_BRIGHT
+    val ION = 0xFFFF5C6B.toInt()
+    val INDIGO = 0xFFC2185B.toInt()
+    val DEEP = 0xFF2A1520.toInt()
+    val LIVE = CRIMSON_BRIGHT
     val GOLD = 0xFFE7B969.toInt()
-    val TEXT = 0xFFF8F9FC.toInt()
-    val DIM = 0xFFB7BECA.toInt()
-    val FAINT = 0xFF818A99.toInt()
+    val TEXT = 0xFFFCF7F8.toInt()
+    val DIM = 0xFFC4B4BA.toInt()
+    val FAINT = 0xFF8E7781.toInt()
 
-    /** Makes any logo colour usable as a tint: saturated, mid-light. Greys fall back to the brand blue. */
+    /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
+    fun glossStops(): IntArray = intArrayOf(CRIMSON_BRIGHT, CRIMSON, CRIMSON_DEEP)
+
+    /**
+     * Makes any logo colour usable as a tint. The sampled hue is pulled most of the way to the brand
+     * crimson so channel artwork still varies, but every surface reads as one crimson identity.
+     */
     fun normalize(c: Int?): Int {
-        if (c == null) return SIGNAL
+        if (c == null) return CRIMSON_BRIGHT
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        if (hsl[1] < 0.18f) return SIGNAL
-        hsl[1] = max(hsl[1], 0.65f); hsl[2] = hsl[2].coerceIn(0.48f, 0.62f)
-        return ColorUtils.HSLToColor(hsl)
+        if (hsl[1] < 0.18f) return CRIMSON_BRIGHT
+        val hue = projectHue(hsl[0])
+        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.62f), hsl[2].coerceIn(0.46f, 0.60f)))
     }
 
-    /** A neighbouring hue so the hero panel has a little depth instead of one flat colour. */
+    /**
+     * Fold any hue onto the red arc (335..25 degrees) instead of blending toward it in RGB, which
+     * drags saturated blues through magenta. Greys are handled by the caller before this runs.
+     */
+    fun projectHue(hue: Float): Float {
+        val normalized = ((hue % 360f) + 360f) % 360f
+        return when {
+            normalized <= 25f -> normalized
+            normalized >= 335f -> normalized
+            // Warm half: fold 25..180 down onto the 25..0 edge.
+            normalized < 180f -> 25f - (normalized - 25f) / 155f * 25f
+            // Cool half: fold 180..335 up onto the 335..360 edge.
+            else -> 335f + (normalized - 180f) / 155f * 25f
+        }
+    }
+
+    /** A darker neighbouring crimson so the hero panel has depth instead of one flat colour. */
     fun partner(c: Int): Int {
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        hsl[0] = (hsl[0] + 48f) % 360f; hsl[2] = 0.42f
+        hsl[0] = if (hsl[0] >= 180f) (hsl[0] - 14f + 360f) % 360f else (hsl[0] + 14f) % 360f
+        hsl[1] = hsl[1].coerceAtLeast(0.45f)
+        hsl[2] = 0.30f
         return ColorUtils.HSLToColor(hsl)
     }
 
-    /** Stable colour for channels that have no logo to sample (V2 / 24-7 channels): same name, same tint. */
+    /**
+     * Stable tint for channels with no logo to sample (V2 / 24-7): same name, same colour.
+     * Hues stay inside a warm crimson band so a wall of tiles reads as one brand, not a rainbow.
+     */
     fun fromName(name: String): Int {
         var h = 7
         for (ch in name.lowercase()) h = (h * 31 + ch.code) and 0x7fffffff
-        return ColorUtils.HSLToColor(floatArrayOf((h % 360).toFloat(), 0.72f, 0.56f))
+        // 0..1 spread across crimson -> rose -> warm wine, all within the red family.
+        val spread = (h % 100) / 99f
+        // Confine the palette to the red arc: 340..360 crimson-rose, 0..20 warm red.
+        val hue = if (spread < 0.55f) 340f + spread * 36f else (spread - 0.55f) * 44f
+        val lightness = 0.34f + ((h / 100) % 12) / 100f
+        return ColorUtils.HSLToColor(floatArrayOf((hue + 360f) % 360f, 0.62f, lightness))
     }
 
     fun from(d: Drawable, cb: (Int) -> Unit) {
         val bmp = (d as? BitmapDrawable)?.bitmap
-        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(SIGNAL); return }
+        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(CRIMSON_BRIGHT); return }
         Palette.from(bmp).maximumColorCount(16).generate { p ->
             val sw = p?.vibrantSwatch ?: p?.lightVibrantSwatch ?: p?.darkVibrantSwatch ?: p?.dominantSwatch
             cb(normalize(sw?.rgb))

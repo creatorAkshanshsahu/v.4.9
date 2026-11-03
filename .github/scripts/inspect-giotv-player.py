@@ -250,10 +250,34 @@ def availability():
                             if entry and isinstance(entry.get(key), str))) if entry else []})
 
 
+SHELF_IDS = ('1103', '1114', '1122', '1123', '1124', '1125', '1126', '1127', '3284', '1106', '1107',
+             '1108', '1109', '1110', '1111', '524', '1112', '1113', '1118', '1119', '1142', '872')
+
+
+def shelf_check():
+    """Compare the curated Sony shelf with the catalogue the replacement site really serves."""
+    body = documents.get('catalogue')
+    if not body:
+        reports.append({'step': 'sony shelf', 'skipped': 'no catalogue document'})
+        return
+    try:
+        clean = body.lstrip('\ufeff').strip()
+        entries = json.loads(clean if clean.startswith('[') else '[' + clean + ']')
+    except (ValueError, TypeError) as error:
+        reports.append({'step': 'sony shelf', 'skipped': type(error).__name__})
+        return
+    by_id = {str(item.get('id')): item.get('name') for item in entries if isinstance(item, dict)}
+    present = [cid for cid in SHELF_IDS if cid in by_id]
+    missing = [cid for cid in SHELF_IDS if cid not in by_id]
+    reports.append({'step': 'sony shelf', 'declared': len(SHELF_IDS), 'advertised': len(present),
+                    'names': [by_id[cid] for cid in present], 'missingIds': missing})
+
+
 if __name__ == '__main__':
     try:
         inspect()
         availability()
+        shelf_check()
     finally:
         text = '\n\n'.join(json.dumps(report, ensure_ascii=True) for report in reports)[:24000]
         for start in range(0, len(text), 3000):

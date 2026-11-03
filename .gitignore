@@ -6,3 +6,4 @@ local.properties
 *.aab
 .idea/
 *.iml
+__pycache__/

@@ -16,7 +16,14 @@ for path in Path('app/build/test-results').glob('*/TEST-com.aktv.app.TgLiveContr
             status = 'failed' if case.find('failure') is not None or case.find('error') is not None else 'skipped' if case.find('skipped') is not None else 'passed'
             cases.append({'case': case.get('name', ''), 'status': status})
 
-text = ('LIVE_CASES ' + json.dumps(cases) + '\n' if cases else '') + '\n'.join(dict.fromkeys(reports))
+# The shelf comparison is the most compact and most useful line: keep it ahead of the per-channel
+# noise so the 24k notice cap cannot truncate it away.
+unique = list(dict.fromkeys(reports))
+# The shelf line is emitted with `put("provider", ...)` before `put("step", ...)`, so the key order is
+# fixed; match either spelling and either key order rather than assuming one serialisation.
+shelf = [line for line in unique if 'sonyShelf' in line and 'LiveCollections' in line]
+others = [line for line in unique if line not in shelf]
+text = ('LIVE_CASES ' + json.dumps(cases) + '\n' if cases else '') + '\n'.join(shelf + others)
 text = text[:24000]
 if not text:
     print('::warning title=Native live check::No live native report was produced; do not infer playback success.')

@@ -1,0 +1,36 @@
+name: UI preview
+# Renders the real native screens on the branch so a reviewer can see the design without a device.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'arena/**' ]
+    paths-ignore: [ 'design/previews/**' ]
+permissions:
+  contents: write
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v3
+        with: { gradle-version: 8.9 }
+      - name: Render brand, home, entrance and player previews
+        run: |
+          gradle testArm64DebugUnitTest --tests 'com.aktv.app.BrandPreviewTest' \
+            --tests 'com.aktv.app.HomePreviewTest' --tests 'com.aktv.app.PlayerPreviewTest' --console=plain
+      - name: Publish previews to this branch
+        if: always()
+        run: |
+          mkdir -p design/previews/4.9.45
+          cp app/build/reports/ui-preview/*.webp design/previews/4.9.45/ 2>/dev/null || true
+          git config user.name "Arena Agent"
+          git config user.email "agent@arena.ai"
+          git add design/previews || true
+          git commit -m "Render 4.9.45 previews [skip ci]" || true
+          git push || true
+      - name: List what rendered
+        if: always()
+        run: ls -la app/build/reports/ui-preview/ 2>/dev/null || echo "no previews produced"
