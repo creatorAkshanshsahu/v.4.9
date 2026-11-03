@@ -150,7 +150,7 @@ These rules are implemented as native metadata resolution, not by opening either
 ## Native playback and automatic selection
 
 1. Keep exact catalogue IDs. V1/Jio and V2 IDs are different namespaces. **Never pass a V2 channel ID to JJTV.** The supplied JJTV example, 816, is Cartoon Network Hindi; Sony YAY Hindi remains 872.
-2. For a V1 channel with no successful history, start with JJTV. A channel's own successful provider takes precedence; an explicit MENU source choice takes precedence for that tuning session. An unrelated channel's provider no longer changes this order. V2 always uses TG.
+2. For a V1 channel with no successful history, start with the second provider (GioTV in 4.9.44). A channel's own successful provider takes precedence; an explicit MENU source choice takes precedence for that tuning session. An unrelated channel's provider no longer changes this order. V2 always uses TG.
 3. Resolve current metadata from that provider. An HTTP 401/403 permits one immediate, bounded fresh lookup for that provider; otherwise try its native sources automatically after native playback/DRM errors or startup/buffering watchdog timeouts.
 4. If that list fails or the provider's 25-second lookup/startup window expires, load the other authorized provider's native configuration for the same V1 channel. Do not mix one provider's keys or credentials into the other provider's stream object.
 5. After all sources fail, perform one forced refresh of the configuration and credentials, then try one more bounded pass. Report an error rather than retrying indefinitely or opening an iframe.
@@ -167,6 +167,10 @@ Both full-screen playback and muted previews use the same Media3/ExoPlayer media
 - V2 uses `/api/public/v2/channels/{id}` only.
 
 ## JJTV metadata
+
+> **4.9.44:** the live site moved from `jjtvxweb.pages.dev` (now HTTP 451 on `/pind`) to
+> `giotv-6op.pages.dev`, which advertises the same contract. See
+> [the migration record](giotv-live-source-4.9.44.md). The resolver below is otherwise unchanged.
 
 `JjtvResolver` reads the current `/pind?id=…` configuration and discovers the advertised `CHANNELS_URL`, `COOKIE_PRIMARY`, `COOKIE_FALLBACK` and `COOKIE_STAR_SPORTS` locations. Filenames, stream URLs, keys and tokens are not bundled into the APK. Static request-header assignments are read for the retained native request style; the preferred embedded-browser style uses Chrome/no-Referer as observed in the real browser trace.
 

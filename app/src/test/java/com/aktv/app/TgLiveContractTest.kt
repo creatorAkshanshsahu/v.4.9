@@ -103,6 +103,26 @@ class TgLiveContractTest {
         assertTrue("JJTV omitted expected key data for channel IDs: ${missingKeys.joinToString()}", missingKeys.isEmpty())
     }
 
+    /**
+     * Opt-in read of the replacement site's current player page. Names only, so a site that moves its
+     * endpoints is reported instead of silently failing; the resolver reads them at runtime anyway.
+     */
+    @Test fun `replacement live site still advertises the native player constants`() {
+        assumeTrue(System.getProperty("aktv.live.tg") == "true")
+        val page = "${JjtvResolver.SITE}/pind?id=872"
+        val http = TgHttp()
+        val html = http.get(page, linkedMapOf("Accept" to "text/html"))
+        println("TG_NATIVE " + JSONObject().put("provider", "GioTV").put("step", "playerPage")
+            .put("status", html.code).put("bytes", html.body.size).put("site", JjtvResolver.SITE))
+        assertEquals("The replacement player page did not answer with HTTP 200", 200, html.code)
+        val config = JjtvProtocol.config(html.body.toString(Charsets.UTF_8), page)
+        println("TG_NATIVE " + JSONObject().put("provider", "GioTV").put("step", "constants")
+            .put("channels", config != null).put("primaryCookie", config?.primaryCookie != null)
+            .put("starCookie", config?.starCookies != null))
+        assertNotNull("The replacement player page no longer advertises its channel document", config)
+        assertNotNull("The replacement player page no longer advertises a cookie document", config?.primaryCookie)
+    }
+
     /** Public timing only; positive expiry is not proof that the provider accepts the signature. */
     private fun tokenSecondsLeft(source: TgStream): Long? =
         StreamRequestPolicy.expiry(source.url, source.cookie)?.let { (it - System.currentTimeMillis()) / 1000 }

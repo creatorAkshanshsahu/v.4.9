@@ -12,7 +12,7 @@ internal class JjtvResolver(
     private val now: () -> Long = System::currentTimeMillis,
     private val elapsed: () -> Long = { System.nanoTime() / 1_000_000 }
 ) {
-    companion object { const val SITE = "https://jjtvxweb.pages.dev" }
+    companion object { const val SITE = "https://giotv-6op.pages.dev" }
     private data class Cached<T>(val until: Long, val value: T)
     private var configuration: Cached<JjtvProtocol.Config>? = null
     private var catalog: Cached<Map<String, JSONObject>>? = null
