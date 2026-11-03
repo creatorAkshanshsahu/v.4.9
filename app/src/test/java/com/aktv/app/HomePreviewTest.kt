@@ -111,9 +111,11 @@ class HomePreviewTest {
                 "Sony Ten 1 HD", "Sony Ten 2 HD", "Sony Ten 3 Hindi HD", "Sony BBC Earth HD"
             ).mapIndexed { index, name -> MainActivity.Channel((3400 + index).toString(), name, "Sony", "") }
             val sonyShelf = LiveCollections.channels(LiveCollections.SONY, sonyCatalogue)
-            fun shortCode(name: String) = name.split(" ")
-                .filterNot { it.lowercase() in setOf("sony", "hd", "sd", "hindi", "english", "tamil", "telugu") }
-                .joinToString(" ").ifBlank { "SONY" }.uppercase()
+            // Mirrors the app's own monogram rule, so the preview shows what a logo-less tile really shows.
+            fun initials(n: String): String {
+                val w = n.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+                return (if (w.size >= 2) "${w[0].first()}${w[1].first()}" else n.trim().take(2)).uppercase()
+            }
             val liveTitles = listOf("Live Channels", "Sony Live", "Trending on AK")
             val movieTitles = listOf("Trending movies", "Top rated movies", "Keep watching")
             val rows = root.findViewById<RecyclerView>(R.id.rows)
@@ -175,9 +177,9 @@ class HomePreviewTest {
                                     visibility = View.VISIBLE
                                     // The Sony row shows the real channel names the shelf selected, so the
                                     // preview proves the shelf renders - not just that a row exists.
-                                    text = if (channel != null) shortCode(channel.name) else "AK"
+                                    text = if (channel != null) initials(channel.name) else "AK"
                                     setTextColor(Accent.GLOSS_HI)
-                                    textSize = if (channel != null) (if (compact) 10f else 13f) else (if (compact) 18f else 23f)
+                                    textSize = if (compact) 18f else 23f
                                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
                                 }
                                 val names = listOf("AK News", "AK Sport", "AK Reality", "AK Kids", "AK Hits")
