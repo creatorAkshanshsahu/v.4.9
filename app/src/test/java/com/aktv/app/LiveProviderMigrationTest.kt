@@ -19,7 +19,7 @@ class LiveProviderMigrationTest {
             .putString("source_provider_872", "https://jjtvxweb.pages.dev")
             .putString("source_872", "old-fingerprint")
             .putBoolean("native_compat_872_JJTV", true)
-            .putSet<String>("favs", setOf("872", "165"))
+            .putStringSet("favs", mutableSetOf("872", "165"))
             .putString("recent_ch", "872")
             .putBoolean("previews", false)
             .putBoolean("native_force_tv", true)
@@ -53,10 +53,9 @@ class LiveProviderMigrationTest {
 
     @Test fun `a later success on the current site is not discarded on the next launch`() {
         TgServers.forgetPreviousLiveSite(context)
-        val prefs = context.getSharedPreferences("aktv", Context.MODE_PRIVATE).edit()
-            .putString("source_provider_872", LiveProvider.JJTV.website)
-            .putString("source_872", "current-fingerprint")
-            .apply()
+        val prefs = context.getSharedPreferences("aktv", Context.MODE_PRIVATE)
+        prefs.edit().putString("source_provider_872", LiveProvider.JJTV.website)
+            .putString("source_872", "current-fingerprint").apply()
         TgServers.forgetPreviousLiveSite(context)
         assertEquals(LiveProvider.JJTV.website, prefs.getString("source_provider_872", null))
         assertEquals("current-fingerprint", prefs.getString("source_872", null))
