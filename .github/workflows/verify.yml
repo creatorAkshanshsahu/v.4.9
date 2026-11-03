@@ -42,3 +42,14 @@ jobs:
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
           python3 .github/scripts/verify-apk-archives.py out
+      - name: Publish the APKs
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-4.9.45
+          path: |
+            out/*.apk
+            out/SHA256SUMS
+            out/apk-validation.json
+          if-no-files-found: error
+          retention-days: 30
