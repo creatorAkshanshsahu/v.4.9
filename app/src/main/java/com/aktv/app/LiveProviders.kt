@@ -9,6 +9,12 @@ internal enum class LiveProvider(val website: String) {
 
 /** Provider order is metadata only. There is still exactly one native playback engine. */
 internal object LiveProviders {
+    /** One user-facing provider name, so a source change cannot leave stale labels behind. */
+    fun displayName(provider: LiveProvider) = when (provider) {
+        LiveProvider.TG -> "TG TV"
+        LiveProvider.JJTV -> "GioTV"
+    }
+
     fun order(v2: Boolean, rememberedWebsite: String?, requested: LiveProvider? = null): List<LiveProvider> {
         if (v2) return listOf(LiveProvider.TG) // V2's numeric IDs are not Jio channel IDs.
         // A working TG channel says nothing about a different, encrypted JJTV channel. Do not let

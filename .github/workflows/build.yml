@@ -26,10 +26,15 @@ jobs:
           node --test .github/scripts/compact-tg-trace.test.cjs
           python3 -B .github/scripts/inspect-jjtv-player.test.py
           python3 -B .github/scripts/inspect-tg-player.test.py
+          python3 -B .github/scripts/inspect-giotv-player.test.py
       - name: Inspect live player metadata without saving credentials
         run: python3 .github/scripts/inspect-tg-player.py
       - name: Inspect the user-provided JJTV native stream contract
         run: python3 .github/scripts/inspect-jjtv-player.py
+      - name: Inspect the user-provided GioTV native stream contract
+        continue-on-error: true
+        timeout-minutes: 5
+        run: python3 .github/scripts/inspect-giotv-player.py
       - name: Trace the website's real browser playback requests
         continue-on-error: true
         timeout-minutes: 4

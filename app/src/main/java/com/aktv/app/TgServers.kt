@@ -16,6 +16,7 @@ object TgServers {
     fun init(ctx: Context) {
         val prefs = ctx.getSharedPreferences("aktv_tg", Context.MODE_PRIVATE)
         if (prefs.getInt("native_schema", 0) != 2) prefs.edit().clear().putInt("native_schema", 2).apply()
+        forgetPreviousLiveSite(ctx)
         resolver.close()
         jjtv = JjtvResolver()
         resolver = TgResolver(initialFunction = prefs.getString("native_function", null), saveFunction = {
@@ -37,6 +38,24 @@ object TgServers {
     }
 
     fun invalidate(id: String, v2: Boolean = false) = resolver.invalidate(id, v2)
+
+    /**
+     * A remembered provider/source hint names the website that supplied it. Once a build points at a
+     * different live site, an old JJTV hint no longer describes anything the app can reach, and the
+     * old fingerprint can never match a source from the new site. Drop only those stale hints: the
+     * TG function id and every other preference stay intact, and no credential was ever stored here.
+     */
+    internal fun forgetPreviousLiveSite(ctx: Context) {
+        val prefs = ctx.getSharedPreferences("aktv", Context.MODE_PRIVATE)
+        if (prefs.getString("native_provider_site", null) == LiveProvider.JJTV.website) return
+        val editor = prefs.edit().putString("native_provider_site", LiveProvider.JJTV.website)
+        for (key in prefs.all.keys) {
+            if (key.startsWith("source_provider_") || key.startsWith("source_") || key.startsWith("native_compat_")) {
+                editor.remove(key)
+            }
+        }
+        editor.apply()
+    }
 
     /** Warm current player chunks without resolving every channel, and check them again while the app is open. */
     fun refreshSite(id: String? = refreshChannel) {

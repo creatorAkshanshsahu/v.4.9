@@ -1343,7 +1343,7 @@ class MainActivity : AppCompatActivity() {
         compatiblePlayback = savedCompatibility(ch, provider) || decoderRetries.used(provider)
         providerWindow.enter(SystemClock.elapsedRealtime())
     }
-    private fun providerName(provider: LiveProvider) = if (provider == LiveProvider.TG) "TG TV" else "JJTV"
+    private fun providerName(provider: LiveProvider) = LiveProviders.displayName(provider)
     private fun sourceKey(source: TgStream) = LiveProviders.sourceKey(source)
     private fun rememberNativeSource(ch: Channel, source: TgStream) {
         prefs.edit().putString("source_${ch.key}", sourceKey(source))
@@ -1558,7 +1558,8 @@ class MainActivity : AppCompatActivity() {
             if (player !== owner) return
             trace.failed(PlaybackProblems.from(error, error.errorCode))
             val code = httpCode(error)
-            val provider = if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) "JJTV" else "TG TV"
+            val provider = LiveProviders.displayName(
+                if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) LiveProvider.JJTV else LiveProvider.TG)
             val stage = trace.lastLoadStageName()?.lowercase()?.replaceFirstChar { it.uppercase() }
             val message = when {
                 code == 451 && stage != null -> "$stage HTTP 451"
@@ -1597,15 +1598,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun metadataFailureReason(provider: LiveProvider, channel: Channel, error: Throwable): String = when {
         error is LiveMetadataTimeoutException -> "${providerName(provider)} metadata failed: ${LiveMetadataRequests.deadlineSeconds(provider)}-second resolution deadline reached"
-        error is JjtvHttpException -> "JJTV metadata HTTP ${error.status}"
+        error is JjtvHttpException -> "${providerName(provider)} metadata HTTP ${error.status}"
         error is TgResolveException -> "TG metadata failed${error.status?.let { " (HTTP $it)" }.orEmpty()}"
         error is java.net.SocketTimeoutException -> "${providerName(provider)} metadata timed out"
         error is java.net.UnknownHostException -> "${providerName(provider)} metadata host unavailable"
         error is javax.net.ssl.SSLException -> "${providerName(provider)} metadata TLS failed"
         provider == LiveProvider.JJTV && channel.id in setOf("1108", "362") ->
-            "JJTV Star cookie probe: no exact-channel native source returned for channel ID ${channel.id}"
+            "${providerName(provider)} Star cookie probe: no exact-channel native source returned for channel ID ${channel.id}"
         provider == LiveProvider.TG -> "TG metadata failed; no native stream configuration was returned"
-        else -> "JJTV metadata failed; no native stream configuration was returned"
+        else -> "${providerName(provider)} metadata failed; no native stream configuration was returned"
     }
 
     /** Classify a relay stall without retaining or displaying the stream URL itself. */
@@ -1891,7 +1892,7 @@ class MainActivity : AppCompatActivity() {
             val selected = if (index == serverIdx) "Now playing · " else ""
             choices.add("${selected}Server ${index + 1} · $provider · $type" to { selectNativeServer(index) })
         }
-        if (!ch.v2) choices.add("${if (requestedProvider(ch) == LiveProvider.JJTV) "Selected · " else ""}Use JJTV only (native)" to { selectNativeProvider(LiveProvider.JJTV) })
+        if (!ch.v2) choices.add("${if (requestedProvider(ch) == LiveProvider.JJTV) "Selected · " else ""}Use ${LiveProviders.displayName(LiveProvider.JJTV)} only (native)" to { selectNativeProvider(LiveProvider.JJTV) })
         choices.add("${if (requestedProvider(ch) == LiveProvider.TG) "Selected · " else ""}Use TG TV only (native)" to { selectNativeProvider(LiveProvider.TG) })
         choices.add((if (prefs.getBoolean("native_force_tv", false)) "TV compatibility: return to automatic detection" else "TV compatibility: force TV mode (generic boxes)") to {
             prefs.edit().putBoolean("native_force_tv", !prefs.getBoolean("native_force_tv", false)).apply()

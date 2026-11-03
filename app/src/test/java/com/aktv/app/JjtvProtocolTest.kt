@@ -139,4 +139,29 @@ class JjtvProtocolTest {
         assertEquals("__hdnea__=opaque", JjtvProtocol.regularCookie(body, now = 100_000))
     }
 
+    /**
+     * Shape observed live on the replacement site: the same four constants, a 1,176-entry catalogue
+     * whose ids are strings, a single `url` per channel, a `keys` array for most channels and the
+     * legacy `keyId`/`key` pair for the rest, with the two Jio CDNs unchanged.
+     */
+    @Test fun `replacement site contract is the same shape the resolver already reads`() {
+        val script = """const CHANNELS_URL = "/jstr4web.json"; const COOKIE_PRIMARY = "https://allinonereborn2.online/jstrweb2/cookies.json";
+            const COOKIE_STAR_SPORTS = "https://allinonereborn2.online/jtv-fetch/jstarcookie/cookie.json";"""
+        val result = requireNotNull(JjtvProtocol.config(script, page))
+        assertEquals("$site/jstr4web.json", result.channels)
+        assertNull(result.fallbackCookie)
+        assertNotNull(result.primaryCookie)
+        assertNotNull(result.starCookies)
+        val catalogue = JjtvProtocol.catalog("""[{"id":"872","name":"Sony YAY Hindi","category":"Kids","logo":"https://jiotv.catchup.cdn.jio.com/dare_images/images/SonyYAYHin.png",
+            "url":"https://jiotvmblive.cdn.jio.com/bpk-tv/SonyYAYHin_MOB/WDVLive/index.mpd?__hdnea__=published",$keyData}]""")
+        val channel = requireNotNull(catalogue["872"])
+        val urls = JjtvProtocol.urls(channel)
+        assertEquals(1, urls.size)
+        assertTrue(urls.single().startsWith("https://jiotvmblive.cdn.jio.com/bpk-tv/"))
+        assertFalse(JjtvProtocol.isStarUrl(urls.single()))
+        val source = JjtvProtocol.streams(channel, result, "__hdnea__=regular", "", "__hdnea__=star",
+            page, site).single()
+        assertEquals(2, JSONObject(String(requireNotNull(ClearKey.license(requireNotNull(source.drm))))).getJSONArray("keys").length())
+        assertEquals("__hdnea__=regular", source.cookie)
+    }
 }
