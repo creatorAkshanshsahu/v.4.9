@@ -21,7 +21,7 @@ internal object LiveCollections {
     data class Spec(
         val title: String,
         val kicker: String,
-        /** Preferred channel names in the order the source page presents them. */
+        /** Name tokens in the order the source page presents them; longest match wins. */
         val order: List<String>,
         /** Builder-defined selection. Match the provider's own name, never a guessed ID. */
         val matches: (String) -> Boolean
@@ -36,13 +36,20 @@ internal object LiveCollections {
     }
 
     /**
-     * The Sony page's own channel order. Names are matched loosely (case/punctuation-insensitive)
-     * because the provider writes them its own way, e.g. `Sony Yay Hindi` for the page's SONY YAY.
+     * The Sony page's tiles in the order they appear on it, each named by the token that identifies it
+     * in the provider's own channel names. Names are matched loosely (case/punctuation-insensitive)
+     * because the provider writes them its way, e.g. `Sony Yay Hindi` for the page's SONY YAY. Plain and
+     * HD tiles both exist upstream, so the tokens are precise enough to tell `Sony Max` from `Sony MAX2`
+     * and `Sony Ten 3` from `Sony Ten 3 Hindi HD`.
      */
     private val PAGE_ORDER = listOf(
-        "set hd", "sony hd", "sab hd", "sony sab", "sony marathi", "sony pal", "sony aath",
-        "sony yay", "sony max hd", "sony max2", "sony max", "sony wah", "sony pix",
-        "sony ten 1", "sony ten 2", "sony ten 3", "sony ten 4", "sony ten 5",
+        "set hd",                                          // sony-hd (Sony's own identity for it)
+        "sony sab hd", "sony sab sd",                      // sab-hd
+        "sony marathi", "sony pal", "sony aath", "sony yay",// sony-marathi / pal / aath / yay
+        "sony max hd", "sony max", "sony wah", "sony max2", "sony pix",   // sony-max-hd .. sony-pix-hd
+        "sony ten 1 hd", "sony ten 1", "sony ten 2 hd", "sony ten 2",
+        "sony ten 3 hd", "sony ten 3", "sony ten 4 hd", "sony ten 4",
+        "sony ten 5 hd", "sony ten 5",
         "bbc earth"
     )
 
@@ -55,10 +62,17 @@ internal object LiveCollections {
 
     val shelves: List<Spec> get() = listOf(SONY)
 
-    /** Rank of a channel name against the page order; unknown Sony entries sort last, alphabetically. */
+    /**
+     * Position in the page order. The *longest* matching token wins, so a specific tile never inherits
+     * the position of a shorter one it happens to contain - `Sony MAX2` is not `Sony Max`, and
+     * `Sony Ten 3 Hindi HD` lands next to the other Ten 3 tiles instead of at the end.
+     */
     private fun rank(name: String, spec: Spec): Int {
         val n = name.lowercase()
-        return spec.order.indexOfFirst { n.contains(it) }.let { if (it < 0) spec.order.size else it }
+        return spec.order.withIndex()
+            .filter { n.contains(it.value) }
+            .maxByOrNull { it.value.length }?.index
+            ?: spec.order.size
     }
 
     /**
