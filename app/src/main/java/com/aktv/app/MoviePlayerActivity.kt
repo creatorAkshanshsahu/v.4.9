@@ -149,18 +149,18 @@ class MoviePlayerActivity : Activity() {
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
-            setPlayedColor(Accent.SIGNAL); setScrubberColor(Accent.TEXT)
-            setBufferedColor(0x887F8A99.toInt()); setUnplayedColor(0x557F8A99)
+            setPlayedColor(Accent.CRIMSON_BRIGHT); setScrubberColor(Accent.GLOSS_HI)
+            setBufferedColor(0x887E4050.toInt()); setUnplayedColor(0x557E4050)
         }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF005070C.toInt(), 0xB805070C.toInt(), 0x3805070C, Color.TRANSPARENT))
+                intArrayOf(0xF00A0512.toInt(), 0xB80C0710.toInt(), 0x38140712, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(0xF505070C.toInt(), 0xC505070C.toInt(), 0x3205070C, Color.TRANSPARENT))
+                intArrayOf(0xF50A0512.toInt(), 0xC50C0710.toInt(), 0x32140712, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
         val brand = ImageView(this).apply {
@@ -271,14 +271,18 @@ class MoviePlayerActivity : Activity() {
             text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
             isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
-            val accent = Accent.SIGNAL
             fun style(focused: Boolean) {
-                background = GradientDrawable().apply {
+                // Focused: lacquered crimson gradient. Resting: translucent wine with a thin rim.
+                background = if (focused) GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(Accent.CRIMSON_BRIGHT, Accent.CRIMSON, Accent.CRIMSON_DEEP)).apply {
                     cornerRadius = px(16).toFloat()
-                    setColor(if (focused) accent else 0xE1151C2D.toInt())
-                    setStroke(px(if (focused) 2 else 1), if (focused) 0xFFEFF6FF.toInt() else 0x4AFFFFFF)
+                    setStroke(px(2), 0xAAFFEBEE.toInt())
+                } else GradientDrawable().apply {
+                    cornerRadius = px(16).toFloat()
+                    setColor(0xE00C0710.toInt())
+                    setStroke(px(1), 0x59FF3448)
                 }
-                setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
+                setTextColor(Accent.TEXT)
                 elevation = if (focused) px(9).toFloat() else 0f
             }
             style(false)

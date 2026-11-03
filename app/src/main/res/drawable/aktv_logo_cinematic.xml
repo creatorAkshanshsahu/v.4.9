@@ -1,33 +1,64 @@
+<!--
+  AK TV 4.9.45 glossy-crimson wordmark plate.
+  Same authored geometry as the previous identity, recoloured to the crimson system: lacquered
+  plate, sheen band, interlocking AK with a shared apex and a negative-space play cue.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="300dp" android:height="260dp"
     android:viewportWidth="600" android:viewportHeight="520">
-    <!-- Subtle rounded panel sits behind the AK mark; the wordmark stays unobstructed below. -->
-    <path android:fillColor="#142033" android:strokeColor="#35FFFFFF" android:strokeWidth="3"
-        android:pathData="M82,14 H518 Q556,14 556,52 V228 Q556,266 518,266 H82 Q44,266 44,228 V52 Q44,14 82,14 Z"/>
-    <!-- The AK monogram is drawn as a single, clean cinematic mark. -->
-    <path android:fillType="evenOdd" android:pathData="M52,238 L151,42 L249,238 L192,238 L173,198 L128,198 L108,238 Z M140,171 L162,171 L151,142 Z">
+
+    <!-- Plate: deep wine to near-black with a crimson rim. -->
+    <path android:pathData="M82,14 H518 Q556,14 556,52 V228 Q556,266 518,266 H82 Q44,266 44,228 V52 Q44,14 82,14 Z">
         <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="0" android:startY="42" android:endX="0" android:endY="238">
-                <item android:color="#5CF2E8" android:offset="0"/>
-                <item android:color="#2589F5" android:offset="0.62"/>
-                <item android:color="#7662F7" android:offset="1"/>
+            <gradient android:type="linear" android:startX="0" android:startY="14" android:endX="0" android:endY="266">
+                <item android:color="#200A12" android:offset="0"/>
+                <item android:color="#0C0710" android:offset="0.6"/>
+                <item android:color="#1A0711" android:offset="1"/>
             </gradient>
         </aapt:attr>
     </path>
+    <path android:strokeWidth="3" android:strokeColor="#55FF3448"
+        android:pathData="M82,14 H518 Q556,14 556,52 V228 Q556,266 518,266 H82 Q44,266 44,228 V52 Q44,14 82,14 Z"/>
+
+    <!-- Specular band across the top of the plate. -->
+    <path android:fillAlpha="0.30" android:pathData="M82,14 H518 Q556,14 556,52 V104 Q300,140 44,104 V52 Q44,14 82,14 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="14" android:endX="0" android:endY="140">
+                <item android:color="#66FFFFFF" android:offset="0"/>
+                <item android:color="#00FFFFFF" android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- A: no crossbar, right leg runs into the K stem. -->
+    <path android:fillType="evenOdd"
+        android:pathData="M52,238 L151,42 L249,238 L192,238 L173,198 L128,198 L108,238 Z M140,171 L162,171 L151,142 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="52" android:startY="42" android:endX="249" android:endY="238">
+                <item android:color="#FFFF5A6B" android:offset="0"/>
+                <item android:color="#FFE11D2E" android:offset="0.5"/>
+                <item android:color="#FF8C0F1C" android:offset="1"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- K: quiet stem, crimson arms. -->
     <path android:pathData="M238,42 H291 V115 L356,42 H424 L340,132 L428,238 H361 L291,159 V238 H238 Z">
         <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="0" android:startY="42" android:endX="0" android:endY="238">
-                <item android:color="#5CF2E8" android:offset="0"/>
-                <item android:color="#2589F5" android:offset="0.62"/>
-                <item android:color="#7662F7" android:offset="1"/>
+            <gradient android:type="linear" android:startX="238" android:startY="42" android:endX="428" android:endY="238">
+                <item android:color="#FFFF5A6B" android:offset="0"/>
+                <item android:color="#FFE11D2E" android:offset="0.52"/>
+                <item android:color="#FF7E0C18" android:offset="1"/>
             </gradient>
         </aapt:attr>
     </path>
-    <!-- A small negative-space play cue makes the mark read as streaming, not a generic monogram. -->
-    <path android:fillColor="#07111B" android:pathData="M224,127 L269,151 L224,175 Z"/>
-    <!-- Hand-built wordmark geometry; stays crisp at both phone and TV sizes. -->
-    <path android:fillColor="#F4F7FC" android:pathData="M124,424 L154,337 H171 L202,424 H182 L176,405 H149 L142,424 Z M155,388 H171 L163,363 Z
+
+    <!-- Negative-space play cue. -->
+    <path android:fillColor="#0C0710" android:pathData="M224,127 L269,151 L224,175 Z"/>
+
+    <!-- Wordmark: warm-white so it reads as branded text, not a second accent colour. -->
+    <path android:fillColor="#FCF7F8" android:pathData="M124,424 L154,337 H171 L202,424 H182 L176,405 H149 L142,424 Z M155,388 H171 L163,363 Z
         M214,337 H232 V372 L268,337 H291 L252,379 L293,424 H269 L232,382 V424 H214 Z
         M314,337 H392 V354 H362 V424 H344 V354 H314 Z
         M407,337 H427 L451,402 L475,337 H495 L461,424 H442 Z"/>

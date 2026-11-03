@@ -1,5 +1,36 @@
+<!-- Glossy crimson focus: lacquered gradient fill, bright sheen rim, warm outer glow. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_focused="true"><shape><solid android:color="#1A62E5D4"/><corners android:radius="16dp"/><stroke android:width="2dp" android:color="#F8F9FC"/></shape></item>
-    <item android:state_activated="true"><shape><solid android:color="#161C27"/><corners android:radius="16dp"/><stroke android:width="1dp" android:color="#8062E5D4"/></shape></item>
-    <item><shape><solid android:color="#00000000"/><corners android:radius="16dp"/><stroke android:width="1dp" android:color="#26303C"/></shape></item>
+    <item android:state_focused="true">
+        <layer-list>
+            <item>
+                <shape>
+                    <gradient android:type="linear" android:angle="270"
+                        android:startColor="#33FF3448" android:endColor="#00E11D2E"/>
+                    <corners android:radius="18dp"/>
+                </shape>
+            </item>
+            <item>
+                <shape>
+                    <gradient android:type="linear" android:angle="270"
+                        android:startColor="#4DFF3448" android:centerColor="#1AE11D2E" android:endColor="#008C0F1C"/>
+                    <corners android:radius="16dp"/>
+                    <stroke android:width="2dp" android:color="#FFFF3448"/>
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item android:state_activated="true">
+        <shape>
+            <solid android:color="#33E11D2E"/>
+            <corners android:radius="16dp"/>
+            <stroke android:width="1dp" android:color="#99FF3448"/>
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#00000000"/>
+            <corners android:radius="16dp"/>
+            <stroke android:width="1dp" android:color="#332A1520"/>
+        </shape>
+    </item>
 </selector>

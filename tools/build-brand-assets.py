@@ -1,43 +1,76 @@
-"""Create Android-size derivatives of the user-selected AK TV mark (no regeneration)."""
-from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+#!/usr/bin/env python3
+"""Derive the Android launcher/banner bitmaps from the glossy-crimson mark.
 
-root=Path(__file__).resolve().parents[1]
-source=Image.open(root/'design/ak-tv-logo.png').convert('RGBA')
-pixels=source.load()
-mask=Image.new('L',source.size); alpha=mask.load()
-for y in range(source.height):
-    for x in range(source.width):
-        r,g,b,a=pixels[x,y]
-        strength=max(g,b)
-        # Remove only the near-black presentation backdrop; preserve the selected cyan geometry.
-        alpha[x,y]=int(max(0,min(255,(strength-48)*255/72))) if g-r>30 or b-r>30 else 0
-source.putalpha(mask)
-bounds=mask.point(lambda v:255 if v>180 else 0).getbbox()
-source=source.crop((max(0,bounds[0]-18),max(0,bounds[1]-18),min(source.width,bounds[2]+18),min(source.height,bounds[3]+18)))
-mark=source.resize((512,round(512*source.height/source.width)),Image.Resampling.LANCZOS)
-res=root/'app/src/main/res/drawable-nodpi'
-res.mkdir(parents=True,exist_ok=True)
-for name in ('ic_mark','ic_mark_blue','ic_intro'):
-    mark.save(res/(name+'.png'),optimize=True)
-mark.save(root/'design/ak-tv-mark-transparent.png',optimize=True)
-icon=Image.new('RGBA',(512,512),(8,13,20,255))
-small=mark.resize((372,round(372*mark.height/mark.width)),Image.Resampling.LANCZOS)
-icon.alpha_composite(small,((512-small.width)//2,(512-small.height)//2))
-icon.convert('RGB').save(res/'ic_logo.png',optimize=True)
-foreground=Image.new('RGBA',(432,432))
-small=mark.resize((264,round(264*mark.height/mark.width)),Image.Resampling.LANCZOS)
-foreground.alpha_composite(small,((432-small.width)//2,(432-small.height)//2))
-foreground.save(res/'ic_launcher_foreground.png',optimize=True)
-fontdir=root/'app/src/main/res/font'
-banner=Image.new('RGB',(640,360),(8,13,20))
-small=mark.resize((228,round(228*mark.height/mark.width)),Image.Resampling.LANCZOS)
-banner.paste(small,(42,(360-small.height)//2),small)
-draw=ImageDraw.Draw(banner)
-font=ImageFont.truetype(str(fontdir/'sora_semibold.ttf'),64)
-draw.text((310,117),'AK TV',font=font,fill=(239,248,248))
-font2=ImageFont.truetype(str(fontdir/'sora_regular.ttf'),17)
-draw.text((314,207),'LIVE. FILMS. YOUR WORLD.',font=font2,fill=(132,169,179))
-banner.resize((320,180),Image.Resampling.LANCZOS).save(res/'banner_img.png',optimize=True)
-banner.save(root/'design/ak-tv-banner.png',optimize=True)
-print('Brand assets:',source.size,'->',mark.size)
+Geometry comes from `tools/brand_mark.py`, the same source that emits
+`res/drawable/aktv_mark_cinematic.xml`, so the raster and vector identities cannot drift.
+
+    python3 tools/build-brand-assets.py
+"""
+import sys
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import brand_mark  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / 'app/src/main/res/drawable-nodpi'
+DESIGN = ROOT / 'design'
+FONTS = ROOT / 'app/src/main/res/font'
+INK = (7, 4, 10)
+
+
+def save(image, name, size=None):
+    OUT.mkdir(parents=True, exist_ok=True)
+    target = image.resize(size, Image.Resampling.LANCZOS) if size else image
+    target.save(OUT / name, optimize=True)
+    return target
+
+
+def banner():
+    """320x180 Android TV banner: mark on the left, wordmark on the right."""
+    canvas = Image.new('RGBA', (640, 360), INK + (255,))
+    glow = Image.new('RGBA', (640, 360), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).ellipse((-120, -80, 400, 440), fill=(255, 52, 72, 78))
+    canvas = Image.alpha_composite(canvas, glow.filter(ImageFilter.GaussianBlur(80)))
+
+    mark = brand_mark.render_mark((420, 245))
+    canvas.alpha_composite(mark, (10, (360 - mark.height) // 2))
+
+    drawer = ImageDraw.Draw(canvas)
+    title = ImageFont.truetype(str(FONTS / 'sora_semibold.ttf'), 76)
+    tagline = ImageFont.truetype(str(FONTS / 'sora_regular.ttf'), 19)
+    drawer.text((352, 126), 'AK TV', font=title, fill=(252, 247, 248))
+    drawer.text((356, 220), 'LIVE. FILMS. YOUR WORLD.', font=tagline, fill=(196, 180, 186))
+
+    flat = Image.new('RGB', canvas.size, INK)
+    flat.paste(canvas, (0, 0), canvas)
+    flat.save(DESIGN / 'ak-tv-banner.png', optimize=True)
+    return flat.resize((320, 180), Image.Resampling.LANCZOS)
+
+
+def main():
+    mark_plate = brand_mark.render_mark((960, 560))
+    mark_plate.save(DESIGN / 'ak-tv-mark-transparent.png', optimize=True)
+
+    bare = brand_mark.render_mark((512, 512), plate=False, glow=False)
+    for name in ('ic_mark', 'ic_mark_blue', 'ic_intro'):
+        save(bare, f'{name}.png')
+
+    icon = Image.new('RGBA', (512, 512), INK + (255,))
+    inset = mark_plate.resize((420, round(420 * mark_plate.height / mark_plate.width)),
+                              Image.Resampling.LANCZOS)
+    icon.alpha_composite(inset, ((512 - inset.width) // 2, (512 - inset.height) // 2))
+    icon.convert('RGB').save(OUT / 'ic_logo.png', optimize=True)
+
+    foreground = Image.new('RGBA', (432, 432), (0, 0, 0, 0))
+    small = bare.resize((300, 300), Image.Resampling.LANCZOS)
+    foreground.alpha_composite(small, ((432 - small.width) // 2, (432 - small.height) // 2))
+    foreground.save(OUT / 'ic_launcher_foreground.png', optimize=True)
+
+    save(banner(), 'banner_img.png')
+    print('Brand assets rebuilt from tools/brand_mark.py')
+
+
+if __name__ == '__main__':
+    main()

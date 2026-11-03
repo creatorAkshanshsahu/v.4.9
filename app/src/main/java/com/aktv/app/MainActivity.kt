@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
-    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF091521.toInt(), 0xFF0C1D2A.toInt(), 0xFF07111B.toInt())) }
+    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF140812.toInt(), 0xFF1A0D15.toInt(), 0xFF0C0710.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
@@ -244,10 +244,10 @@ class MainActivity : AppCompatActivity() {
         infoRetryAction.setOnClickListener { reloadStream() }
         infoGuideAction.setOnClickListener { showProgrammeGuide() }
         listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
-            action.background = Ui.pill(dp, 0xB31C2432.toInt(), 18f)
+            action.background = Ui.pill(dp, 0xB31C0D16.toInt(), 18f)
             action.setOnFocusChangeListener { v, focused ->
                 val text = v as TextView
-                text.background = Ui.pill(dp, if (focused) Accent.ION else 0xB30A111B.toInt(), 18f).apply {
+                text.background = Ui.pill(dp, if (focused) Accent.ION else 0xB30C0710.toInt(), 18f).apply {
                     setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) Accent.TEXT else 0x55FFFFFF)
                 }
                 text.setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
@@ -283,9 +283,9 @@ class MainActivity : AppCompatActivity() {
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
         infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xE5080B11.toInt(), 0xD90D121A.toInt())).apply {
+            intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
             cornerRadius = 16 * dp
-            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x59FF3448)
         }
         infoCard.elevation = 10 * dp
         findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
@@ -328,8 +328,11 @@ class MainActivity : AppCompatActivity() {
             key(this, "GUIDE", "Schedule"); append("     "); key(this, "Hold OK", "Reload"); append("     ")
             key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
         }
-        val track = ColorStateList.valueOf(Color.argb(60, 255, 255, 255))
+        val track = ColorStateList.valueOf(Color.argb(52, 255, 52, 72))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
+        // Programme progress reads as a lacquered crimson bar, not the old mint.
+        val played = ColorStateList.valueOf(Accent.CRIMSON_BRIGHT)
+        heroProgress.progressTintList = played; infoProgress.progressTintList = played
 
         // search pill in the top bar
         searchBtn.background = searchBg
@@ -348,7 +351,7 @@ class MainActivity : AppCompatActivity() {
         guide = findViewById(R.id.guide); guideScrim = findViewById(R.id.guideScrim); guideDivider = findViewById(R.id.guideDivider)
         catList = findViewById(R.id.catList); chList = findViewById(R.id.chList)
         chCol = findViewById(R.id.chCol); chHeader = findViewById(R.id.chHeader); channelSearch = findViewById(R.id.channelSearch)
-        guide.background = Ui.pill(dp, 0xF20E1422.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
+        guide.background = Ui.pill(dp, 0xF2100713.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         listOf(catList to catAdapter, chList to chAdapter).forEach { (rv, ad) ->
             rv.layoutManager = LinearLayoutManager(this); rv.adapter = ad; rv.itemAnimator = null
@@ -429,7 +432,7 @@ class MainActivity : AppCompatActivity() {
     private fun heroMetaChip(text: String) = TextView(this).apply {
         this.text = text; textSize = if (compact) 9f else 10f; typeface = fSemi; setTextColor(Accent.TEXT)
         isFocusable = false; setPadding((10 * dp).toInt(), (6 * dp).toInt(), (10 * dp).toInt(), (6 * dp).toInt())
-        background = Ui.pill(dp, 0x7733424D, 18f)
+        background = Ui.pill(dp, 0x777E4050, 18f)
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (7 * dp).toInt() }
     }
 
@@ -450,11 +453,11 @@ class MainActivity : AppCompatActivity() {
         isFocusable = true; isClickable = true
         setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
         val accent = sectionAccent()
-        val bg = Ui.pill(dp, if (primary) Color.WHITE else 0xB30A111B.toInt(), 12f)
+        val bg = Ui.pill(dp, if (primary) Color.WHITE else 0xB30C0710.toInt(), 12f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (primary) Color.WHITE else if (focused) Ui.mix(Accent.ABYSS, accent, 0.32f) else 0xB30A111B.toInt())
+            bg.setColor(if (primary) Color.WHITE else if (focused) Ui.mix(Accent.ABYSS, accent, 0.32f) else 0xB30C0710.toInt())
             bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, accent)
             setTextColor(if (primary || focused) Accent.ABYSS else Accent.TEXT)
         }
@@ -716,6 +719,11 @@ class MainActivity : AppCompatActivity() {
         val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
+            // Curated Sony shelf sits above the generic categories so it is one row away from the hero.
+            if (!alwaysOn) for (spec in LiveCollections.shelves) {
+                val picked = LiveCollections.channels(spec, channels)
+                if (picked.isNotEmpty()) add(Row(spec.title, picked.map { Tile.Ch(it) }))
+            }
             if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
@@ -894,7 +902,7 @@ class MainActivity : AppCompatActivity() {
     }
     /** Tints the dark hero treatment with the selected section's accent. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(0xFF091521.toInt(), partner, 0.12f), Ui.mix(0xFF0C1D2A.toInt(), c, 0.16f), 0xFF07111B.toInt())
+        orbBg.colors = intArrayOf(Ui.mix(0xFF140812.toInt(), partner, 0.12f), Ui.mix(0xFF1A0D15.toInt(), c, 0.16f), 0xFF0C0710.toInt())
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
     /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
@@ -1198,7 +1206,7 @@ class MainActivity : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
-            background = Ui.pill(dp, 0x66151C2D, 14f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x2AFFFFFF) }
+            background = Ui.pill(dp, 0x6612090F, 14f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x2AFFFFFF) }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (10 * dp).toInt() }
         }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -2948,7 +2956,7 @@ class MainActivity : AppCompatActivity() {
                         result?.outcome == ChannelPlaybackOutcome.WORKING -> "WORKING" to 0xFF16885D.toInt()
                         result?.outcome == ChannelPlaybackOutcome.FAILED -> "FAILED" to 0xFF9F3339.toInt()
                         result?.outcome == ChannelPlaybackOutcome.NO_FRAME -> "NO FRAME" to 0xFF987126.toInt()
-                        else -> "NOT CHECKED" to 0xFF4E5C6D.toInt()
+                        else -> "NOT CHECKED" to 0xFF8E7781.toInt()
                     }
                     v.findViewById<TextView>(R.id.liveBadge).apply {
                         text = badgeText; background = Ui.pill(dp, badgeColor, 7f)

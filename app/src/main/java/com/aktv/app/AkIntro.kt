@@ -28,7 +28,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
     private val bylinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFB7C2D2.toInt(); textAlign = Paint.Align.CENTER; textSize = 11 * dp
+        color = 0xFFC4B4BA.toInt(); textAlign = Paint.Align.CENTER; textSize = 11 * dp
     }
     private val destination = RectF()
     private val soundTarget = RectF()
