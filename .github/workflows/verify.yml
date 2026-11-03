@@ -1,0 +1,44 @@
+name: Verify
+# Deterministic verification for this branch. Runs on push because the branch history is
+# independent of main, so pull_request-triggered workflows never start.
+on:
+  push:
+    branches: [ 'arena/**' ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v3
+        with: { gradle-version: 8.9 }
+      - name: Verify the preserved playback contracts
+        run: python3 .github/scripts/check-playback-baseline.py
+      - name: Compile every variant and run the offline unit tests
+        run: |
+          set -o pipefail
+          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --console=plain 2>&1 | tail -80
+      - name: Report deterministic tests
+        if: always()
+        run: python3 .github/scripts/report-unit-tests.py
+      - name: Report build errors
+        if: failure()
+        run: python3 .github/scripts/report-build-errors.py
+      - name: Stage APKs
+        if: success()
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
+          cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+      - name: Validate and checksum the APKs
+        if: success()
+        run: |
+          python3 .github/scripts/verify-apk-archives.test.py
+          python3 .github/scripts/verify-apk-archives.py out
