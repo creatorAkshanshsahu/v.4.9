@@ -1,0 +1,11 @@
+{
+  "requestedUtc": "2026-10-19T18:30:46.308969+00:00",
+  "channels": [
+    "165",
+    "872",
+    "1106",
+    "1108",
+    "362"
+  ],
+  "purpose": "User-requested read-only credential-window and bounded manifest status check; no app changes."
+}

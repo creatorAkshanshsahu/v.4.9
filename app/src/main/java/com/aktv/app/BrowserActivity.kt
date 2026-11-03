@@ -71,7 +71,7 @@ class ProgressLine(c: Context) : View(c) {
 class BrowserActivity : Activity() {
     companion object {
         var runtime: GeckoRuntime? = null
-        /** One shared Firefox engine for the whole app. Creating it is the slow part of opening a movie, so the details page warms it up. */
+        /** Shared Firefox engine for the general browser. Native live TV and Frost movies do not initialize it. */
         fun sharedRuntime(c: Context): GeckoRuntime = runtime ?: GeckoRuntime.create(c.applicationContext).also {
             // ad / tracker / miner scripts are what make embedded players stutter, so they are all blocked
             it.settings.contentBlocking.setAntiTracking(

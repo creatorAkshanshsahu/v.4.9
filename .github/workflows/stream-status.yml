@@ -1,0 +1,30 @@
+name: Live stream status
+on:
+  push:
+    branches: [arena/eac96ac3-v-4-9]
+    paths:
+      - '.github/stream-status-request.json'
+      - '.github/workflows/stream-status.yml'
+      - '.github/scripts/inspect-tg-player.py'
+      - '.github/scripts/inspect-tg-player.test.py'
+      - '.github/scripts/inspect-jjtv-player.py'
+      - '.github/scripts/inspect-jjtv-player.test.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check redaction and expiry helpers
+        run: |
+          python3 -B .github/scripts/inspect-tg-player.test.py
+          python3 -B .github/scripts/inspect-jjtv-player.test.py
+      - name: Check current TG source timing and manifest access
+        run: python3 -B .github/scripts/inspect-tg-player.py
+      - name: Check current JJTV source timing and manifest access
+        run: python3 -B .github/scripts/inspect-jjtv-player.py

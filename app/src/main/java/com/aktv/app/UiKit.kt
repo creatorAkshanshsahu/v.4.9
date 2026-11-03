@@ -10,24 +10,45 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import androidx.core.graphics.ColorUtils
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.palette.graphics.Palette
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.max
 
-/** Palette (Google TV style: neutral dark surfaces, white focus) + colour extraction from channel logos. */
+/** Edge-to-edge system-bar control for cinematic screens and full-screen playback. */
+internal object ImmersiveUi {
+    fun hide(window: Window) {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    fun show(window: Window) {
+        WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
+        WindowCompat.setDecorFitsSystemWindows(window, true)
+    }
+}
+
+/** AK TV cinema palette: ink-black surfaces, electric blue controls, cyan media cues and violet depth. */
 object Accent {
-    val ABYSS = 0xFF0E0F12.toInt()
-    val SURFACE = 0xFF25272D.toInt()
-    val SIGNAL = 0xFF8AB4F8.toInt()
-    val ION = 0xFF7FE7FF.toInt()
-    val INDIGO = 0xFF4B3BD6.toInt()
-    val DEEP = 0xFF1B1A6B.toInt()
-    val LIVE = 0xFFE8453C.toInt()
-    val TEXT = 0xFFE8EAED.toInt()
-    val DIM = 0xFFBDC1C6.toInt()
-    val FAINT = 0xFF80868B.toInt()
+    val ABYSS = 0xFF05070C.toInt()
+    val SURFACE = 0xFF111923.toInt()
+    val SIGNAL = 0xFF62E5D4.toInt()
+    val ION = 0xFF64D3E6.toInt()
+    val INDIGO = 0xFF8178F5.toInt()
+    val DEEP = 0xFF1D2431.toInt()
+    val LIVE = 0xFFF05E74.toInt()
+    val GOLD = 0xFFE7B969.toInt()
+    val TEXT = 0xFFF8F9FC.toInt()
+    val DIM = 0xFFB7BECA.toInt()
+    val FAINT = 0xFF818A99.toInt()
 
     /** Makes any logo colour usable as a tint: saturated, mid-light. Greys fall back to the brand blue. */
     fun normalize(c: Int?): Int {
@@ -74,7 +95,7 @@ object Ui {
      * List-row background driven by the view's own state: white when focused, soft grey when activated
      * (the row that is "playing" / "open"), [rest] otherwise. The framework switches it; no code runs per focus change.
      */
-    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0xFF2B2D33.toInt()) =
+    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0xFF213542.toInt()) =
         StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), pill(dp, Accent.TEXT, radiusDp))
             addState(intArrayOf(android.R.attr.state_activated), pill(dp, active, radiusDp))
