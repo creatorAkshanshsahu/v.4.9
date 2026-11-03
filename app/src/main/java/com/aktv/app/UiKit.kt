@@ -73,8 +73,24 @@ object Accent {
         if (c == null) return CRIMSON_BRIGHT
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
         if (hsl[1] < 0.18f) return CRIMSON_BRIGHT
-        val sampled = ColorUtils.HSLToColor(floatArrayOf(hsl[0], max(hsl[1], 0.65f), hsl[2].coerceIn(0.48f, 0.62f)))
-        return ColorUtils.blendARGB(CRIMSON, sampled, 0.28f)
+        val hue = projectHue(hsl[0])
+        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.62f), hsl[2].coerceIn(0.46f, 0.60f)))
+    }
+
+    /**
+     * Fold any hue onto the red arc (335..25 degrees) instead of blending toward it in RGB, which
+     * drags saturated blues through magenta. Greys are handled by the caller before this runs.
+     */
+    fun projectHue(hue: Float): Float {
+        val normalized = ((hue % 360f) + 360f) % 360f
+        return when {
+            normalized <= 25f -> normalized
+            normalized >= 335f -> normalized
+            // Warm half: fold 25..180 down onto the 25..0 edge.
+            normalized < 180f -> 25f - (normalized - 25f) / 155f * 25f
+            // Cool half: fold 180..335 up onto the 335..360 edge.
+            else -> 335f + (normalized - 180f) / 155f * 25f
+        }
     }
 
     /** A darker neighbouring crimson so the hero panel has depth instead of one flat colour. */
@@ -95,7 +111,8 @@ object Accent {
         for (ch in name.lowercase()) h = (h * 31 + ch.code) and 0x7fffffff
         // 0..1 spread across crimson -> rose -> warm wine, all within the red family.
         val spread = (h % 100) / 99f
-        val hue = if (spread < 0.5f) 348f + spread * 24f else 342f - (spread - 0.5f) * 30f
+        // Confine the palette to the red arc: 340..360 crimson-rose, 0..20 warm red.
+        val hue = if (spread < 0.55f) 340f + spread * 36f else (spread - 0.55f) * 44f
         val lightness = 0.34f + ((h / 100) % 12) / 100f
         return ColorUtils.HSLToColor(floatArrayOf((hue + 360f) % 360f, 0.62f, lightness))
     }

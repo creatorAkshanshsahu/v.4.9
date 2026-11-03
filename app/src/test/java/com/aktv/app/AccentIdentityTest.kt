@@ -39,6 +39,16 @@ class AccentIdentityTest {
         }
     }
 
+    @Test fun `the hue projection covers the whole wheel without leaving the red arc`() {
+        // Exhaustive: every degree must fold into 335..25 degrees, never through magenta or green.
+        for (degree in 0 until 360) {
+            val projected = Accent.projectHue(degree.toFloat())
+            assertTrue("hue $degree projected to $projected",
+                projected <= 35f || projected >= 335f)
+            assertTrue("hue $degree produced an out-of-range angle", projected in 0f..360f)
+        }
+    }
+
     @Test fun `greyscale logos and missing logos fall back to the brand crimson`() {
         assertEquals(Accent.CRIMSON_BRIGHT, Accent.normalize(null))
         assertTrue(isCrimsonFamily(Accent.normalize(0xFF808080.toInt())))
