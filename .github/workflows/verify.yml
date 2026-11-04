@@ -29,7 +29,9 @@ jobs:
       - name: Compile every variant and run the offline unit tests
         run: |
           set -o pipefail
-          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --console=plain 2>&1 | tail -80
+          # Keep the full log so a compiler error can be reported as an annotation, not only in this step.
+          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --console=plain 2>&1 \
+            | tee "$RUNNER_TEMP/aktv-gradle.log" | tail -80
       - name: Report deterministic tests
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
