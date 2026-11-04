@@ -81,12 +81,16 @@ internal object VodPreflight {
 
     private data class Answer(val code: Int, val contentType: String, val body: String)
 
-    private fun probe(source: FrostSource, timeoutMs: Long): Boolean = try {
-        val client = FrostHttp.client(source).newBuilder()
-            .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-            .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-            .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
-            .build()
+    private fun probe(source: FrostSource, timeoutMs: Long): Boolean {
+        val client = try {
+            FrostHttp.client(source).newBuilder()
+                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .callTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .build()
+        } catch (_: Exception) {
+            return false
+        }
         // A progressive file has no manifest to read: one short ranged answer is the whole check.
         if (source.format == VodFormat.MP4) return fetch(client, source.url, ranged = true)?.code in 200..299
         val manifest = fetch(client, source.url, ranged = false) ?: return false
@@ -95,9 +99,7 @@ internal object VodPreflight {
         val target = manifestTargets(source.format, source.url, manifest.body).firstOrNull() ?: return true
         // A signed segment that no longer answers means the manifest outlived its own content.
         val media = fetch(client, target, ranged = true) ?: return false
-        media.code in 200..299
-    } catch (_: Exception) {
-        false
+        return media.code in 200..299
     }
 
     private fun fetch(client: OkHttpClient, url: String, ranged: Boolean): Answer? = try {
