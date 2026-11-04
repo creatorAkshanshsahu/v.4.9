@@ -367,7 +367,7 @@ class MoviePlayerActivity : Activity() {
                         sources = ordered
                         message("Starting ${first?.label.orEmpty()}…", true)
                         nextSource()
-                        return@onSuccess
+                        return@fold
                     }
                     // The website moves past a dead source inside one page load. A native player would
                     // spend a full startup cycle on it, which is what makes the app need a second try.

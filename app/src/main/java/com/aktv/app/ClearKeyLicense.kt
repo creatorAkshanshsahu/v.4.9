@@ -36,9 +36,9 @@ class ClearKeyLicenseCallback(
     override fun executeKeyRequest(uuid: UUID, request: ExoMediaDrm.KeyRequest): ByteArray {
         if (uuid != C.CLEARKEY_UUID) throw IOException("Not a ClearKey key request")
         val builder = Request.Builder().url(url)
+        // Only the source's own headers are sent: this endpoint wants a plain GET, and Media3 1.3.1's
+        // key/request data is not a licence body that this provider could accept.
         headers.forEach { (name, value) -> builder.header(name, value) }
-        // The platform type can be null when Media3 creates a request without headers.
-        request.headers?.forEach { (name, value) -> builder.header(name, value) }
         client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("ClearKey key response HTTP ${response.code}")
             val body = response.body ?: throw IOException("ClearKey key response was empty")

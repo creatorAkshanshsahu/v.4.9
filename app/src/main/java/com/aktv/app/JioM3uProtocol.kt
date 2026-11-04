@@ -236,7 +236,8 @@ internal object JioM3uProtocol {
         val map = LinkedHashMap<String, ArrayList<Entry>>()
         entries.forEach { e ->
             val cat = e.category.ifBlank { "Other" }
-            map.getOrPut(cat) { ArrayList() }().add(e)
+            val bucket = map.getOrPut(cat) { ArrayList() }
+            bucket.add(e)
         }
         return map.map { it.key to it.value }
     }

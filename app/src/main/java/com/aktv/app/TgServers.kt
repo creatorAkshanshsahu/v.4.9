@@ -44,7 +44,7 @@ object TgServers {
     }
 
     /** Returns all channel entries from the JioTV m3u8 playlist, for building the UI catalogue. */
-    fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> = jioM3u.catalogue(fresh)
+    internal fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> = jioM3u.catalogue(fresh)
 
     fun invalidate(id: String, v2: Boolean = false) = resolver.invalidate(id, v2)
 
