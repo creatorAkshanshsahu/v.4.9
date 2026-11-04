@@ -18,7 +18,9 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       - uses: gradle/actions/setup-gradle@v3
-        with: { gradle-version: 8.9 }
+        with:
+          gradle-version: 8.9
+          cache-enabled: false
       - name: Verify the preserved playback contracts
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Compile every variant and run the offline unit tests
