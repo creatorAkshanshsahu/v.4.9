@@ -28,6 +28,9 @@ internal object JioM3uProtocol {
     const val SITE = "https://allinonereborn2.online"
     const val PLAYLIST = "$SITE/jiotv-m3u/jtv33.m3u8"
     const val UA_OVERRIDE = "@allinone_reborn"
+    /** Only the playlist's own host may supply the key document; no other origin is followed. */
+    val HOST: String = URI(SITE).host
+    const val MAX_KEY_BYTES = 64 * 1024
 
     data class Entry(
         val id: String,
@@ -123,8 +126,8 @@ internal object JioM3uProtocol {
         }
     } catch (_: Exception) { null }
 
-    /** Build a TgStream from an Entry, attaching ClearKey DRM when present. */
-    fun toTgStream(entry: Entry): TgStream {
+    /** Build a TgStream from an Entry, attaching ClearKey DRM (inline keys and/or a fetched key document). */
+    fun toTgStream(entry: Entry, keys: Map<String, String> = emptyMap()): TgStream {
         val type = when (entry.url.substringAfterLast('.', "").substringBefore('?').lowercase()) {
             "mpd" -> "dash"
             "m3u8" -> "hls"
@@ -135,7 +138,7 @@ internal object JioM3uProtocol {
         headers["Origin"] = SITE
         headers["Referer"] = "$SITE/"
 
-        val drm = buildDrm(entry)
+        val drm = buildDrm(entry, keys)
         return TgStream(
             label = entry.name,
             url = entry.url,
@@ -147,25 +150,85 @@ internal object JioM3uProtocol {
         )
     }
 
-    /** Convert a KODIPROP license_key into the app's ClearKey JSON shape. */
-    fun buildDrm(entry: Entry): JSONObject? {
-        if (entry.licenseKey.isNullOrBlank()) return null
-        val key = entry.licenseKey
-        return if (key.startsWith("http")) {
-            // URL-based license: store as licenseUrl for the player to fetch.
-            JSONObject().put("type", "clearkey").put("licenseUrl", key)
-        } else {
-            // Inline keyid:key — parse into the ClearKey pairs format.
-            val parts = key.split(",").map { it.trim() }.filter { it.contains(':') }
-            val keys = JSONArray()
-            parts.forEach { pair ->
-                val kid = pair.substringBefore(':').trim()
-                val k = pair.substringAfter(':').trim()
-                keys.put(JSONObject().put("kid", kid).put("k", k))
+    /**
+     * The key endpoint this playlist advertises for a channel, if it is an HTTPS URL on the playlist's
+     * own host. It returns the ClearKey document itself over GET, so it is a key source and not a
+     * Widevine licence endpoint.
+     */
+    fun licenseUrl(entry: Entry): String? {
+        val raw = entry.licenseKey?.trim().orEmpty()
+        if (!raw.startsWith("https://", true)) return null
+        return try {
+            val uri = URI(raw)
+            raw.takeIf {
+                uri.scheme.equals("https", true) && uri.userInfo == null && uri.host != null &&
+                    uri.host.equals(HOST, true) && uri.fragment == null
             }
-            if (keys.length() == 0) return null
-            JSONObject().put("type", "clearkey").put("keys", keys)
+        } catch (_: Exception) {
+            null
         }
+    }
+
+    /**
+     * Parse the provider's ClearKey document: `{"keys":[{"kty":"oct","k":"...","kid":"..."}]}`.
+     * Plain `kid:key` pairs and `{"keys":{"kid":"key"}}` are accepted too. Values must look like a
+     * 16-byte key/key id (32 hex digits or base64url); anything else is ignored rather than guessed.
+     */
+    fun parseKeys(body: String): Map<String, String> {
+        if (body.isBlank() || body.length > MAX_KEY_BYTES) return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        fun normalised(value: String?): String? {
+            val trimmed = value.orEmpty().trim()
+            return trimmed.takeIf { it.matches(Regex("[0-9a-fA-F]{32}")) || it.matches(Regex("[A-Za-z0-9_-]{16,88}")) }
+        }
+        fun pair(kid: String?, key: String?) {
+            val id = normalised(kid) ?: return
+            val k = normalised(key) ?: return
+            out[id] = k
+        }
+        val parsed = try { JSONObject(body) } catch (_: Exception) { null }
+        if (parsed != null) {
+            parsed.optJSONArray("keys")?.let { array ->
+                for (index in 0 until minOf(array.length(), 8)) {
+                    val item = array.optJSONObject(index) ?: continue
+                    pair(item.optString("kid", item.optString("keyId", "")), item.optString("k", item.optString("key", "")))
+                }
+            }
+            parsed.optJSONObject("keys")?.let { objectKeys ->
+                objectKeys.keys().forEach { kid -> pair(kid, objectKeys.optString(kid)) }
+            }
+            if (out.isEmpty()) pair(parsed.optString("kid", ""), parsed.optString("k", ""))
+            return out
+        }
+        body.trim().split(Regex("[,;\\s]+")).forEach { token ->
+            val key = token.substringAfter(':', "").trim()
+            if (key.isNotEmpty()) pair(token.substringBefore(':'), key)
+        }
+        return out
+    }
+
+    /** Convert the playlist's key material into the app's ClearKey JSON shape. */
+    fun buildDrm(entry: Entry, keys: Map<String, String> = emptyMap()): JSONObject? {
+        val pairs = LinkedHashMap<String, String>()
+        // Inline `keyid:key` (the SunNxt variant of this playlist).
+        entry.licenseKey?.takeUnless { it.startsWith("http", true) }?.let { inline ->
+            inline.split(",").map { it.trim() }.filter { it.contains(':') }.forEach {
+                val kid = it.substringBefore(':').trim()
+                val key = it.substringAfter(':').trim()
+                if (kid.isNotEmpty() && key.isNotEmpty()) pairs[kid] = key
+            }
+        }
+        keys.forEach { (kid, key) -> pairs[kid] = key }
+        val keyUrl = licenseUrl(entry)
+        if (pairs.isEmpty()) {
+            // No key material yet: keep the advertised endpoint so the player can ask for it itself.
+            return keyUrl?.let { JSONObject().put("type", "clearkey").put("licenseUrl", it) }
+        }
+        val array = JSONArray()
+        pairs.forEach { (kid, key) -> array.put(JSONObject().put("kid", kid).put("k", key)) }
+        val drm = JSONObject().put("type", "clearkey").put("keys", array)
+        keyUrl?.let { drm.put("licenseUrl", it) }
+        return drm
     }
 
     /** Group entries by category for the UI. */

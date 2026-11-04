@@ -1,3 +1,19 @@
+## 4.9.46: playlist ClearKey, Sony section and in-app updates
+
+The allinonereborn2.online playlist advertises its keys as a **URL** (`jtv-fetch/keyid.php?id=…`) that
+answers a plain `GET` with the ClearKey document. The native path only knew local ClearKey material or a
+Widevine licence, so those playlist channels were refused before the first frame. The resolver now reads
+that document (own host only, bounded, in memory), keeps the endpoint as a fallback `MediaDrmCallback`,
+and the JioTV tab gained a **Sony Live · Allinone** section plus the full playlist section. A refused
+playlist stream re-reads the playlist and its key document once.
+
+The same build starts movies and episodes on a source that has answered (`VodPreflight`, six candidates,
+four-second parallel probe) instead of on the first listed URL, and it installs its own updates from the
+project's GitHub release. Details and the one-time reinstall caveat caused by earlier CI signing keys:
+[playlist-first-attempt-and-updates-4.9.46.md](playlist-first-attempt-and-updates-4.9.46.md).
+
+---
+
 ## 4.9.21: user-confirmed TV baseline, UI rebuild and stable sports quality
 
 The user clarifies that the website could play channels while the APK failed, and now confirms **4.9.18 works on the TV for all channels**. The remaining complaint is recurring stutter on **Star Sports 1 Hindi HD**. Returned expired metadata was not a complete explanation of the website/APK mismatch, and missing TV decoding capability is not established.

@@ -15,8 +15,15 @@ package com.aktv.app
  *
  * Playback still runs on the existing native TG/GioTV ClearKey path: nothing here remaps a source,
  * invents a URL, or borrows another channel's credentials.
+ *
+ * The same name-matched shelf is also the new **Sony section of the playlist tab**, where the tiles come
+ * from the allinonereborn2.online M3U8 catalogue itself. There the stream, its ClearKey key document and
+ * its cookie all come from that playlist, so the section plays natively without the TG or GioTV lookup.
  */
 internal object LiveCollections {
+
+    /** Section heading used by the Live tab shelf and by the playlist tab's Sony section. */
+    const val SONY_TITLE = "Sony Live · Allinone"
 
     data class Spec(
         val title: String,
@@ -54,7 +61,7 @@ internal object LiveCollections {
     )
 
     val SONY = Spec(
-        title = "Sony Live",
+        title = SONY_TITLE,
         kicker = "SONY CHANNELS \u00b7 NATIVE CLEARKEY",
         order = PAGE_ORDER,
         matches = ::isSony

@@ -48,6 +48,9 @@ object TgServers {
 
     fun invalidate(id: String, v2: Boolean = false) = resolver.invalidate(id, v2)
 
+    /** Playlist channels share one cached playlist and key document; a refusal re-reads both. */
+    fun invalidateJio() = jioM3u.invalidate()
+
     /**
      * A remembered provider/source hint names the website that supplied it. Once a build points at a
      * different live site, an old JJTV hint no longer describes anything the app can reach, and the

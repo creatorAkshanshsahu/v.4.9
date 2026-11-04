@@ -1,11 +1,37 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+
+// A stable signing key is what lets an in-app update install over the previous build. The key itself is
+// a sideload key (this app is distributed as an APK), not a Play Store upload key; the password is a
+// build property so a fork can supply its own. Without the file the build falls back to the local debug
+// key, which still produces an installable APK but cannot update an existing installation in place.
+val updateKeystore = rootProject.file("keystore/aktv-update.p12")
+val updateStorePassword = providers.gradleProperty("aktvUpdateStorePassword").orNull
+    ?: System.getenv("AKTV_UPDATE_STORE_PASSWORD")
+    ?: "aktv-update-key"
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 62; versionName = "4.9.45"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 63; versionName = "4.9.46"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
     }
-    buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
+    signingConfigs {
+        create("update") {
+            if (updateKeystore.exists()) {
+                storeFile = updateKeystore
+                storePassword = updateStorePassword
+                keyAlias = "aktv"
+                keyPassword = updateStorePassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            // Same key for every CI build, so "Update" in the app replaces the installed copy.
+            signingConfig = if (updateKeystore.exists()) signingConfigs.getByName("update") else signingConfigs.getByName("debug")
+        }
+    }
     lint { abortOnError = false; checkReleaseBuilds = false }
     testOptions {
         unitTests.isIncludeAndroidResources = true

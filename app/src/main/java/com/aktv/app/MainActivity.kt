@@ -149,6 +149,9 @@ class MainActivity : AppCompatActivity() {
     private var drmProbeRunning = false
     private var drmProbeStatus = "ClearKey self-test: not run (MENU > Playback details > Check DRM)."
     private val appVersion by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" }
+    // In-app update (GitHub release). One check and one download at a time, never blocking playback.
+    private var updateChecking = false
+    private var updateDownloading = false
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
     private var picture: NativePictureController? = null
@@ -416,6 +419,8 @@ class MainActivity : AppCompatActivity() {
         loadHomeTrending()
         // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
+        // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
+        ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         findViewById<TextView>(R.id.navVersion).text = appVersion
         intro.start()
     }
@@ -499,7 +504,8 @@ class MainActivity : AppCompatActivity() {
             val sonyLive = tab == 0 && LiveCollections.channels(LiveCollections.SONY, all).isNotEmpty()
             text = when (tab) {
                 0 -> if (sonyLive) "LIVE · SONY SHELF INCLUDED" else "LIVE, RIGHT NOW"
-                1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV · 80+ CHANNELS"; 3 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
+                1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · SONY SECTION · NATIVE CLEARKEY"
+                3 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
             }
             setTextColor(sectionAccent())
         }
@@ -767,9 +773,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The JioTV tab is also the playlist section: the same M3U8 catalogue that supplies these tiles
+     * supplies their native stream, ClearKey document and cookie, so a tile here never borrows another
+     * provider's channel. The Sony page's tiles are matched by channel name against that catalogue and
+     * shown as their own section above the full playlist.
+     */
     private fun jioRows(channels: List<Channel>): List<Row> {
         return buildList {
-            if (channels.isNotEmpty()) add(Row("JioTV Channels", featuredChannels(channels).map { Tile.Ch(it) }))
+            val sony = LiveCollections.channels(LiveCollections.SONY, channels)
+            if (sony.isNotEmpty()) add(Row(LiveCollections.SONY_TITLE, sony.map { Tile.Ch(it) }))
+            if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
@@ -1469,15 +1483,46 @@ class MainActivity : AppCompatActivity() {
             } else {
                 val type = drm.optString("type")
                 val licenseUrl = drm.optString("licenseUrl", drm.optString("license_url"))
-                if (!type.equals("widevine", true) || !licenseUrl.startsWith("https://"))
-                    throw IOException("TG TV did not provide usable DRM for this source")
-                val headers = HashMap<String, String>()
-                drm.optJSONObject("headers")?.let { h -> h.keys().forEach { headers[it] = h.optString(it) } }
-                item.setDrmConfiguration(MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
-                    .setLicenseUri(licenseUrl).setLicenseRequestHeaders(headers).build())
+                when {
+                    // Playlist ClearKey: the provider serves the key document itself over GET. No
+                    // Widevine licence is invented for it and no key is stored on the device.
+                    type.contains("clear", true) && licenseUrl.startsWith("https://") -> {
+                        val manager = DefaultDrmSessionManager.Builder()
+                            .setUuidAndExoMediaDrmProvider(C.CLEARKEY_UUID,
+                                trace?.let { ObservedMediaDrm.provider(it) } ?: FrameworkMediaDrm.DEFAULT_PROVIDER)
+                            .setMultiSession(true).setPlayClearSamplesWithoutKeys(true)
+                            .build(ClearKeyLicenseCallback(licenseUrl, keyRequestHeaders(source)))
+                        factory.setDrmSessionManagerProvider { manager }
+                    }
+                    !type.equals("widevine", true) || !licenseUrl.startsWith("https://") ->
+                        throw IOException("TG TV did not provide usable DRM for this source")
+                    else -> {
+                        val headers = HashMap<String, String>()
+                        drm.optJSONObject("headers")?.let { h -> h.keys().forEach { headers[it] = h.optString(it) } }
+                        item.setDrmConfiguration(MediaItem.DrmConfiguration.Builder(C.WIDEVINE_UUID)
+                            .setLicenseUri(licenseUrl).setLicenseRequestHeaders(headers).build())
+                    }
+                }
             }
         }
         return factory.createMediaSource(item.build())
+    }
+
+    /**
+     * Headers for the playlist's key document: the same browser-style User-Agent and site origin the
+     * playlist itself was read with. Channel cookies are deliberately not attached - the key endpoint
+     * lives on the playlist host, not on the CDN that issued that cookie.
+     */
+    private fun keyRequestHeaders(source: TgStream): Map<String, String> {
+        val headers = LinkedHashMap<String, String>()
+        source.headers.forEach { (name, value) ->
+            if (!name.equals("Cookie", true) && !name.equals("Origin", true) && !name.equals("Referer", true))
+                headers[name] = value
+        }
+        headers["Origin"] = source.requestOrigin.trimEnd('/')
+        headers["Referer"] = source.requestOrigin.trimEnd('/') + "/"
+        if (headers.keys.none { it.equals("User-Agent", true) }) headers["User-Agent"] = TgHttp.USER_AGENT
+        return headers
     }
 
     private fun startNative() {
@@ -1490,14 +1535,22 @@ class MainActivity : AppCompatActivity() {
             "${providerMode(channel)} · $sourceLabel · server ${serverIdx + 1} of ${nativeSources.size}" +
             (if (nativeSources.size > 1) "   ·   SOURCE chooses server · LEFT cycles" else "") + (probeStatus?.let { "   ·   $it" } ?: "")
         infoNext.visibility = View.VISIBLE
+        // A local copy keeps the null check stable for the three-way DRM classification below.
+        val sourceDrm = source.drm
         val trace = diagnostics.begin(
             if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV
             else if (source.requestOrigin == JioM3uResolver.SITE) PlaybackDiagnostics.Provider.JIOM3U
             else PlaybackDiagnostics.Provider.TG,
             when (source.type) { "hls" -> PlaybackDiagnostics.Media.HLS; "mp4" -> PlaybackDiagnostics.Media.FILE; else -> PlaybackDiagnostics.Media.DASH },
-            when { source.drm == null -> PlaybackDiagnostics.Drm.NONE
-                ClearKey.license(source.drm) != null -> PlaybackDiagnostics.Drm.CLEARKEY
-                else -> PlaybackDiagnostics.Drm.WIDEVINE },
+            when {
+                sourceDrm == null -> PlaybackDiagnostics.Drm.NONE
+                ClearKey.license(sourceDrm) != null -> PlaybackDiagnostics.Drm.CLEARKEY
+                // A playlist ClearKey endpoint (key document over GET) is ClearKey, not Widevine.
+                sourceDrm.optString("type").contains("clear", true) &&
+                    sourceDrm.optString("licenseUrl", sourceDrm.optString("license_url")).startsWith("https://") ->
+                    PlaybackDiagnostics.Drm.CLEARKEY
+                else -> PlaybackDiagnostics.Drm.WIDEVINE
+            },
             source.omitReferrer, compatiblePlayback)
         diagnostics.metadataStatus(probeStatus)
         try { attach(nativeMediaSource(source, trace), trace) }
@@ -1794,7 +1847,11 @@ class MainActivity : AppCompatActivity() {
         recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == provider })
         val token = ++playToken
         resolveJob?.cancel(true); releasePlayer()
-        diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
+        diagnostics.resolving(when (provider) {
+            LiveProvider.JJTV -> PlaybackDiagnostics.Provider.JJTV
+            LiveProvider.JIOM3U -> PlaybackDiagnostics.Provider.JIOM3U
+            else -> PlaybackDiagnostics.Provider.TG
+        })
         spinner.visibility = View.GONE
         infoNext.text = "${providerMode(ch)} · ${providerName(provider)}"
         infoNext.visibility = View.VISIBLE
@@ -1907,7 +1964,8 @@ class MainActivity : AppCompatActivity() {
             }
             is PlaybackRecovery.Action.MoreSources -> loadMoreNative(ch, action.fresh || nativePassFresh, reason)
             PlaybackRecovery.Action.Refresh -> {
-                TgServers.invalidate(ch.id, ch.v2)
+                // A playlist channel's token and key document both live behind the playlist lookup.
+                if (ch.jio) TgServers.invalidateJio() else TgServers.invalidate(ch.id, ch.v2)
                 resolveAndStart(ch, fresh = true)
             }
             PlaybackRecovery.Action.Unavailable -> fail("$reason. Hold OK to reload or choose another channel.")
@@ -2580,6 +2638,107 @@ class MainActivity : AppCompatActivity() {
         searchAdapter.notifyDataSetChanged(); searchResults.scrollToPosition(0)
         renderCounts(q)
     }
+    // ---------- in-app update ----------
+
+    /**
+     * The published release is a rolling GitHub tag; the app compares its `versionCode` and the SHA-256
+     * of the file it last installed. A push that publishes a new build therefore reaches an installed
+     * app on its own, and a tap on "Update" installs it over this one.
+     */
+    private fun checkForUpdates(interactive: Boolean) {
+        if (updateChecking || updateDownloading) return
+        val last = prefs.getLong("update_checked_at", 0L)
+        if (!interactive && System.currentTimeMillis() - last < UpdateConfig.CHECK_INTERVAL_MS) return
+        updateChecking = true
+        io.execute {
+            var reachable = true
+            val release = try { Updater.check(this) } catch (_: Exception) { reachable = false; null }
+            runOnUiThread {
+                updateChecking = false
+                prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
+                if (release != null) promptUpdate(release)
+                else if (interactive) {
+                    Toast.makeText(this, if (reachable) "AK TV $appVersion is the latest published build." else
+                        "Couldn't reach the update service. Check the connection and try again.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun promptUpdate(release: UpdateRelease) {
+        if (isFinishing || isDestroyed) return
+        AlertDialog.Builder(this)
+            .setTitle("Update available · ${release.versionName.ifBlank { "code ${release.versionCode}" }}")
+            .setMessage(buildString {
+                append("A newer AK TV build is published on GitHub.\n")
+                append("Installed: $appVersion\n")
+                append("New build: ${release.label}\n")
+                if (release.notes.isNotBlank()) append("\n${release.notes.take(800)}\n")
+                append("\nIt installs over this app, so favourites, channels and movie progress stay.")
+            })
+            .setPositiveButton("Download and install") { _, _ -> startUpdateDownload(release) }
+            .setNegativeButton("Later", null)
+            .show()
+    }
+
+    private fun startUpdateDownload(release: UpdateRelease) {
+        if (updateDownloading || isFinishing) return
+        updateDownloading = true
+        val dialogProgress = android.app.ProgressDialog(this).apply {
+            setTitle("Downloading AK TV update")
+            setMessage(release.versionName.ifBlank { "code ${release.versionCode}" })
+            setProgressStyle(android.app.ProgressDialog.STYLE_HORIZONTAL)
+            max = 100
+            progress = 0
+            isIndeterminate = false
+            setCancelable(false)
+            show()
+        }
+        io.execute {
+            try {
+                val file = Updater.download(this, release, { percent ->
+                    runOnUiThread { if (dialogProgress.isShowing) dialogProgress.progress = percent }
+                }, { false })
+                runOnUiThread {
+                    updateDownloading = false
+                    dialogProgress.dismiss()
+                    val problem = Updater.verifyPackage(this, file, release)
+                    if (problem != null) {
+                        Toast.makeText(this, problem, Toast.LENGTH_LONG).show()
+                        return@runOnUiThread
+                    }
+                    if (Updater.signatureMismatch(this, file)) {
+                        AlertDialog.Builder(this)
+                            .setTitle("One-time reinstall needed")
+                            .setMessage("This build was signed with a different key than the copy installed now, so Android cannot install it over the old app. Uninstall AK TV once and install this download; every later update installs itself.")
+                            .setPositiveButton("Install anyway") { _, _ -> Updater.install(this, file) }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                        return@runOnUiThread
+                    }
+                    if (!Updater.canInstall(this)) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Allow AK TV to install updates")
+                            .setMessage("Android asks for this permission once. Enable it, then choose Update again.")
+                            .setPositiveButton("Open settings") { _, _ -> Updater.openInstallSettings(this) }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                        return@runOnUiThread
+                    }
+                    prefs.edit().putString("update_installed_sha", release.sha256)
+                        .putLong("update_installed_code", release.versionCode).apply()
+                    Updater.install(this, file)
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    updateDownloading = false
+                    dialogProgress.dismiss()
+                    Toast.makeText(this, "Update failed: ${error.message?.take(140) ?: "network error"}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     private fun openSearch() {
         if (searchShown || layer.visibility == View.VISIBLE || intro.visibility == View.VISIBLE) return
         searchShown = true; searchScope = tab; searchBuf.setLength(0); renderQuery(); updateResults()

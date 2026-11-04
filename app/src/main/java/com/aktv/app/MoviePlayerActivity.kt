@@ -77,6 +77,8 @@ class MoviePlayerActivity : Activity() {
     private var currentSource: FrostSource? = null
     private val recovery = VodRecovery()
     private val sourceRecovery = VodStartupPolicy()
+    /** One probe per provider per playback session; retries reuse the order it produced. */
+    private val probed = HashSet<FrostProvider>()
     private val softwareRetried = HashSet<FrostProvider>()
     private var compatible = false
     private var diagnostics = PlaybackDiagnostics()
@@ -330,7 +332,7 @@ class MoviePlayerActivity : Activity() {
 
     private fun begin(nextProvider: FrostProvider, selected: FrostSource? = null) {
         captureProgress()
-        recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); diagnostics = PlaybackDiagnostics()
+        recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); probed.clear(); diagnostics = PlaybackDiagnostics()
         failed = false; lastFailure = ""; compatible = false; startupAt = SystemClock.elapsedRealtime()
         if (selected == null) resolve(nextProvider)
         else {
@@ -356,8 +358,28 @@ class MoviePlayerActivity : Activity() {
                 result.fold(onSuccess = { list ->
                     val remembered = prefs.getString("vod_source_${request.progressKey}", null)
                     val favored = preferred ?: remembered?.takeUnless { it == avoidIdentity }
-                    sources = VodSourceOrder.prioritize(list, favored, avoidIdentity)
-                    nextSource()
+                    val ordered = VodSourceOrder.prioritize(list, favored, avoidIdentity)
+                    val first = ordered.firstOrNull()
+                    val rememberedFirst = preferred == null && first != null && first.identity == favored
+                    if (rememberedFirst || !probed.add(nextProvider)) {
+                        // Either the source that played last time is first again, or this provider was
+                        // already probed in this session: start immediately.
+                        sources = ordered
+                        message("Starting ${first?.label.orEmpty()}…", true)
+                        nextSource()
+                        return@onSuccess
+                    }
+                    // The website moves past a dead source inside one page load. A native player would
+                    // spend a full startup cycle on it, which is what makes the app need a second try.
+                    message("Checking native sources · ${minOf(ordered.size, VodPreflight.MAX_CANDIDATES)} of ${ordered.size}…", true)
+                    io.submit {
+                        val reachable = try { VodPreflight.verify(ordered) } catch (_: Exception) { emptySet() }
+                        ui.post {
+                            if (!foreground || token != generation || request != title) return@post
+                            sources = VodPreflight.rank(ordered, reachable)
+                            nextSource()
+                        }
+                    }
                 }, onFailure = { error ->
                     diagnostics.metadataFailed(PlaybackProblems.from(error))
                     val problem = error as? FrostResolveException
