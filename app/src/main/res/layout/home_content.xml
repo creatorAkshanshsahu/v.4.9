@@ -59,6 +59,7 @@
                     android:contentDescription="AK TV logo"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
                 <TextView android:id="@+id/phoneV2" style="@style/Widget.AKTV.PhonePill" android:text="Always on"/>
+                <TextView android:id="@+id/phoneJio" style="@style/Widget.AKTV.PhonePill" android:text="JioTV"/>
                 <TextView android:id="@+id/phoneMovies" style="@style/Widget.AKTV.PhonePill" android:text="Movies"/>
                 <TextView android:id="@+id/phoneSeries" style="@style/Widget.AKTV.PhonePill" android:text="Series"/>
                 <TextView android:id="@+id/phoneSearch" style="@style/Widget.AKTV.PhonePill" android:text="Search"/>
@@ -112,9 +113,11 @@
         <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live" android:drawableTop="@drawable/ic_nav_live"
             android:nextFocusDown="@id/segV2" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/segV2" style="@style/Widget.AKTV.RailItem" android:text="Always on" android:drawableTop="@drawable/ic_nav_v2"
-            android:nextFocusUp="@id/segLive" android:nextFocusDown="@id/segSites" android:nextFocusRight="@id/rows"/>
+            android:nextFocusUp="@id/segLive" android:nextFocusDown="@id/segJio" android:nextFocusRight="@id/rows"/>
+        <TextView android:id="@+id/segJio" style="@style/Widget.AKTV.RailItem" android:text="JioTV" android:drawableTop="@drawable/ic_nav_jio"
+            android:nextFocusUp="@id/segV2" android:nextFocusDown="@id/segSites" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/segSites" style="@style/Widget.AKTV.RailItem" android:text="Movies" android:drawableTop="@drawable/ic_nav_movies"
-            android:nextFocusUp="@id/segV2" android:nextFocusDown="@id/segSeries" android:nextFocusRight="@id/rows"/>
+            android:nextFocusUp="@id/segJio" android:nextFocusDown="@id/segSeries" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/segSeries" style="@style/Widget.AKTV.RailItem" android:text="Series" android:drawableTop="@drawable/ic_nav_series"
             android:nextFocusUp="@id/segSites" android:nextFocusDown="@id/searchBtn" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"

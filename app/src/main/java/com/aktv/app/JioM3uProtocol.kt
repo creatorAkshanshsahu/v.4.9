@@ -1,0 +1,179 @@
+package com.aktv.app
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.net.URI
+
+/**
+ * Static data contract for the allinonereborn2.online JioTV m3u8 playlist.
+ *
+ * The playlist is a standard M3U8 with per-channel blocks:
+ *
+ *   #EXTINF:-1 tvg-id="143" group-title="English" tvg-logo="…",CNBC TV18 Prime
+ *   #KODIPROP:inputstream.adaptive.license_type=clearkey
+ *   #KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=143
+ *   #EXTVLCOPT:http-user-agent=@allinone_reborn
+ *   #EXTHTTP:{"cookie":"__hdnea__=st=…"}
+ *   https://allinonereborn2.online/jiotv-m3u/jtv1.mpd?id=143
+ *
+ * Three transport variants appear:
+ *  1. JioTV DASH  — license_key is a URL, cookie + UA override required
+ *  2. SunNxt DASH — license_key is inline `keyid:key`, no cookie
+ *  3. Local HLS   — no DRM, plain m3u8 URL
+ *
+ * No remote JavaScript, adverts or embeds are executed.
+ */
+internal object JioM3uProtocol {
+
+    const val SITE = "https://allinonereborn2.online"
+    const val PLAYLIST = "$SITE/jiotv-m3u/jtv33.m3u8"
+    const val UA_OVERRIDE = "@allinone_reborn"
+
+    data class Entry(
+        val id: String,
+        val name: String,
+        val category: String,
+        val logo: String,
+        val url: String,
+        val licenseKey: String?,       // raw KODIPROP license_key value (URL or keyid:key)
+        val licenseType: String,       // "clearkey" or ""
+        val userAgent: String?,        // EXTVLCOPT override or null
+        val cookie: String?            // EXTHTTP cookie or null
+    )
+
+    // #EXTINF:-1 tvg-id="143" group-title="English" tvg-logo="…",CNBC TV18 Prime
+    private val extinf = Regex(
+        """^#EXTINF:.*tvg-id="(?<id>[^"]*)"(?:\s+group-title="(?<cat>[^"]*)")?(?:\s+tvg-logo="(?<logo>[^"]*)")?\s*,(?<name>.+)$""",
+        RegexOption.IGNORE_CASE
+    )
+    // Also matches entries with tvg-name instead of comma-separated name
+    private val extinfNamed = Regex(
+        """^#EXTINF:.*tvg-name="(?<name>[^"]*)"(?:\s+group-title="(?<cat>[^"]*)")?(?:\s+tvg-logo="(?<logo>[^"]*)")?\s*,?(?<id>[^"\s]*)\s*$""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val kodiLicenseType = Regex(
+        """^#KODIPROP:inputstream\.adaptive\.license_type=(?<val>\S+)\s*$""", RegexOption.IGNORE_CASE
+    )
+    private val kodiLicenseKey = Regex(
+        """^#KODIPROP:inputstream\.adaptive\.license_key=(?<val>\S+)\s*$""", RegexOption.IGNORE_CASE
+    )
+    private val extvlcUserAgent = Regex(
+        """^#EXTVLCOPT:http-user-agent=(?<val>\S+)\s*$""", RegexOption.IGNORE_CASE
+    )
+    private val extHttpCookie = Regex(
+        """^#EXTHTTP:\{"cookie":"(?<val>[^"]*)"\}\s*$""", RegexOption.IGNORE_CASE
+    )
+
+    /** A media URL line: starts with http and is not a comment or directive. */
+    private val mediaUrl = Regex("""^https?://\S+$""")
+
+    fun parse(body: String): List<Entry> {
+        val lines = body.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+        val entries = ArrayList<Entry>(200)
+        var i = 0
+        while (i < lines.size) {
+            val line = lines[i]
+            val ext = parseExtinf(line) ?: run { i++; continue }
+            val (id, name, category, logo) = ext
+
+            var licenseKey: String? = null
+            var licenseType = ""
+            var userAgent: String? = null
+            var cookie: String? = null
+            var url: String? = null
+
+            var j = i + 1
+            while (j < lines.size && !mediaUrl.matches(lines[j])) {
+                val l = lines[j]
+                kodiLicenseType.matchEntire(l)?.let { licenseType = it.groupValues[1] }
+                kodiLicenseKey.matchEntire(l)?.let { licenseKey = it.groupValues[1] }
+                extvlcUserAgent.matchEntire(l)?.let { userAgent = it.groupValues[1] }
+                extHttpCookie.matchEntire(l)?.let { cookie = it.groupValues[1] }
+                j++
+            }
+            if (j < lines.size && mediaUrl.matches(lines[j])) {
+                url = resolveUrl(lines[j], PLAYLIST)
+                j++
+            }
+            if (url != null && id.isNotBlank()) {
+                entries.add(Entry(id, name, category, logo, url, licenseKey, licenseType, userAgent, cookie))
+            }
+            i = j
+        }
+        return entries
+    }
+
+    private fun parseExtinf(line: String): Quad? {
+        extinf.matchEntire(line)?.let { m ->
+            return Quad(m.groupValues[1], m.groupValues[4].trim(), m.groupValues[2], m.groupValues[3])
+        }
+        extinfNamed.matchEntire(line)?.let { m ->
+            return Quad(m.groupValues[3].trim(), m.groupValues[1], m.groupValues[2], m.groupValues[4])
+        }
+        return null
+    }
+
+    private data class Quad(val id: String, val name: String, val category: String, val logo: String)
+
+    private fun resolveUrl(raw: String, page: String): String? = try {
+        URI(page).resolve(raw).let { uri ->
+            uri.toASCIIString().takeIf { uri.scheme in listOf("https", "http") && !uri.host.isNullOrBlank() }
+        }
+    } catch (_: Exception) { null }
+
+    /** Build a TgStream from an Entry, attaching ClearKey DRM when present. */
+    fun toTgStream(entry: Entry): TgStream {
+        val type = when (entry.url.substringAfterLast('.', "").substringBefore('?').lowercase()) {
+            "mpd" -> "dash"
+            "m3u8" -> "hls"
+            else -> "dash"
+        }
+        val headers = linkedMapOf<String, String>()
+        entry.userAgent?.let { headers["User-Agent"] = it }
+        headers["Origin"] = SITE
+        headers["Referer"] = "$SITE/"
+
+        val drm = buildDrm(entry)
+        return TgStream(
+            label = entry.name,
+            url = entry.url,
+            type = type,
+            drm = drm,
+            headers = headers,
+            cookie = entry.cookie.orEmpty(),
+            requestOrigin = SITE
+        )
+    }
+
+    /** Convert a KODIPROP license_key into the app's ClearKey JSON shape. */
+    fun buildDrm(entry: Entry): JSONObject? {
+        if (entry.licenseKey.isNullOrBlank()) return null
+        val key = entry.licenseKey
+        return if (key.startsWith("http")) {
+            // URL-based license: store as licenseUrl for the player to fetch.
+            JSONObject().put("type", "clearkey").put("licenseUrl", key)
+        } else {
+            // Inline keyid:key — parse into the ClearKey pairs format.
+            val parts = key.split(",").map { it.trim() }.filter { it.contains(':') }
+            val keys = JSONArray()
+            parts.forEach { pair ->
+                val kid = pair.substringBefore(':').trim()
+                val k = pair.substringAfter(':').trim()
+                keys.put(JSONObject().put("kid", kid).put("k", k))
+            }
+            if (keys.length() == 0) return null
+            JSONObject().put("type", "clearkey").put("keys", keys)
+        }
+    }
+
+    /** Group entries by category for the UI. */
+    fun categories(entries: List<Entry>): List<Pair<String, List<Entry>>> {
+        val map = LinkedHashMap<String, ArrayList<Entry>>()
+        entries.forEach { e ->
+            val cat = e.category.ifBlank { "Other" }
+            map.getOrPut(cat) { ArrayList() }().add(e)
+        }
+        return map.map { it.key to it.value }
+    }
+}

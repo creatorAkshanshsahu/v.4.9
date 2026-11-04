@@ -6,10 +6,15 @@ internal object ChannelProviderOrder {
     fun playbackOrder(
         channelId: String,
         v2: Boolean,
+        jio: Boolean,
         rememberedWebsite: String?,
         requested: LiveProvider? = null
-    ): List<LiveProvider> = if (v2) listOf(LiveProvider.TG)
-        else requested?.let { listOf(it) } ?: order(channelId, v2, rememberedWebsite)
+    ): List<LiveProvider> = when {
+        v2 -> listOf(LiveProvider.TG)
+        jio -> requested?.let { listOf(it) } ?: listOf(LiveProvider.JIOM3U) +
+            LiveProviders.order(v2, rememberedWebsite, null).filter { it != LiveProvider.JIOM3U }
+        else -> requested?.let { listOf(it) } ?: order(channelId, v2, rememberedWebsite)
+    }
 
     fun order(
         channelId: String,

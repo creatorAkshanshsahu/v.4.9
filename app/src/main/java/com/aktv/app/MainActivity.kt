@@ -57,8 +57,8 @@ class ApiException(val code: Int) : IOException("HTTP $code")
 
 class MainActivity : AppCompatActivity() {
     /** V1 = live TV, v2 = the 24/7 catalogue. [key] is unique across both, so favourites and glow colours never collide. */
-    data class Channel(val id: String, val name: String, val category: String, val logo: String, val v2: Boolean = false) {
-        val key: String get() = if (v2) "v2:$id" else id
+    data class Channel(val id: String, val name: String, val category: String, val logo: String, val v2: Boolean = false, val jio: Boolean = false) {
+        val key: String get() = if (v2) "v2:$id" else if (jio) "jio:$id" else id
     }
     sealed class Tile {
         data class Ch(val c: Channel) : Tile()
@@ -88,15 +88,15 @@ class MainActivity : AppCompatActivity() {
     private val fRegular by lazy { ResourcesCompat.getFont(this, R.font.sora_regular) ?: Typeface.DEFAULT }
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
 
-    private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var shown = listOf<Channel>()
-    private var v1CatalogLoaded = false; private var v2CatalogLoaded = false
+    private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
+    private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
     private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
     private var favs = setOf<String>(); private var heroTile: Tile? = null
     private val accents = HashMap<String, Int>()
     private var tab = 0; private var current = -1
     private var player: ExoPlayer? = null
-    private var lastRefresh = 0L; private var v1Msg = "Loading channels…"
+    private var lastRefresh = 0L; private var v1Msg = "Loading channels…"; private var jioMsg = "Loading JioTV channels…"
 
     // Only the native player owns live TV playback. Resolve jobs are cancelled/guarded when zapping.
     private var playToken = 0
@@ -166,11 +166,11 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
-    private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
-    private val segs by lazy { listOf(segLive, segV2, segSites, segSeries) }   // TV rail: Live, Always on, Movies, Series
+    private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segJio: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
+    private val segs by lazy { listOf(segLive, segV2, segJio, segSites, segSeries) }   // TV rail: Live, Always on, JioTV, Movies, Series
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
-    private val segBgs by lazy { List(4) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
-    private val phoneSegBgs by lazy { List(5) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
+    private val segBgs by lazy { List(5) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
+    private val phoneSegBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
@@ -221,9 +221,9 @@ class MainActivity : AppCompatActivity() {
         loadChannelPlaybackResults()
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
-        segLive = findViewById(R.id.segLive); segV2 = findViewById(R.id.segV2); segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
+        segLive = findViewById(R.id.segLive); segV2 = findViewById(R.id.segV2); segJio = findViewById(R.id.segJio); segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
         searchBtn = findViewById(R.id.searchBtn)
-        phoneSegs = listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
+        phoneSegs = listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneJio, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
         heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
@@ -281,6 +281,7 @@ class MainActivity : AppCompatActivity() {
         // Use selective translucent panels, not blur/backdrop filters; this stays cheap on 32-bit TVs.
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
+        findViewById<TextView>(R.id.segJio).background = segBgs[2]
         heroOrb.background = orbBg
         infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
             intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
@@ -343,7 +344,7 @@ class MainActivity : AppCompatActivity() {
             tv.setOnClickListener { switchTab(i) }
             tv.setOnFocusChangeListener { _, _ -> styleSegs() }
         }
-        phoneSearchBtn.background = phoneSegBgs[4]
+        phoneSearchBtn.background = phoneSegBgs[5]
         phoneSearchBtn.setOnClickListener { openSearch() }
         phoneSearchBtn.setOnFocusChangeListener { _, _ -> styleSegs() }
 
@@ -467,7 +468,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun layoutHero() {
         val dm = resources.displayMetrics
-        HomeChrome.apply(findViewById(R.id.home), dm.widthPixels, dm.heightPixels, dp, tab >= 2)
+        HomeChrome.apply(findViewById(R.id.home), dm.widthPixels, dm.heightPixels, dp, tab >= 3)
         val searchWidth = minOf(340f, dm.widthPixels / dp * 0.43f)
         findViewById<View>(R.id.searchInputColumn).layoutParams.width = (searchWidth * dp).toInt()
         findViewById<View>(R.id.home).requestLayout()
@@ -486,24 +487,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun styleSegs() {
         searchBtn.text = "Search"
-        searchBtn.contentDescription = when (tab) { 2 -> "Search movies"; 3 -> "Search series"; else -> "Search channels" }
+        searchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tab == i) }
         navStyle(searchBtn, searchBg, searchBtn.isFocused, false)
         phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tab == i) }
-        phoneSearchBtn.contentDescription = when (tab) { 2 -> "Search movies"; 3 -> "Search series"; else -> "Search channels" }
-        navStyle(phoneSearchBtn, phoneSegBgs[4], phoneSearchBtn.isFocused, false)
-        findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "Movies"; else -> "Series" }
+        phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
+        navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)
+        findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; else -> "Series" }
         findViewById<TextView>(R.id.sectionKicker).apply {
             // The curated Sony shelf is the newest part of Live TV, so name it in the header.
             val sonyLive = tab == 0 && LiveCollections.channels(LiveCollections.SONY, all).isNotEmpty()
             text = when (tab) {
                 0 -> if (sonyLive) "LIVE · SONY SHELF INCLUDED" else "LIVE, RIGHT NOW"
-                1 -> "PLAY ANYTIME · 24/7"; 2 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
+                1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV · 80+ CHANNELS"; 3 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
             }
             setTextColor(sectionAccent())
         }
-        val count = when (tab) { 0 -> all.size; 1 -> allV2.size; else -> vodRows[tab - 2].sumOf { it.tiles.size } }
-        findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 2) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
+        val count = when (tab) { 0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; else -> vodRows[tab - 3].sumOf { it.tiles.size } }
+        findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 3) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
 
     /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
@@ -634,8 +635,9 @@ class MainActivity : AppCompatActivity() {
     }
     private fun updateStatus() {
         val msg = when { tab == 0 && all.isEmpty() -> v1Msg; tab == 1 && allV2.isEmpty() -> "Loading 24/7 channels…"
-            tab >= 2 && vodRows[tab - 2].isEmpty() -> {
-                val idx = tab - 2; val w = if (tab == 3) "series" else "movies"
+            tab == 2 && allJio.isEmpty() -> jioMsg
+            tab >= 3 && vodRows[tab - 3].isEmpty() -> {
+                val idx = tab - 3; val w = if (tab == 4) "series" else "movies"
                 if (vodLoading[idx]) "Loading $w…"
                 else vodError[idx]?.let { "Couldn't load $w ($it). Select this tab again to retry." }
                     ?: "Couldn't load $w. Select this tab again to retry."
@@ -687,9 +689,38 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { applyV2(list) }
             } catch (_: Exception) {}
         }
+        loadJioChannels()
     }
 
-    private fun pool() = if (tab == 1) allV2 else all
+    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; else -> all }
+
+    /** Loads the JioTV m3u8 playlist and builds a channel catalogue from it. */
+    private fun loadJioChannels() {
+        if (jioCatalogLoaded) return
+        jioMsg = "Loading JioTV channels…"; updateStatus()
+        io.execute {
+            try {
+                val entries = TgServers.jioCatalogue()
+                val channels = entries.map { e ->
+                    Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
+                }
+                require(channels.isNotEmpty()) { "empty JioTV playlist" }
+                runOnUiThread { applyJio(channels) }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (allJio.isEmpty()) { jioMsg = "JioTV channels didn't load (${why(e)}). Check the connection and reopen the app."; updateStatus() }
+                }
+            }
+        }
+    }
+
+    private fun applyJio(list: List<Channel>) {
+        jioCatalogLoaded = true
+        if (list == allJio) return
+        allJio = list; seedAccents(list); updateStatus()
+        if (tab == 2) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
+        if (searchShown) updateResults()
+    }
     private fun favTiles(): List<Tile> {
         val l = pool().filter { it.key in favs }.map { Tile.Ch(it) }
         return if (l.isEmpty()) listOf(Tile.Hint) else l
@@ -736,8 +767,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun jioRows(channels: List<Channel>): List<Row> {
+        return buildList {
+            if (channels.isNotEmpty()) add(Row("JioTV Channels", featuredChannels(channels).map { Tile.Ch(it) }))
+            add(Row(FAV, favTiles()))
+            addAll(recentRow())
+            addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+        }
+    }
+
     private fun continueRow(): List<Row> {
-        val type = if (tab == 3) "series" else "movie"
+        val type = if (tab == 4) "series" else "movie"
         val l = Movies.recent(prefs).filter { it.type == type }.map { Tile.Mv(it) }
         return if (l.isEmpty()) emptyList() else listOf(Row(CONTINUE, l))
     }
@@ -758,7 +798,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadVod(t: Int) {
-        val idx = t - 2
+        val idx = t - 3
         if (idx !in 0..1 || vodLoading[idx] || vodRows[idx].isNotEmpty()) return
         vodLoading[idx] = true; vodError[idx] = null; updateStatus()
         val shelves = Movies.shelves(if (idx == 1) "series" else "movie")
@@ -828,13 +868,14 @@ class MainActivity : AppCompatActivity() {
         rows = when (tab) {
             0 -> liveRows(all)
             1 -> liveRows(allV2, alwaysOn = true)
-            else -> { loadVod(tab); continueRow() + vodRows[tab - 2] }
+            2 -> jioRows(allJio)
+            else -> { loadVod(tab); continueRow() + vodRows[tab - 3] }
         }
         setHeroCollapsed(false)
         inner.clear()
         rowAdapter.notifyDataSetChanged()
         val first: Tile? = when (tab) {
-            0, 1 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
+            0, 1, 2 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
             else -> rows.firstOrNull()?.tiles?.firstOrNull()
         }
         setHero(first, immediate = true)
@@ -856,7 +897,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun switchTab(t: Int) {
         if (t == tab) {
-            if (t >= 2 && vodRows[t - 2].isEmpty() && !vodLoading[t - 2]) loadVod(t)
+            if (t >= 3 && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
             return
         }
         val dir = if (t > tab) 1 else -1
@@ -961,8 +1002,8 @@ class MainActivity : AppCompatActivity() {
             setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
         }
         showCinematicFallback(t)
-        heroTagline.visibility = if (tab < 2 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
-        heroSubheading.text = if (tab < 2) "A clearer view of what’s next." else "Find your next story."
+        heroTagline.visibility = if (tab < 3 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
+        heroSubheading.text = if (tab < 3) "A clearer view of what’s next." else "Find your next story."
         when (t) {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
@@ -1096,7 +1137,7 @@ class MainActivity : AppCompatActivity() {
             else "Live TV, curated for your next moment."
         val d = n?.desc?.takeIf { it.isNotBlank() } ?: fallback
         heroDesc.text = d
-        heroDesc.visibility = if (compact || tab >= 2) View.GONE else View.VISIBLE
+        heroDesc.visibility = if (compact || tab >= 3) View.GONE else View.VISIBLE
         heroNext.visibility = if (nx != null && !compact) View.VISIBLE else View.GONE
         if (nx != null) heroNext.text = progLine("NEXT", nx, range = false)
     }
@@ -1344,7 +1385,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
-        ch.id, ch.v2, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch)
+        ch.id, ch.v2, ch.jio, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch)
     )
     private fun providerMode(ch: Channel) = if (requestedProvider(ch) == null) "Auto" else "Selected"
     private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(
@@ -1352,7 +1393,11 @@ class MainActivity : AppCompatActivity() {
         prefs.getString("source_provider_${ch.key}", null) == provider.website && prefs.getBoolean("native_compat_${ch.key}", false))
     private fun enterNativeProvider(ch: Channel, provider: LiveProvider) {
         currentNativeProvider = provider
-        diagnostics.resolving(if (provider == LiveProvider.JJTV) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG)
+        diagnostics.resolving(when (provider) {
+            LiveProvider.JJTV -> PlaybackDiagnostics.Provider.JJTV
+            LiveProvider.JIOM3U -> PlaybackDiagnostics.Provider.JIOM3U
+            else -> PlaybackDiagnostics.Provider.TG
+        })
         compatiblePlayback = savedCompatibility(ch, provider) || decoderRetries.used(provider)
         providerWindow.enter(SystemClock.elapsedRealtime())
     }
@@ -1446,7 +1491,9 @@ class MainActivity : AppCompatActivity() {
             (if (nativeSources.size > 1) "   ·   SOURCE chooses server · LEFT cycles" else "") + (probeStatus?.let { "   ·   $it" } ?: "")
         infoNext.visibility = View.VISIBLE
         val trace = diagnostics.begin(
-            if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV else PlaybackDiagnostics.Provider.TG,
+            if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV
+            else if (source.requestOrigin == JioM3uResolver.SITE) PlaybackDiagnostics.Provider.JIOM3U
+            else PlaybackDiagnostics.Provider.TG,
             when (source.type) { "hls" -> PlaybackDiagnostics.Media.HLS; "mp4" -> PlaybackDiagnostics.Media.FILE; else -> PlaybackDiagnostics.Media.DASH },
             when { source.drm == null -> PlaybackDiagnostics.Drm.NONE
                 ClearKey.license(source.drm) != null -> PlaybackDiagnostics.Drm.CLEARKEY
@@ -1572,7 +1619,9 @@ class MainActivity : AppCompatActivity() {
             trace.failed(PlaybackProblems.from(error, error.errorCode))
             val code = httpCode(error)
             val provider = LiveProviders.displayName(
-                if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) LiveProvider.JJTV else LiveProvider.TG)
+                if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) LiveProvider.JJTV
+                else if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JioM3uResolver.SITE) LiveProvider.JIOM3U
+                else LiveProvider.TG)
             val stage = trace.lastLoadStageName()?.lowercase()?.replaceFirstChar { it.uppercase() }
             val message = when {
                 code == 451 && stage != null -> "$stage HTTP 451"
@@ -1612,6 +1661,7 @@ class MainActivity : AppCompatActivity() {
     private fun metadataFailureReason(provider: LiveProvider, channel: Channel, error: Throwable): String = when {
         error is LiveMetadataTimeoutException -> "${providerName(provider)} metadata failed: ${LiveMetadataRequests.deadlineSeconds(provider)}-second resolution deadline reached"
         error is JjtvHttpException -> "${providerName(provider)} metadata HTTP ${error.status}"
+        error is JioM3uHttpException -> "${providerName(provider)} metadata HTTP ${error.status}"
         error is TgResolveException -> "TG metadata failed${error.status?.let { " (HTTP $it)" }.orEmpty()}"
         error is java.net.SocketTimeoutException -> "${providerName(provider)} metadata timed out"
         error is java.net.UnknownHostException -> "${providerName(provider)} metadata host unavailable"
@@ -1619,6 +1669,7 @@ class MainActivity : AppCompatActivity() {
         provider == LiveProvider.JJTV && channel.id in setOf("1108", "362") ->
             "${providerName(provider)} Star cookie probe: no exact-channel native source returned for channel ID ${channel.id}"
         provider == LiveProvider.TG -> "TG metadata failed; no native stream configuration was returned"
+        provider == LiveProvider.JIOM3U -> "JioTV m3u8 did not supply a native source for this channel"
         else -> "${providerName(provider)} metadata failed; no native stream configuration was returned"
     }
 
@@ -2252,7 +2303,7 @@ class MainActivity : AppCompatActivity() {
         home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
             if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
         } }
-        if (tab < 2) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
+        if (tab < 3) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
     }
 
     private fun shortOk() {
@@ -2408,7 +2459,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         refreshProgrammeFeed()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
-        if (tab >= 2 && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
+        if (tab >= 3 && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
@@ -2816,7 +2867,7 @@ class MainActivity : AppCompatActivity() {
     private fun schedulePreview(c: Channel?) {
         stopPreview()
         // no live preview on the movie tabs, while the hero is folded away, or by default on weak boxes (it runs a second decoder)
-        if (c != null && tab < 2 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
+        if (c != null && tab < 3 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
     }
     private fun stopPreview() {
         ui.removeCallbacks(previewRunnable); previewToken++; previewJob?.cancel(true)
@@ -2831,7 +2882,7 @@ class MainActivity : AppCompatActivity() {
         old?.let { try { it.release() } catch (_: Exception) {} }
     }
     private fun previewIsCurrent(ch: Channel, token: Int) = token == previewToken && layer.visibility != View.VISIBLE &&
-        !searchShown && tab < 2 && !heroCollapsed && (heroTile as? Tile.Ch)?.c?.key == ch.key
+        !searchShown && tab < 3 && !heroCollapsed && (heroTile as? Tile.Ch)?.c?.key == ch.key
 
     private fun startPreview() {
         val ch = (heroTile as? Tile.Ch)?.c ?: return
@@ -2918,7 +2969,7 @@ class MainActivity : AppCompatActivity() {
         rows = when (tab) {
             0 -> liveRows(all)
             1 -> liveRows(allV2, alwaysOn = true)
-            else -> continueRow() + vodRows[tab - 2]
+            else -> continueRow() + vodRows[tab - 3]
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()
         val shift = rows.size - old.size
@@ -2992,7 +3043,7 @@ class MainActivity : AppCompatActivity() {
                         focusAnim(x, f)
                         if (f) {
                             setHero(t)
-                            if (tab < 2) scheduleSourceWarmup(t.c)
+                            if (tab < 3) scheduleSourceWarmup(t.c)
                             fetchGuide(t.c) { guide ->
                                 if (nowCaption.tag == t.c.key) nowCaption.text = if (t.c.v2) "Always-on · no schedule feed" else guide?.now?.title ?: "Programme information unavailable"
                             }

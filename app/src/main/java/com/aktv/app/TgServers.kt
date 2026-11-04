@@ -9,6 +9,7 @@ object TgServers {
     const val SITE = TgResolver.SITE
     @Volatile private var resolver = TgResolver()
     @Volatile private var jjtv = JjtvResolver()
+    @Volatile private var jioM3u = JioM3uResolver()
     private val refreshExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "tg-site-refresh").apply { isDaemon = true } }
     private val refreshing = AtomicBoolean(false)
     @Volatile private var refreshChannel: String? = null
@@ -19,6 +20,7 @@ object TgServers {
         forgetPreviousLiveSite(ctx)
         resolver.close()
         jjtv = JjtvResolver()
+        jioM3u = JioM3uResolver()
         resolver = TgResolver(initialFunction = prefs.getString("native_function", null), saveFunction = {
             prefs.edit().putString("native_function", it).apply()
         })
@@ -35,7 +37,14 @@ object TgServers {
             require(!v2) { "JJTV uses V1/Jio IDs, not V2 catalogue IDs" }
             jjtv.resolve(id, fresh)
         }
+        LiveProvider.JIOM3U -> {
+            require(!v2) { "JioTV m3u8 uses V1/Jio IDs, not V2 catalogue IDs" }
+            jioM3u.resolve(id.removePrefix("jio:"), fresh)
+        }
     }
+
+    /** Returns all channel entries from the JioTV m3u8 playlist, for building the UI catalogue. */
+    fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> = jioM3u.catalogue(fresh)
 
     fun invalidate(id: String, v2: Boolean = false) = resolver.invalidate(id, v2)
 
