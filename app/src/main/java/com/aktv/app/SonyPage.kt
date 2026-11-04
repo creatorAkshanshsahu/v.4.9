@@ -67,30 +67,60 @@ internal object SonyPage {
     fun channels(catalogue: List<MainActivity.Channel>): List<MainActivity.Channel> {
         val pool = catalogue.filter { !it.v2 }.distinctBy { it.key }
         if (pool.isEmpty()) return emptyList()
-        val normalised = pool.map { Triple(it, normalise(it.name), logoFile(it.logo)) }
-        val used = LinkedHashSet<String>()
-        val out = ArrayList<MainActivity.Channel>(TILES.size)
-        for (tile in TILES) {
-            val aliases = tile.names.map(::normalise)
-            val logo = tile.logo.lowercase()
-            val picked =
-                normalised.firstOrNull { (channel, name, _) -> channel.key !in used && name in aliases }?.first
-                    ?: normalised.firstOrNull { (channel, _, file) -> channel.key !in used && file == logo }?.first
-                    ?: normalised.firstOrNull { (channel, name, _) ->
-                        channel.key !in used && aliases.any { alias -> name.contains(alias) }
-                    }?.first
-            if (picked != null) {
-                used.add(picked.key)
-                out.add(picked.copy(jio = true, pinned = true))
-            }
+        val names = pool.map { normalise(it.name) to it }.toMap()
+        val files = pool.map { logoFile(it.logo) to it }.toMap()
+        val taken = HashSet<String>()
+        val assigned = HashMap<String, MainActivity.Channel>()
+
+        /** A channel's normalised words without a leading "sony", so `BBC Earth HD` can meet `bbc earth`. */
+        fun words(channel: MainActivity.Channel): List<String> =
+            channel.name.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
+                .let { if (it.firstOrNull() == "sony") it.drop(1) else it }
+
+        /** The page's name, optionally followed only by a quality or language word. */
+        fun qualifies(channel: MainActivity.Channel, alias: String): Boolean {
+            val wanted = alias.split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
+                .let { if (it.firstOrNull() == "sony") it.drop(1) else it }
+            val actual = words(channel)
+            if (wanted.isEmpty() || actual.size < wanted.size) return false
+            if (actual.subList(0, wanted.size) != wanted) return false
+            return actual.drop(wanted.size).all { it in SUFFIX_WORDS }
         }
-        // Only channels the provider itself brands Sony: three-letter tokens like "max" or "aath" also
-        // match Jaya Max, Mahaa Max, Aakash Aath and MK Six, which are not this site's Sony section.
-        for ((channel, name, _) in normalised) {
-            if (channel.key in used || !name.startsWith("sony")) continue
-            used.add(channel.key)
+
+        // Exact name, then the CDN logo file, then the name plus a quality/language suffix. Each pass is
+        // global, so an exact match always beats a loose one - `Sony MAX1` can never claim the MAX tile
+        // before the MAX2 tile has had its exact chance.
+        for (tile in TILES) {
+            val hit = tile.names.map(::normalise).firstNotNullOfOrNull { alias ->
+                names[alias]?.takeIf { it.key !in taken }
+            } ?: continue
+            taken.add(hit.key); assigned[tile.slug] = hit
+        }
+        for (tile in TILES) {
+            if (tile.slug in assigned) continue
+            val hit = files[tile.logo.lowercase()]?.takeIf { it.key !in taken } ?: continue
+            taken.add(hit.key); assigned[tile.slug] = hit
+        }
+        for (tile in TILES) {
+            if (tile.slug in assigned) continue
+            val hit = pool.firstOrNull { it.key !in taken && tile.names.any { alias -> qualifies(it, alias) } }
+                ?: continue
+            taken.add(hit.key); assigned[tile.slug] = hit
+        }
+
+        val out = ArrayList<MainActivity.Channel>(TILES.size)
+        // Page order first, then the rest of the source's Sony channels in the order it lists them.
+        for (tile in TILES) assigned[tile.slug]?.let { out.add(it.copy(jio = true, pinned = true)) }
+        for (channel in pool) {
+            if (channel.key in taken || !normalise(channel.name).startsWith("sony")) continue
+            taken.add(channel.key)
             out.add(channel.copy(jio = true, pinned = true))
         }
         return out
     }
-}
+
+    /** Words that may follow a page name without changing which channel it is. */
+    private val SUFFIX_WORDS = setOf(
+        "hd", "sd", "uhd", "4k", "hindi", "english", "tamil", "telugu", "bengali", "kannada",
+        "malayalam", "marathi", "punjabi", "gujarati", "hd1"
+    )
