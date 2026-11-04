@@ -277,7 +277,7 @@ the loaded catalogue does not carry is left out rather than guessed.
 It is a separate row (*Sony Live · Allinone Playlist*). The catalogued *Sony Live* shelf keeps exactly
 the tiles it always had, in the same order: the new section is added beside it, never in place of it.
 
-## 9. 4.9.49 — one Sony section, from the site's own playlist, and nothing behind it
+## 9. 4.9.49/4.9.50 — one Sony section, from the site's own playlist, and nothing behind it
 
 4.9.48 added the site's Sony list as a *second* row and left the catalogued `Sony Live` shelf in place.
 Two rows of Sony channels is what the user rejected, and the older row played through a different
@@ -299,6 +299,20 @@ entry carries the native pieces 4.9.47 made playable:
 
 So the section's *list* is the Sony page (22 tiles, page order) and the section's *stream* is the
 playlist — the same site, the same channels, played natively.
+
+### What the live playlist actually carries
+
+The first live run of the section against the real playlist (1169 channels) bound **14 of the page's
+22 tiles**: SET HD, Sony SAB HD, Sony Pal, Sony Wah, Sony Marathi SD, Sony Max HD, Sony MAX2, Sony Pix
+HD, Sony Ten 1 HD, Sony Ten 2 HD, Sony Ten 3 Hindi HD, Sony Yay Hindi, Sony aath, Sony BBC Earth HD
+English. The other eight slugs — the SD twins of Ten 1/2/3 and Max, and the Ten 4 and Ten 5 (Six)
+feeds — have no entry in that playlist at all, so the site serves them only through its browser player,
+which cannot be read. They are left out rather than filled from another provider.
+
+To make the section *all* the Sony this source has, it then adds every remaining channel the playlist
+brands Sony: the regional Sony Yay feeds (Tamil, Telugu, Bengali, Kannada, Malayalam), Sony BBC Earth
+HD and its Tamil and Telugu feeds, Sony SAB SD and Sony MAX1. Channels that merely share a word —
+Mahaa Max, Jaya Max, Aakash Aath, MK Six, Animax — are never pulled in.
 
 ### How a tile is bound
 
