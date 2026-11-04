@@ -124,3 +124,4 @@ internal object SonyPage {
         "hd", "sd", "uhd", "4k", "hindi", "english", "tamil", "telugu", "bengali", "kannada",
         "malayalam", "marathi", "punjabi", "gujarati", "hd1"
     )
+}
