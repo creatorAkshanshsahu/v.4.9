@@ -5,16 +5,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The `allinonereborn2.online/sony/` page lists 22 Sony tiles and hands each one to a third-party web
- * player. The app never opens that player: the tiles are rebuilt from the page's own list and bound to
- * the playlist's channels, which carry a native manifest and ClearKey document. These cases pin the
- * page order and the name matching, and prove that nothing is invented for a channel the catalogue
- * does not carry.
+ * The `allinonereborn2.online/sony/` page lists 22 Sony tiles; the app rebuilds them from the page's
+ * own list and binds each one to the matching channel of that site's playlist (native manifest +
+ * ClearKey). These cases pin the page order, the name and logo matching, the one-channel-one-tile
+ * rule, and the pin that keeps a Sony tile on the playlist source only.
  */
 class SonyPageTest {
 
-    private fun channel(id: String, name: String, jio: Boolean = true) =
-        MainActivity.Channel(id, name, "Sports", "https://logo.example/$id.png", v2 = false, jio = jio)
+    private fun channel(id: String, name: String, jio: Boolean = true, logo: String = "") =
+        MainActivity.Channel(
+            id, name, "Sports", logo.ifEmpty { "https://logo.example/$id.png" }, v2 = false, jio = jio
+        )
 
     /** The page's own order, as far as the sampled playlist carries those channels. */
     @Test fun `the page's channels come back in the page's order`() {
@@ -32,11 +33,39 @@ class SonyPageTest {
         )
     }
 
+    /** The playlist, not another provider, is what these tiles play: every tile is pinned to it. */
+    @Test fun `every tile is pinned to the playlist only`() {
+        val picked = SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD"), channel("162", "Sony Ten 1 HD")))
+        assertEquals(2, picked.size)
+        assertTrue(picked.all { it.pinned })
+        assertTrue(picked.all { it.jio })
+        assertTrue(picked.all { !it.v2 })
+        picked.forEach { tile ->
+            assertEquals(
+                listOf(LiveProvider.JIOM3U),
+                ChannelProviderOrder.playbackOrder(
+                    tile.id, v2 = tile.v2, jio = tile.jio,
+                    rememberedWebsite = TgResolver.SITE, requested = null, pinned = tile.pinned
+                )
+            )
+        }
+    }
+
     /** A channel the playlist does not carry is left out, never replaced by a guessed one. */
     @Test fun `unavailable page tiles are skipped instead of invented`() {
         val picked = SonyPage.channels(listOf(channel("1393", "Sony Wah")))
         assertEquals(listOf("Sony Wah"), picked.map { it.name })
         assertTrue(picked.single().jio)
+    }
+
+    /** The page and the playlist publish the same CDN logo file, so a renamed channel still binds. */
+    @Test fun `a channel is matched by its published logo when the name differs`() {
+        val catalogue = listOf(
+            channel("999", "Sports Feed 03", logo = "https://jiotvimages.cdn.jio.com/dare_images/images/Ten3_HD.png")
+        )
+        val picked = SonyPage.channels(catalogue)
+        assertEquals(listOf("Sports Feed 03"), picked.map { it.name })
+        assertTrue(picked.single().pinned)
     }
 
     /** One catalogue entry becomes one tile: the plain and HD page tiles cannot both claim it. */
@@ -57,10 +86,11 @@ class SonyPageTest {
         assertTrue(SonyPage.channels(listOf(v2)).isEmpty())
     }
 
-    @Test fun `the page section has its own title and does not replace the catalogued shelf`() {
+    /** One section, built from this page alone; nothing else in the app lists Sony channels. */
+    @Test fun `the section is the page's own and carries all 22 tiles`() {
         assertTrue(SonyPage.TITLE.isNotBlank())
-        assertTrue(SonyPage.TITLE != LiveCollections.SONY_TITLE)
         assertEquals(22, SonyPage.TILES.size)
         assertEquals(SonyPage.TILES.size, SonyPage.TILES.map { it.slug }.distinct().size)
+        assertTrue(SonyPage.TILES.all { it.names.isNotEmpty() && it.logo.endsWith(".png") })
     }
 }

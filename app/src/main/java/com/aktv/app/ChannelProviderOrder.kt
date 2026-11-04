@@ -8,8 +8,12 @@ internal object ChannelProviderOrder {
         v2: Boolean,
         jio: Boolean = false,
         rememberedWebsite: String?,
-        requested: LiveProvider? = null
+        requested: LiveProvider? = null,
+        pinned: Boolean = false
     ): List<LiveProvider> = when {
+        // A pinned channel (the allinonereborn2.online Sony section) is played from its playlist only.
+        // Falling back to another provider would show a different stream than the tile promises.
+        pinned -> requested?.let { listOf(it) } ?: listOf(LiveProvider.JIOM3U)
         v2 -> listOf(LiveProvider.TG)
         jio -> requested?.let { listOf(it) } ?: listOf(LiveProvider.JIOM3U) +
             LiveProviders.order(v2, rememberedWebsite, null).filter { it != LiveProvider.JIOM3U }

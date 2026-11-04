@@ -103,20 +103,21 @@ class HomePreviewTest {
                 }
                 view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
             }
-            // The Live tab's real shape: generic channels, then the Sony shelf built by the shipped
+            // The Live tab's real shape: generic channels, then the one Sony section built by the shipped
             // selector, then trending. The names below are the ones the live feed actually serves.
             val sonyCatalogue = listOf(
                 "SET HD", "Sony SAB HD", "Sony SAB SD", "Sony Marathi SD", "Sony Pal", "Sony aath",
                 "Sony Yay Hindi", "Sony Max HD", "Sony MAX1", "Sony Wah", "Sony MAX2", "Sony Pix HD",
                 "Sony Ten 1 HD", "Sony Ten 2 HD", "Sony Ten 3 Hindi HD", "Sony BBC Earth HD"
             ).mapIndexed { index, name -> MainActivity.Channel((3400 + index).toString(), name, "Sony", "") }
-            val sonyShelf = LiveCollections.channels(LiveCollections.SONY, sonyCatalogue)
+            // The shipped selector for the one Sony section: the page's tiles bound to the playlist.
+            val sonyShelf = SonyPage.channels(sonyCatalogue.map { it.copy(jio = true) })
             // Mirrors the app's own monogram rule, so the preview shows what a logo-less tile really shows.
             fun initials(n: String): String {
                 val w = n.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
                 return (if (w.size >= 2) "${w[0].first()}${w[1].first()}" else n.trim().take(2)).uppercase()
             }
-            val liveTitles = listOf("Live Channels", "Sony Live", "Trending on AK")
+            val liveTitles = listOf("Live Channels", SonyPage.TITLE, "Trending on AK")
             val movieTitles = listOf("Trending movies", "Top rated movies", "Keep watching")
             val rows = root.findViewById<RecyclerView>(R.id.rows)
             rows.layoutManager = LinearLayoutManager(activity)
@@ -175,8 +176,8 @@ class HomePreviewTest {
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE
-                                    // The Sony row shows the real channel names the shelf selected, so the
-                                    // preview proves the shelf renders - not just that a row exists.
+                                    // The Sony row shows the real channel names the section selected, so the
+                                    // preview proves the section renders - not just that a row exists.
                                     text = if (channel != null) initials(channel.name) else "AK"
                                     setTextColor(Accent.GLOSS_HI)
                                     textSize = if (compact) 18f else 23f

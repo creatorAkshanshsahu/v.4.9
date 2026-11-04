@@ -57,7 +57,12 @@ class ApiException(val code: Int) : IOException("HTTP $code")
 
 class MainActivity : AppCompatActivity() {
     /** V1 = live TV, v2 = the 24/7 catalogue. [key] is unique across both, so favourites and glow colours never collide. */
-    data class Channel(val id: String, val name: String, val category: String, val logo: String, val v2: Boolean = false, val jio: Boolean = false) {
+    data class Channel(
+        val id: String, val name: String, val category: String, val logo: String,
+        val v2: Boolean = false, val jio: Boolean = false,
+        // Pinned channels are played from the playlist only; no other provider is ever tried.
+        val pinned: Boolean = false
+    ) {
         val key: String get() = if (v2) "v2:$id" else if (jio) "jio:$id" else id
     }
     sealed class Tile {
@@ -89,6 +94,8 @@ class MainActivity : AppCompatActivity() {
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
+    /** Keys of the Sony section's tiles: playlist-only channels, re-pinned wherever they reappear. */
+    private var sonyPinned = setOf<String>()
     private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
     private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
@@ -500,10 +507,10 @@ class MainActivity : AppCompatActivity() {
         navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; else -> "Series" }
         findViewById<TextView>(R.id.sectionKicker).apply {
-            // The curated Sony shelf is the newest part of Live TV, so name it in the header.
-            val sonyLive = tab == 0 && LiveCollections.channels(LiveCollections.SONY, all).isNotEmpty()
+            // The Sony section is the newest part of Live TV, so name it in the header.
+            val sonyLive = tab == 0 && SonyPage.channels(allJio).isNotEmpty()
             text = when (tab) {
-                0 -> if (sonyLive) "LIVE · SONY SHELF INCLUDED" else "LIVE, RIGHT NOW"
+                0 -> if (sonyLive) "LIVE · SONY SECTION INCLUDED" else "LIVE, RIGHT NOW"
                 1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · SONY SECTION · NATIVE CLEARKEY"
                 3 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
             }
@@ -727,16 +734,25 @@ class MainActivity : AppCompatActivity() {
         if (tab == 2 || tab == 0) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
         if (searchShown) updateResults()
     }
+    /**
+     * The channel behind a stored key. The tab's own list wins, then the playlist, so a Sony tile the
+     * user favourited on Live TV is still found when the tiles themselves come from the playlist, and
+     * it keeps its pin: it must replay from the same source it was saved from.
+     */
+    private fun channelFor(key: String): Channel? {
+        val found = (pool() + allJio + allV2).firstOrNull { it.key == key } ?: return null
+        return if (found.key in sonyPinned) found.copy(jio = true, pinned = true) else found
+    }
+
     private fun favTiles(): List<Tile> {
-        val l = pool().filter { it.key in favs }.map { Tile.Ch(it) }
+        val l = favs.mapNotNull { channelFor(it) }.map { Tile.Ch(it) }
         return if (l.isEmpty()) listOf(Tile.Hint) else l
     }
 
-    /** Channels played lately (newest first), limited to the current tab's list. */
+    /** Channels played lately (newest first), across the tab's list and the playlist. */
     private fun recentRow(): List<Row> {
         val keys = prefs.getString("recent_ch", "")!!.split(",").filter { it.isNotEmpty() }
-        val byKey = pool().associateBy { it.key }
-        val l = keys.mapNotNull { byKey[it] }.map { Tile.Ch(it) }
+        val l = keys.mapNotNull { channelFor(it) }.map { Tile.Ch(it) }
         return if (l.isEmpty()) emptyList() else listOf(Row(RECENT, l))
     }
     private fun rememberChannel(c: Channel) {
@@ -759,19 +775,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun liveRows(channels: List<Channel>, alwaysOn: Boolean = false): List<Row> {
         val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
+        // The one Sony section. Every tile is a channel of allinonereborn2.online/sony, resolved from that
+        // site's own playlist and pinned to it: no TG or GioTV lookup is ever tried for these.
+        val sony = SonyPage.channels(allJio)
+        sonyPinned = sony.map { it.key }.toSet()
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
-            // Curated Sony shelf sits above the generic categories so it is one row away from the hero.
-            if (!alwaysOn) for (spec in LiveCollections.shelves) {
-                // The catalogued shelf keeps exactly the tiles it always had.
-                val picked = LiveCollections.channels(spec, channels)
-                if (picked.isNotEmpty()) add(Row(spec.title, picked.map { Tile.Ch(it) }))
-                // A separate section for allinonereborn2.online/sony: those tiles come from the playlist
-                // itself, so each one carries its own manifest, ClearKey document and cookie. It sits next
-                // to the catalogued shelf instead of replacing it.
-                val fromPlaylist = SonyPage.channels(allJio)
-                if (fromPlaylist.isNotEmpty()) add(Row(SonyPage.TITLE, fromPlaylist.map { Tile.Ch(it) }))
-            }
+            if (!alwaysOn && sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
@@ -782,12 +792,13 @@ class MainActivity : AppCompatActivity() {
     /**
      * The JioTV tab is also the playlist section: the same M3U8 catalogue that supplies these tiles
      * supplies their native stream, ClearKey document and cookie, so a tile here never borrows another
-     * provider's channel. The Sony page's tiles are matched by channel name against that catalogue and
-     * shown as their own section above the full playlist.
+     * provider's channel. The Sony page's tiles are bound to that catalogue and shown as the one Sony
+     * section above the full playlist; the same section is the only Sony row on Live TV.
      */
     private fun jioRows(channels: List<Channel>): List<Row> {
         return buildList {
-            val sony = SonyPage.channels(channels)
+            val sony = SonyPage.channels(channels.ifEmpty { allJio })
+            sonyPinned = sony.map { it.key }.toSet()
             if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, favTiles()))
@@ -1407,7 +1418,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
-        ch.id, ch.v2, ch.jio, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch)
+        ch.id, ch.v2, ch.jio, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch), ch.pinned
     )
     private fun providerMode(ch: Channel) = if (requestedProvider(ch) == null) "Auto" else "Selected"
     private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(

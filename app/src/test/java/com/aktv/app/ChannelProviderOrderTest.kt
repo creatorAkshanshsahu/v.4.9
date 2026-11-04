@@ -57,6 +57,19 @@ class ChannelProviderOrderTest {
             "892", v2 = false, rememberedWebsite = TgResolver.SITE))
     }
 
+    @Test fun `a pinned Sony tile is played from its playlist and nothing else`() {
+        assertEquals(listOf(LiveProvider.JIOM3U),
+            ChannelProviderOrder.playbackOrder("892", v2 = false, jio = true,
+                rememberedWebsite = TgResolver.SITE, pinned = true))
+        assertEquals(listOf(LiveProvider.JIOM3U),
+            ChannelProviderOrder.playbackOrder("162", v2 = false, jio = false,
+                rememberedWebsite = JjtvResolver.SITE, pinned = true))
+        // A manual provider choice still wins: the user is never overruled, they are just not silently moved.
+        assertEquals(listOf(LiveProvider.TG),
+            ChannelProviderOrder.playbackOrder("892", v2 = false, jio = true,
+                rememberedWebsite = null, requested = LiveProvider.TG, pinned = true))
+    }
+
     @Test fun `other V1 channels keep their remembered working provider first`() {
         assertEquals(
             listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U),

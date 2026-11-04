@@ -276,3 +276,54 @@ the loaded catalogue does not carry is left out rather than guessed.
 
 It is a separate row (*Sony Live · Allinone Playlist*). The catalogued *Sony Live* shelf keeps exactly
 the tiles it always had, in the same order: the new section is added beside it, never in place of it.
+
+## 9. 4.9.49 — one Sony section, from the site's own playlist, and nothing behind it
+
+4.9.48 added the site's Sony list as a *second* row and left the catalogued `Sony Live` shelf in place.
+Two rows of Sony channels is what the user rejected, and the older row played through a different
+provider than the one they asked for. 4.9.49 replaces both with a single section.
+
+### What the source actually is
+
+`suniliv.pages.dev/ptest1.html?id=<slug>` cannot be read usefully: the page is a browser player that
+resolves its stream with Media Source Extensions, so no manifest, key or URL appears in its markup
+(five independent proxies returned player chrome only). The site does, however, publish the same
+channels a second time as a plain playlist — `allinonereborn2.online/jiotv-m3u/jtv33.m3u8` — where each
+entry carries the native pieces 4.9.47 made playable:
+
+| piece | where it comes from |
+| --- | --- |
+| manifest | `https://allinonereborn2.online/jiotv-m3u/jtv1.mpd?id=<n>` → 302 → Jio CDN `index.mpd?__hdnea__=…` |
+| ClearKey | `GET https://allinonereborn2.online/jtv-fetch/keyid.php?id=<n>` (plain JSON) |
+| headers | `User-Agent: @allinone_reborn` plus the entry's own `__hdnea__` cookie, re-parsed at play time |
+
+So the section's *list* is the Sony page (22 tiles, page order) and the section's *stream* is the
+playlist — the same site, the same channels, played natively.
+
+### How a tile is bound
+
+`SonyPage.channels()` walks the page's 22 tiles in page order and takes, for each one, the first channel
+of the playlist that is not already used and that matches by
+
+1. normalised name (`Sony Ten 3 Hindi HD`), then
+2. **published logo file** (`Ten3_HD.png`) — the page and the playlist both use the Jio image CDN, so a
+   channel the playlist renames still binds, then
+3. a contained alias, as a last resort.
+
+A channel is used once, so the page's SD and HD tiles stay two tiles when the playlist carries both, and
+a channel the playlist does not carry is dropped instead of being filled with a different broadcaster.
+
+### Why it cannot fall back
+
+Binding by name was never the problem in 4.9.48 — falling back was. A bound tile is now **pinned**:
+`Channel` carries `pinned`, and `ChannelProviderOrder.playbackOrder(..., pinned = true)` returns the
+playlist provider only. If the playlist stream fails, the tile reports the failure; it never quietly
+starts a TG or GioTV stream that the section did not promise. Favourites and recents re-pin a Sony key
+when it is restored, so a saved tile replays from the same source.
+
+### What was removed
+
+`LiveCollections` (the catalogued `Sony Live` shelf and its name-matched variant) and its tests are
+gone, together with the second row. There is exactly one Sony row in the app — on Live TV and on the
+JioTV tab, both built by `SonyPage.channels()` from the loaded playlist. The JioTV tab's full
+`Allinone Playlist` row and the ordinary catalogue categories are untouched.

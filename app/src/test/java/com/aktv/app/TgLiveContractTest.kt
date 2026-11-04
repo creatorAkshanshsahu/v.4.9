@@ -113,37 +113,28 @@ class TgLiveContractTest {
     }
 
     /**
-     * Opt-in check of the Sony shelf against the exact feed the Live tab loads.
-     *
-     * The shelf is selected by channel *name*, so what matters is that real Sony channels come back -
-     * not that a hand-written ID list survives. This prints the selection and the provider's own
-     * names for it, plus any Sony-flavoured channel it missed, so a wrong shelf is visible before a
-     * user ever sees it. A missing channel is dropped by design, never shown as a dead tile.
+     * Opt-in read of the real playlist that powers the one Sony section. The section is bound to the
+     * `allinonereborn2.online` m3u8 catalogue, so this proves against the live feed that the page's 22
+     * tiles still bind to the channels that playlist actually carries, and reports any it drops.
      */
-    @Test fun `sony shelf selects advertised Sony channels by name`() {
-        assumeTrue(System.getProperty("aktv.live.tg") == "true")
-        val response = TgHttp().get("${TgResolver.SITE}/api/public/channels", linkedMapOf("Accept" to "application/json"))
-        assertEquals("live channel feed did not answer 200", 200, response.code)
-        val channels = JSONObject(response.body.toString(Charsets.UTF_8)).getJSONArray("channels")
-        val catalogue = ArrayList<MainActivity.Channel>()
-        for (index in 0 until channels.length()) {
-            val item = channels.optJSONObject(index) ?: continue
-            catalogue.add(MainActivity.Channel(item.optString("id"), item.optString("name"), "", item.optString("logo")))
-        }
-        val shelf = LiveCollections.channels(LiveCollections.SONY, catalogue)
-        val picked = shelf.associate { it.id to it.name }
-        // Sony-flavoured channels the real catalogue carries that the shelf does NOT list.
-        val omitted = catalogue.filter { channel ->
-            channel.id !in picked && !channel.v2 &&
-                (channel.name.contains("sony", true) || channel.name.startsWith("SET ", true) ||
-                    channel.name.startsWith("BBC Earth", true) || channel.name.startsWith("SAB ", true))
-        }.associate { it.id to it.name }
-        println("TG_NATIVE " + JSONObject().put("provider", "LiveCollections").put("step", "sonyShelf")
-            .put("catalogueSize", catalogue.size).put("selected", shelf.size)
-            .put("names", JSONObject(picked as Map<*, *>))
-            .put("omittedSonyChannels", JSONObject(omitted as Map<*, *>)))
-        assertTrue("The live feed advertised no Sony channel at all - the shelf would render empty",
-            shelf.size >= 5)
+    @Test fun `sony section binds the page tiles to the live playlist`() {
+        assumeTrue(System.getProperty("aktv.live.jio") == "true")
+        val response = TgHttp().get(
+            JioM3uProtocol.PLAYLIST,
+            linkedMapOf("Accept" to "*/*", "User-Agent" to JioM3uProtocol.UA_OVERRIDE)
+        )
+        assertEquals("the playlist did not answer 200", 200, response.code)
+        val entries = JioM3uProtocol.parse(response.body.toString(Charsets.UTF_8))
+        assertTrue("the playlist parsed to no channels", entries.size > 20)
+        val catalogue = entries.map { MainActivity.Channel(it.id, it.name, it.category, it.logo, jio = true) }
+        val section = SonyPage.channels(catalogue)
+        println("TG_NATIVE " + JSONObject().put("provider", "SonyPage").put("step", "sonySection")
+            .put("playlistChannels", entries.size).put("tiles", section.size)
+            .put("names", JSONObject(section.associate { it.id to it.name } as Map<*, *>)))
+        // Every tile is playable from this playlist only, and the page's channels are overwhelmingly present.
+        assertTrue(section.all { it.pinned && it.jio && !it.v2 })
+        assertTrue("only ${section.size} of ${SonyPage.TILES.size} page tiles bound to the live playlist",
+            section.size >= SonyPage.TILES.size - 2)
     }
 
     /**
