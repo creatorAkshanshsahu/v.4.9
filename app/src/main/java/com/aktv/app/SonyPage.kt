@@ -56,9 +56,13 @@ internal object SonyPage {
     private fun logoFile(value: String) = value.substringAfterLast('/').substringBefore('?').lowercase()
 
     /**
-     * One tile per page channel, in page order, pinned to the playlist. A channel is used once, so the
-     * page's plain and HD tiles stay two tiles when the playlist carries both, and a channel the
-     * playlist does not carry is left out rather than filled with another provider's stream.
+     * The section: the page's tiles in page order, then any other Sony channel the playlist carries that
+     * the page does not list (Sony's regional Yay and BBC Earth feeds, SAB SD, MAX1 …), so the section is
+     * every Sony channel this source has. A channel is used once and every tile is pinned to the playlist.
+     *
+     * A page tile the playlist does not carry is left out rather than filled from another provider. The
+     * live playlist currently carries 14 of the page's 22 tiles: its SD twins and the Ten 4/Ten 5 feeds
+     * are web-player-only, and showing them from a different source is exactly what was rejected.
      */
     fun channels(catalogue: List<MainActivity.Channel>): List<MainActivity.Channel> {
         val pool = catalogue.filter { !it.v2 }.distinctBy { it.key }
@@ -79,6 +83,13 @@ internal object SonyPage {
                 used.add(picked.key)
                 out.add(picked.copy(jio = true, pinned = true))
             }
+        }
+        // Only channels the provider itself brands Sony: three-letter tokens like "max" or "aath" also
+        // match Jaya Max, Mahaa Max, Aakash Aath and MK Six, which are not this site's Sony section.
+        for ((channel, name, _) in normalised) {
+            if (channel.key in used || !name.startsWith("sony")) continue
+            used.add(channel.key)
+            out.add(channel.copy(jio = true, pinned = true))
         }
         return out
     }

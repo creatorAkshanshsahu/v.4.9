@@ -68,6 +68,33 @@ class SonyPageTest {
         assertTrue(picked.single().pinned)
     }
 
+    /** Every other Sony channel the source carries is added after the page's own tiles. */
+    @Test fun `the section also carries Sony channels the page does not list`() {
+        val catalogue = listOf(
+            channel("872", "Sony Yay Hindi"),
+            channel("1587", "Sony Yay Tamil"),
+            channel("1927", "SONY YAY Bengali"),
+            channel("484", "Sony MAX1"),
+            channel("1407", "Sony BBC Earth HD Telugu"),
+            channel("483", "Sony MAX2")
+        )
+        // Page order first (Yay, MAX2, the BBC Earth feed), then the rest of the Sony-branded channels.
+        assertEquals(
+            listOf("Sony Yay Hindi", "Sony MAX2", "Sony BBC Earth HD Telugu", "Sony Yay Tamil", "SONY YAY Bengali", "Sony MAX1"),
+            SonyPage.channels(catalogue).map { it.name }
+        )
+        assertTrue(SonyPage.channels(catalogue).all { it.pinned })
+    }
+
+    /** Channels that merely share a word with a Sony brand are not Sony channels. */
+    @Test fun `lookalike channels are never pulled into the section`() {
+        val catalogue = listOf(
+            channel("1", "Mahaa Max"), channel("2", "Jaya Max"), channel("3", "Aakash Aath"),
+            channel("4", "MK Six"), channel("5", "Animax"), channel("6", "Sony Wah")
+        )
+        assertEquals(listOf("Sony Wah"), SonyPage.channels(catalogue).map { it.name })
+    }
+
     /** One catalogue entry becomes one tile: the plain and HD page tiles cannot both claim it. */
     @Test fun `a single catalogue entry never fills two page tiles`() {
         val picked = SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD")))
@@ -86,7 +113,7 @@ class SonyPageTest {
         assertTrue(SonyPage.channels(listOf(v2)).isEmpty())
     }
 
-    /** One section, built from this page alone; nothing else in the app lists Sony channels. */
+    /** One section, built from this page and its playlist; nothing else in the app lists Sony channels. */
     @Test fun `the section is the page's own and carries all 22 tiles`() {
         assertTrue(SonyPage.TITLE.isNotBlank())
         assertEquals(22, SonyPage.TILES.size)
