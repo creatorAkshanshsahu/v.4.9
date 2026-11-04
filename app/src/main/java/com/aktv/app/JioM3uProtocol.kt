@@ -29,7 +29,7 @@ internal object JioM3uProtocol {
     const val PLAYLIST = "$SITE/jiotv-m3u/jtv33.m3u8"
     const val UA_OVERRIDE = "@allinone_reborn"
     /** Only the playlist's own host may supply the key document; no other origin is followed. */
-    val HOST: String = URI(SITE).host
+    val HOST: String = URI(SITE).host.orEmpty()
     const val MAX_KEY_BYTES = 64 * 1024
 
     data class Entry(
