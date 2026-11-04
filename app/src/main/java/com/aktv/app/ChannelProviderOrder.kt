@@ -6,7 +6,7 @@ internal object ChannelProviderOrder {
     fun playbackOrder(
         channelId: String,
         v2: Boolean,
-        jio: Boolean,
+        jio: Boolean = false,
         rememberedWebsite: String?,
         requested: LiveProvider? = null
     ): List<LiveProvider> = when {

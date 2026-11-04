@@ -41,6 +41,17 @@ class ChannelProviderOrderTest {
             "872", v2 = false, rememberedWebsite = JjtvResolver.SITE, requested = LiveProvider.TG))
     }
 
+    @Test fun `a playlist channel starts on the playlist provider and keeps the others as fallback`() {
+        assertEquals(listOf(LiveProvider.JIOM3U, LiveProvider.JJTV, LiveProvider.TG),
+            ChannelProviderOrder.playbackOrder("143", v2 = false, jio = true, rememberedWebsite = null))
+    }
+
+    @Test fun `a manually chosen provider stays pinned for a playlist channel too`() {
+        assertEquals(listOf(LiveProvider.TG),
+            ChannelProviderOrder.playbackOrder("143", v2 = false, jio = true, rememberedWebsite = JioM3uResolver.SITE,
+                requested = LiveProvider.TG))
+    }
+
     @Test fun `automatic Sony channel selection remains JJTV first with TG fallback`() {
         assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), ChannelProviderOrder.playbackOrder(
             "892", v2 = false, rememberedWebsite = TgResolver.SITE))
