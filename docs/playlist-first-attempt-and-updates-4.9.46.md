@@ -310,9 +310,15 @@ feeds — have no entry in that playlist at all, so the site serves them only th
 which cannot be read. They are left out rather than filled from another provider.
 
 To make the section *all* the Sony this source has, it then adds every remaining channel the playlist
-brands Sony: the regional Sony Yay feeds (Tamil, Telugu, Bengali, Kannada, Malayalam), Sony BBC Earth
-HD and its Tamil and Telugu feeds, Sony SAB SD and Sony MAX1. Channels that merely share a word —
-Mahaa Max, Jaya Max, Aakash Aath, MK Six, Animax — are never pulled in.
+brands Sony: the regional Sony Yay feeds (Tamil 873, Telugu 874, Kannada 3420, Bengali 3424, Malayalam
+3423), Sony BBC Earth HD 821 with its Tamil 853 and Telugu 854 feeds, Sony SAB SD 154 and Sony MAX1
+3418. Channels that merely share a word — Mahaa Max, Jaya Max, Aakash Aath, MK Six, Animax — are never
+pulled in.
+
+The shipped section therefore reads, in order: SET HD 291, Sony SAB HD 471, Sony Pal 474, Sony Wah 1393,
+Sony Marathi SD 1146, Sony Max HD 476, Sony MAX2 483, Sony Pix HD 762, Sony Ten 1 HD 162, Sony Ten 2 HD
+891, Sony Ten 3 Hindi HD 892, Sony Yay Hindi 872, Sony aath 697, Sony BBC Earth HD English 852 — then
+the ten listed above. Twenty-four tiles, every one of them resolved from this playlist.
 
 ### How a tile is bound
 
