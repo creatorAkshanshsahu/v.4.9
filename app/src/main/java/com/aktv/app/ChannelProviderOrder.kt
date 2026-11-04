@@ -9,8 +9,12 @@ internal object ChannelProviderOrder {
         jio: Boolean = false,
         rememberedWebsite: String?,
         requested: LiveProvider? = null,
-        pinned: Boolean = false
+        pinned: Boolean = false,
+        pageOnly: Boolean = false
     ): List<LiveProvider> = when {
+        // A tile the playlist does not carry at all: its only source is the site's own player page, so
+        // there is no native provider to try and nothing to fall back to.
+        pageOnly -> emptyList()
         // A pinned channel (the allinonereborn2.online Sony section) is played from its playlist only.
         // Falling back to another provider would show a different stream than the tile promises.
         pinned -> requested?.let { listOf(it) } ?: listOf(LiveProvider.JIOM3U)

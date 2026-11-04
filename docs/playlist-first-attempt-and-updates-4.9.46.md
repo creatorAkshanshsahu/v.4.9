@@ -306,8 +306,9 @@ The first live run of the section against the real playlist (1169 channels) boun
 22 tiles**: SET HD, Sony SAB HD, Sony Pal, Sony Wah, Sony Marathi SD, Sony Max HD, Sony MAX2, Sony Pix
 HD, Sony Ten 1 HD, Sony Ten 2 HD, Sony Ten 3 Hindi HD, Sony Yay Hindi, Sony aath, Sony BBC Earth HD
 English. The other eight slugs — the SD twins of Ten 1/2/3 and Max, and the Ten 4 and Ten 5 (Six)
-feeds — have no entry in that playlist at all, so the site serves them only through its browser player,
-which cannot be read. They are left out rather than filled from another provider.
+feeds — have no entry in that playlist at all, so the site serves them only through its browser player.
+4.9.51 keeps those eight as tiles and plays them through that page inside the app (section 10); they are
+never filled from another provider.
 
 To make the section *all* the Sony this source has, it then adds every remaining channel the playlist
 brands Sony: the regional Sony Yay feeds (Tamil 873, Telugu 874, Kannada 3420, Bengali 3424, Malayalam
@@ -347,3 +348,28 @@ when it is restored, so a saved tile replays from the same source.
 gone, together with the second row. There is exactly one Sony row in the app — on Live TV and on the
 JioTV tab, both built by `SonyPage.channels()` from the loaded playlist. The JioTV tab's full
 `Allinone Playlist` row and the ordinary catalogue categories are untouched.
+
+## 10. 4.9.51 — every Sony tile has a picture: native playlist first, the site's own player behind it
+
+The section from 4.9.50 resolved natively for the 24 channels the playlist carries, but a tile still
+ended on an error card when the playlist refused its manifest, and the eight page-only slugs (SD twins
+of Ten 1/2/3 and Max, Ten 4 HD/SD, Ten 5 HD/SD) had no tile at all.
+
+Both are now closed without leaving the source:
+
+| tile | what plays it |
+| --- | --- |
+| a page slug the playlist carries (24 channels) | natively from `jtv33.m3u8` — `jtv1.mpd?id=N`, ClearKey, cookie |
+| the same tile when the playlist refuses | the site's own player page, `suniliv.pages.dev/ptest1?id=<slug>`, inside the app |
+| a page slug the playlist does not carry (8 channels) | that same page directly; no native provider is even tried |
+
+The page player is not a new provider and not a browser hand-off: `BrowserActivity` already runs the
+bundled engine with a D-pad pointer, and it now receives the channel's name and opens full screen. The
+rule from 4.9.49 still holds — a tile never falls back to TG or GioTV; the only fallback is the site
+that the section came from.
+
+`Channel.page` carries the slug's player URL and `Channel.pageOnly` marks the eight channels the
+playlist cannot serve. `ChannelProviderOrder.playbackOrder(..., pageOnly = true)` returns an empty list,
+so the native machinery is skipped entirely, and `MainActivity.fail()` closes a playlist refusal by
+opening the page instead of drawing an error. Favourites and recents resolve the section's own tiles, so
+a saved Sony channel keeps working after a restart.

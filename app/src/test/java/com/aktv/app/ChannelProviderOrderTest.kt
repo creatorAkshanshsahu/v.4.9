@@ -70,6 +70,16 @@ class ChannelProviderOrderTest {
                 rememberedWebsite = null, requested = LiveProvider.TG, pinned = true))
     }
 
+    @Test fun `a page-only Sony tile has no native provider so its own player runs`() {
+        assertEquals(emptyList<LiveProvider>(),
+            ChannelProviderOrder.playbackOrder("page:sony-ten-4", v2 = false, jio = false,
+                rememberedWebsite = TgResolver.SITE, pinned = true, pageOnly = true))
+        // A tile the playlist carries still resolves natively; its page is only the fallback.
+        assertEquals(listOf(LiveProvider.JIOM3U),
+            ChannelProviderOrder.playbackOrder("892", v2 = false, jio = true,
+                rememberedWebsite = null, pinned = true, pageOnly = false))
+    }
+
     @Test fun `other V1 channels keep their remembered working provider first`() {
         assertEquals(
             listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U),

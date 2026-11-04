@@ -61,9 +61,14 @@ class MainActivity : AppCompatActivity() {
         val id: String, val name: String, val category: String, val logo: String,
         val v2: Boolean = false, val jio: Boolean = false,
         // Pinned channels are played from the playlist only; no other provider is ever tried.
-        val pinned: Boolean = false
+        val pinned: Boolean = false,
+        // The site's own player page for this channel (the Sony section's slugs). When the playlist has
+        // no stream for the tile, this page plays it inside the app instead of leaving the tile silent.
+        val page: String? = null
     ) {
         val key: String get() = if (v2) "v2:$id" else if (jio) "jio:$id" else id
+        /** A channel the playlist does not carry at all: only its own page can play it. */
+        val pageOnly: Boolean get() = page != null && !jio && !v2
     }
     sealed class Tile {
         data class Ch(val c: Channel) : Tile()
@@ -95,7 +100,9 @@ class MainActivity : AppCompatActivity() {
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
     /** Keys of the Sony section's tiles: playlist-only channels, re-pinned wherever they reappear. */
-    private var sonyPinned = setOf<String>()
+    private var sonyPinned = setOf<String>(); private var sonyTiles = listOf<Channel>()
+    /** The channel whose page player was opened by the fallback, so a retry never bounces into it twice. */
+    private var pageFallbackFor: String? = null
     private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
     private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
@@ -740,7 +747,7 @@ class MainActivity : AppCompatActivity() {
      * it keeps its pin: it must replay from the same source it was saved from.
      */
     private fun channelFor(key: String): Channel? {
-        val found = (pool() + allJio + allV2).firstOrNull { it.key == key } ?: return null
+        val found = (sonyTiles + pool() + allJio + allV2).firstOrNull { it.key == key } ?: return null
         return if (found.key in sonyPinned) found.copy(jio = true, pinned = true) else found
     }
 
@@ -778,7 +785,7 @@ class MainActivity : AppCompatActivity() {
         // The one Sony section. Every tile is a channel of allinonereborn2.online/sony, resolved from that
         // site's own playlist and pinned to it: no TG or GioTV lookup is ever tried for these.
         val sony = SonyPage.channels(allJio)
-        sonyPinned = sony.map { it.key }.toSet()
+        sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
             if (!alwaysOn && sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
@@ -798,7 +805,7 @@ class MainActivity : AppCompatActivity() {
     private fun jioRows(channels: List<Channel>): List<Row> {
         return buildList {
             val sony = SonyPage.channels(channels.ifEmpty { allJio })
-            sonyPinned = sony.map { it.key }.toSet()
+            sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
             if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, favTiles()))
@@ -1109,7 +1116,7 @@ class MainActivity : AppCompatActivity() {
     private fun guideHasSchedule(g: Guide?) = g != null && (g.now != null || g.next != null || g.upcoming.isNotEmpty())
 
     private fun fetchGuide(c: Channel, cb: (Guide?) -> Unit) {
-        if (c.v2) { cb(null); return }
+        if (c.v2 || c.pageOnly) { cb(null); return }
         Epg.cached(c.id)?.let { cb(it); return }
         val leader = synchronized(guideWaiters) {
             val existing = guideWaiters[c.id]
@@ -1362,6 +1369,8 @@ class MainActivity : AppCompatActivity() {
         healthScanAudioStartedAt = 0L; healthScanAudioStartPosition = 0L
         requestedNativeProvider = null
         val ch = shown[current]
+        pageFallbackFor = null
+        if (ch.pageOnly) { rememberChannel(ch); playOnSourcePage(ch); return }
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
         home.visibility = View.INVISIBLE
         heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
@@ -1418,7 +1427,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
-        ch.id, ch.v2, ch.jio, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch), ch.pinned
+        ch.id, ch.v2, ch.jio, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch),
+        ch.pinned, ch.pageOnly
     )
     private fun providerMode(ch: Channel) = if (requestedProvider(ch) == null) "Auto" else "Selected"
     private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(
@@ -1758,7 +1768,7 @@ class MainActivity : AppCompatActivity() {
         playbackActive = true
         diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); freshCredentialProviders.clear(); providerWindow.clear()
         refusalRetryCount = 0
-        compatiblePlayback = savedCompatibility(ch, providerOrder(ch).first())
+        compatiblePlayback = providerOrder(ch).firstOrNull()?.let { savedCompatibility(ch, it) } ?: false
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
     }
@@ -2352,6 +2362,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun fail(message: String) {
+        val failed = shown.getOrNull(current)
+        if (!healthScanActive && failed?.page != null && pageFallbackFor != failed.key) {
+            // The playlist refused every source. The channel is still this site's, so its own player page
+            // plays it inside the app: the tile must never end on a black screen or an error card.
+            recordChannelPlayback(failed, ChannelPlaybackOutcome.FAILED, "$message · opening the source page",
+                providerName(currentNativeProvider), serverIdx + 1)
+            playOnSourcePage(failed)
+            return
+        }
         if (healthScanActive) {
             healthScanChannels.getOrNull(healthScanIndex)?.let { channel ->
                 recordChannelPlayback(channel, ChannelPlaybackOutcome.FAILED, "$message · ${diagnostics.summary()}",
@@ -2368,6 +2387,28 @@ class MainActivity : AppCompatActivity() {
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
         playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
         ui.removeCallbacks(hideInfo); hideInfo.run()
+    }
+
+    /**
+     * Opens the Sony channel's own player page (the same site the section comes from) inside the app, in
+     * the bundled browser, full screen with D-pad control. This is the section's fallback: same source,
+     * played by the site's own player, never a different provider and never a silent tile.
+     */
+    private fun playOnSourcePage(ch: Channel) {
+        val page = ch.page ?: return
+        pageFallbackFor = ch.key
+        ++playToken; resolveJob?.cancel(true)
+        endNativeSession(); releasePlayer()
+        spinner.visibility = View.GONE
+        layer.visibility = View.INVISIBLE
+        home.visibility = View.VISIBLE
+        ImmersiveUi.show(window)
+        startActivity(
+            Intent(this, BrowserActivity::class.java)
+                .putExtra("url", page)
+                .putExtra("title", ch.name)
+                .putExtra("source", "Sony")
+        )
     }
 
     private fun releasePlayer() {
@@ -3018,7 +3059,7 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- focus-driven stream prefetch (metadata only, no second decoder) ----------
     private fun scheduleSourceWarmup(channel: Channel) {
-        if (layer.visibility == View.VISIBLE || searchShown) return
+        if (layer.visibility == View.VISIBLE || searchShown || channel.pageOnly) return
         pendingWarmupChannel = channel
         ui.removeCallbacks(sourceWarmupRunnable)
         ui.postDelayed(sourceWarmupRunnable, 260)

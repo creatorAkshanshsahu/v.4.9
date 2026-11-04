@@ -137,6 +137,15 @@ class BrowserActivity : Activity() {
     private fun controlsHint(): CharSequence {
         val semi = ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD
         val sb = SpannableStringBuilder()
+        // A channel opened from the Sony section names itself here, so the page is clearly that tile.
+        val channel = intent.getStringExtra("title")
+        if (!channel.isNullOrBlank()) {
+            val start = sb.length
+            sb.append(channel)
+            sb.setSpan(ForegroundColorSpan(Accent.TEXT), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.setSpan(TypefaceSpan(semi), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.append("      ")
+        }
         listOf("Arrows" to "Move pointer", "OK" to "Click", "Back" to "Go back").forEachIndexed { i, (k, l) ->
             if (i > 0) sb.append("      ")
             val s = sb.length; sb.append(k)
