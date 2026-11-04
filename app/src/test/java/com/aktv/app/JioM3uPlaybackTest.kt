@@ -56,11 +56,24 @@ class JioM3uPlaybackTest {
         val stream = resolver { TgResponse(200, mpd().toByteArray(), "application/dash+xml", finalUrl = cdnUrl) }
             .resolve("143").single()
         assertEquals(cdnUrl, stream.url)
-        assertTrue(stream.headers.isEmpty())
+        // The media host gets the playlist's own user agent and nothing else: no Origin, no Referer, no
+        // cookie. A foreign browser origin is what Jio's CDN answers with HTTP 451.
+        assertEquals(mapOf("User-Agent" to "@allinone_reborn"), stream.headers)
+        assertTrue(stream.omitOrigin)
         assertEquals(JioM3uResolver.SITE, stream.requestOrigin)
         // The stream no longer carries the Jio CDN token as a cookie, so it cannot be re-sent as `__hdnea__`.
         assertEquals("", stream.cookie)
         assertEquals("dash", stream.type)
+    }
+
+    @Test fun `the playlist host still receives the browser-style headers the site uses`() {
+        val entry = JioM3uProtocol.parse(playlist).single()
+        val probe = JioM3uProtocol.requestHeaders(entry)
+        assertEquals("@allinone_reborn", probe["User-Agent"])
+        assertEquals(JioM3uResolver.SITE, probe["Origin"])
+        assertEquals(JioM3uResolver.SITE + "/", probe["Referer"])
+        // ... while the media host receives only the user agent.
+        assertEquals(mapOf("User-Agent" to "@allinone_reborn"), JioM3uProtocol.mediaHeaders(entry))
     }
 
     @Test fun `a refused request is retried with the playlist's own cookie`() {

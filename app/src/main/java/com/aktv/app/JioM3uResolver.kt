@@ -109,8 +109,9 @@ internal class JioM3uResolver(
         val matched = matchKeys(keys, JioM3uProtocol.defaultKids(manifest))
         val stream = base.copy(
             url = finalUrl,
-            // A redirect to the CDN is served by that CDN with the browser User-Agent, exactly as before.
-            headers = if (sameHost) base.headers else emptyMap(),
+            // The playlist host keeps its browser-style headers; a CDN of another origin gets the
+            // playlist's own user agent and nothing else, the way an IPTV player opens the same link.
+            headers = if (sameHost) base.headers else JioM3uProtocol.mediaHeaders(entry),
             drm = JioM3uProtocol.buildDrm(entry, matched)
         )
         return stream

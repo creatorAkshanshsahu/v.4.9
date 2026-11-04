@@ -6,7 +6,9 @@ import json
 reports = []
 failed = False
 cases = []
-for path in Path('app/build/test-results').glob('*/TEST-com.aktv.app.TgLiveContractTest.xml'):
+live_reports = list(Path('app/build/test-results').glob('*/TEST-com.aktv.app.TgLiveContractTest.xml'))
+live_reports += list(Path('app/build/test-results').glob('*/TEST-com.aktv.app.JioM3uLiveTest.xml'))
+for path in live_reports:
     root = ET.parse(path).getroot()
     failed = failed or root.find('.//failure') is not None or root.find('.//error') is not None
     output_lines = [line for output in root.findall('system-out') for line in (output.text or '').splitlines() if line.startswith('TG_NATIVE ')]

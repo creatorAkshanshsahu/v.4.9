@@ -373,3 +373,38 @@ playlist cannot serve. `ChannelProviderOrder.playbackOrder(..., pageOnly = true)
 so the native machinery is skipped entirely, and `MainActivity.fail()` closes a playlist refusal by
 opening the page instead of drawing an error. Favourites and recents resolve the section's own tiles, so
 a saved Sony channel keeps working after a restart.
+
+## 11. 4.9.52 — the playlist played everywhere except here: a browser origin Jio's CDN refuses
+
+The report was exact: `jtv33.m3u8` opens **every** channel in an ordinary IPTV player, while the app
+played only a couple of them. A playlist that behaves that way is not a playlist problem — the request
+the app sends differs from the request the player sends.
+
+It did. For every channel the app resolved, the request policy attached
+
+    Origin:  https://allinonereborn2.online
+    Referer: https://allinonereborn2.online/
+
+to **every** request, including the ones going to `jiotvmblive.cdn.jio.com` / `jiotvpllive.cdn.jio.com`.
+Jio's CDN treats a foreign browser origin as a hotlink and answers **HTTP 451**; the IPTV player sends
+neither header, which is why the same link worked there. Only the endpoints that ignore the header
+played — the two channels the user still saw.
+
+4.9.52 sends what the playlist itself declares and nothing more:
+
+| request | headers |
+| --- | --- |
+| playlist (`jtv33.m3u8`) and the `jtv1.mpd?id=N` redirect | `User-Agent: @allinone_reborn`, `Origin`/`Referer: allinonereborn2.online` |
+| the signed Jio CDN link and every segment under it | `User-Agent: @allinone_reborn` only — no `Origin`, no `Referer`, no cookie |
+
+`TgStream.omitOrigin` carries that rule into `StreamRequestPolicy`, so segments inherit it too, and the
+signed `__hdnea__` token keeps following the requests as before. Provider identity is unchanged: the
+stream still reports the playlist as its origin, so provider attribution, remembered sources and the
+source fingerprint all behave exactly as they did.
+
+The ClearKey path is untouched — key document over `GET`, KIDs matched against the manifest, JWK
+licence handed to Media3 — because the refusal happened before any key was ever requested.
+
+CI now prints, per channel, what actually happens: playlist path, key-document status and key count,
+the resolved CDN host, the manifest status/bytes, and whether the MPD declares ContentProtection. Zee
+Cinema HD and &TV are the controls; Sony SAB HD and Sony Ten 3 Hindi HD are the reported failures.

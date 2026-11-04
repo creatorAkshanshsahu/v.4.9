@@ -139,7 +139,12 @@ internal object JioM3uProtocol {
             // for the playlist host. Handing it to the request policy made every manifest request carry a
             // stale `__hdnea__` for the wrong resource; the host mints a fresh one on each redirect.
             cookie = "",
-            requestOrigin = SITE
+            requestOrigin = SITE,
+            // ... and no browser origin at all. The media host is Jio's CDN, and it refuses a request that
+            // carries `Origin`/`Referer: allinonereborn2.online` (HTTP 451) far more often than the bare
+            // request a normal IPTV player sends - which is exactly why the same playlist plays there and
+            // not here. The identity above is still the playlist's, so provider attribution is unchanged.
+            omitOrigin = true
         )
     }
 
@@ -158,6 +163,15 @@ internal object JioM3uProtocol {
         headers["Referer"] = "$SITE/"
         return headers
     }
+
+    /**
+     * The headers the *media* host may see after a cross-origin redirect: only the user agent the playlist
+     * declares for these channels. No Origin, no Referer, no cookie - the signed CDN token is already in
+     * the redirected URL, and nothing else about this app's origin should reach Jio's CDN.
+     */
+    fun mediaHeaders(entry: Entry): Map<String, String> = linkedMapOf(
+        "User-Agent" to (entry.userAgent?.takeIf { it.isNotBlank() } ?: UA_OVERRIDE)
+    )
 
     /** The playlist's own `#EXTHTTP` cookie, sent only to the playlist host as a last attempt. */
     fun cookieHeaders(entry: Entry): Map<String, String> =
