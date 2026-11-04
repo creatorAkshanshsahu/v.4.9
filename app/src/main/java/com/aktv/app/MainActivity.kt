@@ -763,20 +763,14 @@ class MainActivity : AppCompatActivity() {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
             // Curated Sony shelf sits above the generic categories so it is one row away from the hero.
             if (!alwaysOn) for (spec in LiveCollections.shelves) {
-                // Sony's page tiles are JioTV channels. When the playlist already carries them, prefer those
-                // tiles: they arrive with their own manifest, ClearKey document and cookie and play directly
-                // on the native player instead of borrowing another provider's lookup first.
+                // The catalogued shelf keeps exactly the tiles it always had.
                 val picked = LiveCollections.channels(spec, channels)
-                val fromPlaylist = LiveCollections.channels(spec, allJio)
-                fun sameName(a: Channel, b: Channel) =
-                    a.name.lowercase().filter { it.isLetterOrDigit() } == b.name.lowercase().filter { it.isLetterOrDigit() }
-                val preferred = when {
-                    fromPlaylist.isEmpty() -> picked
-                    picked.isEmpty() -> fromPlaylist
-                    // Playlist tiles first: they carry their own manifest and keys, so they play at once.
-                    else -> fromPlaylist + picked.filterNot { t -> fromPlaylist.any { sameName(it, t) } }
-                }
-                if (preferred.isNotEmpty()) add(Row(spec.title, preferred.map { Tile.Ch(it) }))
+                if (picked.isNotEmpty()) add(Row(spec.title, picked.map { Tile.Ch(it) }))
+                // A separate section for allinonereborn2.online/sony: those tiles come from the playlist
+                // itself, so each one carries its own manifest, ClearKey document and cookie. It sits next
+                // to the catalogued shelf instead of replacing it.
+                val fromPlaylist = SonyPage.channels(allJio)
+                if (fromPlaylist.isNotEmpty()) add(Row(SonyPage.TITLE, fromPlaylist.map { Tile.Ch(it) }))
             }
             if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
@@ -793,8 +787,8 @@ class MainActivity : AppCompatActivity() {
      */
     private fun jioRows(channels: List<Channel>): List<Row> {
         return buildList {
-            val sony = LiveCollections.channels(LiveCollections.SONY, channels)
-            if (sony.isNotEmpty()) add(Row(LiveCollections.SONY_TITLE, sony.map { Tile.Ch(it) }))
+            val sony = SonyPage.channels(channels)
+            if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, favTiles()))
             addAll(recentRow())

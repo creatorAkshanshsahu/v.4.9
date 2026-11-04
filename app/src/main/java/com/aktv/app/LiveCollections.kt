@@ -22,8 +22,10 @@ package com.aktv.app
  */
 internal object LiveCollections {
 
-    /** Section heading used by the Live tab shelf and by the playlist tab's Sony section. */
-    const val SONY_TITLE = "Sony Live · Allinone"
+    /** The catalogued Sony shelf. It is never replaced: the playlist section below sits next to it. */
+    const val SONY_TITLE = "Sony Live"
+    /** The separate section for the allinonereborn2.online/sony page's channels, played from the playlist. */
+    const val SONY_PLAYLIST_TITLE = "Sony Live · Allinone Playlist"
 
     data class Spec(
         val title: String,
@@ -90,4 +92,70 @@ internal object LiveCollections {
         catalogue.filter { !it.v2 && spec.matches(it.name) }
             .distinctBy { it.key }
             .sortedWith(compareBy({ rank(it.name, spec) }, { it.name.lowercase() }))
+}
+
+/**
+ * The `allinonereborn2.online/sony/` page itself: one tile per channel, in the page's own order.
+ *
+ * The page links every tile to a third-party web player (`suniliv.pages.dev/ptest1.html?id=<slug>`),
+ * which the app never opens. What the page does tell us is *which* Sony channels its author lists and
+ * how they are ordered, so the section is rebuilt from that list and the tiles are then bound to the
+ * playlist's own channels — the ones that carry a native manifest, ClearKey document and cookie.
+ *
+ * A tile is matched by name only. No channel id, stream or credential is copied from the page, and a
+ * channel the loaded catalogue does not carry is left out rather than guessed.
+ */
+internal object SonyPage {
+    data class Tile(val slug: String, val names: List<String>)
+
+    /** Page order, with the names each tile is published under upstream (plain and HD variants differ). */
+    val TILES: List<Tile> = listOf(
+        Tile("sony-hd", listOf("set hd", "sony hd", "sony entertainment television hd")),
+        Tile("sab-hd", listOf("sony sab hd", "sony sab")),
+        Tile("sony-marathi", listOf("sony marathi")),
+        Tile("sony-pal", listOf("sony pal")),
+        Tile("sony-aath", listOf("sony aath", "aath")),
+        Tile("sony-yay", listOf("sony yay")),
+        Tile("sony-max-hd", listOf("sony max hd")),
+        Tile("sony-max", listOf("sony max")),
+        Tile("sony-wah", listOf("sony wah")),
+        Tile("sony-max2", listOf("sony max2")),
+        Tile("sony-pix-hd", listOf("sony pix hd", "sony pix")),
+        Tile("sony-ten-1-hd", listOf("sony ten 1 hd")),
+        Tile("sony-ten-1", listOf("sony ten 1")),
+        Tile("sony-ten-2-hd", listOf("sony ten 2 hd")),
+        Tile("sony-ten-2", listOf("sony ten 2")),
+        Tile("sony-ten-3-hd", listOf("sony ten 3 hd")),
+        Tile("sony-ten-3", listOf("sony ten 3")),
+        Tile("sony-ten-4-hd", listOf("sony ten 4 hd")),
+        Tile("sony-ten-4", listOf("sony ten 4")),
+        Tile("sony-ten-5-hd", listOf("sony ten 5 hd")),
+        Tile("sony-ten-5", listOf("sony ten 5")),
+        Tile("bbc-earth", listOf("bbc earth"))
+    )
+
+    const val TITLE = LiveCollections.SONY_PLAYLIST_TITLE
+
+    private fun normalise(value: String) = value.lowercase().filter { it.isLetterOrDigit() }
+
+    /**
+     * One tile per page channel, in page order. An exact name wins, then the first name that contains
+     * the tile's alias; a channel is used once, so `Sony Ten 3 HD` and `Sony Ten 3` stay two tiles.
+     */
+    fun channels(catalogue: List<MainActivity.Channel>): List<MainActivity.Channel> {
+        val pool = catalogue.filter { !it.v2 }.distinctBy { it.key }
+        if (pool.isEmpty()) return emptyList()
+        val normalised = pool.map { it to normalise(it.name) }
+        val used = LinkedHashSet<String>()
+        val out = ArrayList<MainActivity.Channel>(TILES.size)
+        for (tile in TILES) {
+            val aliases = tile.names.map(::normalise)
+            val exact = normalised.firstOrNull { (channel, name) -> channel.key !in used && name in aliases }?.first
+            val loose = exact ?: normalised.firstOrNull { (channel, name) ->
+                channel.key !in used && aliases.any { alias -> name.contains(alias) }
+            }?.first
+            if (loose != null) { used.add(loose.key); out.add(loose) }
+        }
+        return out
+    }
 }

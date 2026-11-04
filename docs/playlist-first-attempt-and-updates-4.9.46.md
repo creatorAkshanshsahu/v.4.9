@@ -233,3 +233,46 @@ The Sony shelf on the Live tab now prefers the playlist's own tiles (they carry 
 keys, so they play directly) and only falls back to another provider's tile when the playlist does not
 list that channel. The hero's *Play Live* button also stopped playing the first channel of the TG
 catalogue when the hero showed a playlist tile.
+
+## 8. 4.9.48 — what the movie service actually serves, and the separate Sony section
+
+### Movies: a manifest that answers is not a playable source
+
+The live `/api/sources` response was read for two titles (`1288069`, `550`) on both servers. Two shapes
+matter:
+
+- **TG FROST (`tgflix`)** returns DASH through a relay: `https://cinemaos-relay.<x>.workers.dev/?url=…`
+  where the inner URL is `https://holly.mpddash.workers.dev/p/<token>.mpd`. The relay is a generic
+  pass-through proxy (confirmed with an unrelated URL) that rewrites the manifest's `<BaseURL>` to its
+  own `/t/<base64 {"dir","headers"}>/` form. The manifest itself is static DASH, HEVC only
+  (`hev1.1.6.L150.90` …), with **absolute CloudFront segment URLs** carrying `Policy`/`Signature`/
+  `Key-Pair-Id`. Playback therefore never needed the relay for the segments.
+- **TG OUT (`tgout`)** returns signed HLS (`Expires=…&KeyName=Signature&Signature=…`) whose first
+  "720p source" for 1288069 is a **seek-bar sprite sheet**: a genuine `#EXTM3U` whose `#EXTINF` media
+  lines are `.jpg` images under `/720/0000.jpg`. Its header is indistinguishable from video.
+
+The preflight used to accept both. A sprite sheet was *ranked first* and confirmed reachable, so the
+player paid a startup cycle on it before failing — which is exactly "the source is found, the server is
+not". The probe now:
+
+- reads the document (bounded), then fetches **the one media resource it names** — the DASH
+  `initialization` segment with `$RepresentationID$`/`$Number$` substituted and XML escapes decoded, or
+  the HLS `#EXT-X-MAP` / first media segment resolved against the playlist — and requires a 2xx/206 for
+  it. A manifest whose signature has outlived its content no longer counts as confirmed;
+- recognises sprite playlists ([VodPreflight.isImagePlaylist]) and rejects them;
+- runs fewer, wider probes (4 candidates, 2 workers) because every candidate costs a manifest request
+  plus a media request against a rate-limited relay.
+
+A progressive MP4 is checked with a single short ranged request instead of a manifest read.
+
+### Sony: a separate section, and it is not a replacement
+
+`allinonereborn2.online/sony/` lists 22 tiles and hands each to `suniliv.pages.dev/ptest1.html?id=<slug>` —
+a web player this app never opens. The page is still useful as the *list*: which Sony channels its
+author carries and in what order. `SonyPage` rebuilds that list on the native side and binds each tile
+to the **playlist's own channel** by name, so the tile carries the playlist manifest, ClearKey document
+and cookie that 4.9.47 made playable. No id, stream or credential is copied from the page, and a tile
+the loaded catalogue does not carry is left out rather than guessed.
+
+It is a separate row (*Sony Live · Allinone Playlist*). The catalogued *Sony Live* shelf keeps exactly
+the tiles it always had, in the same order: the new section is added beside it, never in place of it.
