@@ -165,13 +165,17 @@ internal object JioM3uProtocol {
     }
 
     /**
-     * The headers the *media* host may see after a cross-origin redirect: only the user agent the playlist
-     * declares for these channels. No Origin, no Referer, no cookie - the signed CDN token is already in
-     * the redirected URL, and nothing else about this app's origin should reach Jio's CDN.
+     * The headers an IPTV player sends for one of these channels, and therefore the only ones this app
+     * sends: the playlist's own `User-Agent`, and the playlist's own `#EXTHTTP` cookie when it declares
+     * one. No `Origin`, no `Referer` - nothing about this app's origin reaches Jio's CDN.
+     *
+     * The cookie is sent as a plain `Cookie` header and never as a signed query parameter: the CDN URL
+     * already carries the token the redirector minted for it.
      */
-    fun mediaHeaders(entry: Entry): Map<String, String> = linkedMapOf(
-        "User-Agent" to (entry.userAgent?.takeIf { it.isNotBlank() } ?: UA_OVERRIDE)
-    )
+    fun mediaHeaders(entry: Entry): Map<String, String> = linkedMapOf<String, String>().apply {
+        put("User-Agent", entry.userAgent?.takeIf { it.isNotBlank() } ?: UA_OVERRIDE)
+        entry.cookie?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
+    }
 
     /** The playlist's own `#EXTHTTP` cookie, sent only to the playlist host as a last attempt. */
     fun cookieHeaders(entry: Entry): Map<String, String> =

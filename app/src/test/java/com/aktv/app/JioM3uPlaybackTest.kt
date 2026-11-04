@@ -56,9 +56,12 @@ class JioM3uPlaybackTest {
         val stream = resolver { TgResponse(200, mpd().toByteArray(), "application/dash+xml", finalUrl = cdnUrl) }
             .resolve("143").single()
         assertEquals(cdnUrl, stream.url)
-        // The media host gets the playlist's own user agent and nothing else: no Origin, no Referer, no
-        // cookie. A foreign browser origin is what Jio's CDN answers with HTTP 451.
-        assertEquals(mapOf("User-Agent" to "@allinone_reborn"), stream.headers)
+        // The media host gets exactly what an IPTV player sends for this link: the playlist's user agent
+        // and its own cookie. No Origin, no Referer.
+        assertEquals(
+            mapOf("User-Agent" to "@allinone_reborn", "Cookie" to "__hdnea__=st=1~exp=2~acl=/*~hmac=abc"),
+            stream.headers
+        )
         assertTrue(stream.omitOrigin)
         assertEquals(JioM3uResolver.SITE, stream.requestOrigin)
         // The stream no longer carries the Jio CDN token as a cookie, so it cannot be re-sent as `__hdnea__`.
@@ -72,8 +75,11 @@ class JioM3uPlaybackTest {
         assertEquals("@allinone_reborn", probe["User-Agent"])
         assertEquals(JioM3uResolver.SITE, probe["Origin"])
         assertEquals(JioM3uResolver.SITE + "/", probe["Referer"])
-        // ... while the media host receives only the user agent.
-        assertEquals(mapOf("User-Agent" to "@allinone_reborn"), JioM3uProtocol.mediaHeaders(entry))
+        // ... while the media host receives the user agent and the playlist's own cookie.
+        assertEquals(
+            mapOf("User-Agent" to "@allinone_reborn", "Cookie" to "__hdnea__=st=1~exp=2~acl=/*~hmac=abc"),
+            JioM3uProtocol.mediaHeaders(entry)
+        )
     }
 
     @Test fun `the first attempt at a channel carries no browser origin`() {
@@ -89,8 +95,8 @@ class JioM3uPlaybackTest {
             }
         })
         resolver.resolve("143")
-        // The IPTV player's request, and the one this endpoint answers: user agent only, no hotlink headers.
-        assertEquals(setOf("User-Agent"), attempts.first().keys)
+        // The IPTV player's request: its user agent and its cookie, and no hotlink headers.
+        assertEquals(setOf("User-Agent", "Cookie"), attempts.first().keys)
         assertEquals("@allinone_reborn", attempts.first()["User-Agent"])
     }
 

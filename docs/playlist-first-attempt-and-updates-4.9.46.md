@@ -374,50 +374,53 @@ so the native machinery is skipped entirely, and `MainActivity.fail()` closes a 
 opening the page instead of drawing an error. Favourites and recents resolve the section's own tiles, so
 a saved Sony channel keeps working after a restart.
 
-## 11. 4.9.52 — the playlist played everywhere except here: a browser origin Jio's CDN refuses
+## 11. 4.9.52–4.9.54 — the playlist plays everywhere except here: request parity with a normal IPTV player
 
 The report was exact: `jtv33.m3u8` opens **every** channel in an ordinary IPTV player, while the app
 played only a couple of them. A playlist that behaves that way is not a playlist problem — the request
 the app sends differs from the request the player sends.
 
-It did. The live report (`JioM3uLiveTest`) settled it on the first run, for all four probed channels —
-including the two that still played:
+### What the live report showed, and what it did not
 
-    channel 165  Zee Cinema HD          jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
-    channel 1106 &TV HD                 jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
-    channel 471  Sony SAB HD            jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
-    channel 892  Sony Ten 3 Hindi HD    jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
+`JioM3uLiveTest` prints, per channel: the playlist path, the key-document status and key count, the host
+that finally answered, the manifest status and size, and whether the MPD declares ContentProtection. First
+run, four channels (Zee Cinema HD 165 and &TV 1106 as controls, Sony SAB HD 471 and Sony Ten 3 Hindi HD
+892 as the reported failures):
 
-The endpoint never even redirected to the CDN: it answered **HTTP 451** to a request that carried
+    all four: jtv1.mpd -> HTTP 451, 0 bytes, no redirect to the CDN
+    key document: 200, 315 bytes / 2 keys (165), 181 bytes / 1 key (471)
 
-    Origin:  https://allinonereborn2.online
-    Referer: https://allinonereborn2.online/
+The same answer for the channels that work and the channels that do not is the useful part: it means the
+CI runner is not measuring this app at all. **Jio refuses non-Indian addresses with HTTP 451**, and the
+GitHub runner is one. Playback for an Indian device cannot be judged from CI, and a change justified by
+that 451 would have been a change made for the wrong reason. The report is still worth having: it proves
+the key document, the playlist and the redirect contract, and it will show a real regression the day a
+channel disappears from the playlist.
 
-which the request policy attached to *every* request it made. The key document answered 200 the whole
-time (315 bytes, 2 keys for 165; 181 bytes, 1 key for 471), so no licence was ever the problem — the
-channel was refused before a manifest existed. An IPTV player sends only the playlist's
-`User-Agent: @allinone_reborn` and works, which is exactly the difference the user reported.
+### So: match the player that works
 
-4.9.53 sends what the playlist itself declares and nothing more:
+An IPTV player opening this playlist sends, for `jtv1.mpd?id=N`:
+
+| header | value |
+| --- | --- |
+| `User-Agent` | `@allinone_reborn` (the playlist's `#EXTVLCOPT`) |
+| `Cookie` | the playlist's `#EXTHTTP` `__hdnea__` token |
+
+and nothing else — no `Origin`, no `Referer`. The app sent the opposite: its own browser User-Agent on the
+CDN, plus `Origin: https://allinonereborn2.online` and `Referer: …/` on every request (including segments),
+because the request policy attached the site origin to every stream.
+
+4.9.52–4.9.54 restore parity:
 
 | request | headers |
 | --- | --- |
-| `jtv33.m3u8` and the first attempt at `jtv1.mpd?id=N` | `User-Agent: @allinone_reborn` only — the request an IPTV player sends, and the one the endpoint answers |
-| later attempts, if that one is refused | the browser-style headers the page itself uses (`Origin`/`Referer`, then the playlist cookie) |
-| the signed Jio CDN link and every segment under it | `User-Agent: @allinone_reborn` only — no `Origin`, no `Referer`, no cookie |
+| `jtv33.m3u8` | playlist user agent |
+| first attempt at `jtv1.mpd?id=N` | playlist user agent + playlist cookie (the IPTV player's request) |
+| later attempts, if that is refused | the page's browser-style headers, then the cookie, then the app user agent |
+| the signed Jio CDN link and every segment under it | playlist user agent + playlist cookie — no `Origin`, no `Referer` |
 
-`TgStream.omitOrigin` carries that rule into `StreamRequestPolicy`, so segments inherit it too, and the
-signed `__hdnea__` token keeps following the requests as before. The resolver's own probe leads with the
-bare request, so it now follows the redirect and hands Media3 the **signed CDN URL** instead of the
-redirector; the browser-style attempts remain behind it as a fallback for channels that want them. Provider identity is unchanged: the
-stream still reports the playlist as its origin, so provider attribution, remembered sources and the
-source fingerprint all behave exactly as they did.
-
-The ClearKey path is untouched — key document over `GET`, KIDs matched against the manifest, JWK
-licence handed to Media3 — because the refusal happened before any key was ever requested.
-
-CI now prints, per channel, what actually happens: playlist path, key-document status and key count, the
-resolved CDN host, the manifest status/bytes, and whether the MPD declares ContentProtection. Zee Cinema
-HD and &TV are the controls; Sony SAB HD and Sony Ten 3 Hindi HD are the reported failures. A run that
-reports `finalHost: jiotv*mblive.cdn.jio.com`, `finalTokens: 1..2` and `manifestStatus: 200` is the proof
-that the channel is reachable; the previous run reported the playlist host and 451 for all four.
+`TgStream.omitOrigin` carries the rule into `StreamRequestPolicy` so segments inherit it, and the cookie
+stays a plain `Cookie` header: it is never re-sent as a `?__hdnea__=` query parameter, which is what broke
+the redirector in 4.9.47. Provider identity, remembered sources, the source fingerprint and the whole
+ClearKey path (key document over `GET`, KIDs matched against the manifest, JWK licence to Media3) are
+unchanged.
