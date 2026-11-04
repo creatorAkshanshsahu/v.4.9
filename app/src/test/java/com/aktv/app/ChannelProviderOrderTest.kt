@@ -6,21 +6,21 @@ import org.junit.Test
 class ChannelProviderOrderTest {
     @Test fun `Sony YAY respects JJTV first even when a different device remembered TG`() {
         assertEquals(
-            listOf(LiveProvider.JJTV, LiveProvider.TG),
+            listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U),
             ChannelProviderOrder.order("872", v2 = false, rememberedWebsite = TgResolver.SITE)
         )
     }
 
     @Test fun `Sony Ten 3 HD tries JJTV first as requested and retains TG fallback`() {
         assertEquals(
-            listOf(LiveProvider.JJTV, LiveProvider.TG),
+            listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U),
             ChannelProviderOrder.order("892", v2 = false, rememberedWebsite = TgResolver.SITE)
         )
     }
 
     @Test fun `explicit TG selection still overrides Sony Ten 3 HD automatic preference`() {
         assertEquals(
-            listOf(LiveProvider.TG, LiveProvider.JJTV),
+            listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U),
             ChannelProviderOrder.order("892", v2 = false, rememberedWebsite = JjtvResolver.SITE,
                 requested = LiveProvider.TG)
         )
@@ -28,7 +28,7 @@ class ChannelProviderOrderTest {
 
     @Test fun `explicit source selection overrides Sony YAY automatic preference`() {
         assertEquals(
-            listOf(LiveProvider.TG, LiveProvider.JJTV),
+            listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U),
             ChannelProviderOrder.order("872", v2 = false, rememberedWebsite = JjtvResolver.SITE,
                 requested = LiveProvider.TG)
         )
@@ -53,13 +53,13 @@ class ChannelProviderOrderTest {
     }
 
     @Test fun `automatic Sony channel selection remains JJTV first with TG fallback`() {
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), ChannelProviderOrder.playbackOrder(
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U), ChannelProviderOrder.playbackOrder(
             "892", v2 = false, rememberedWebsite = TgResolver.SITE))
     }
 
     @Test fun `other V1 channels keep their remembered working provider first`() {
         assertEquals(
-            listOf(LiveProvider.TG, LiveProvider.JJTV),
+            listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U),
             ChannelProviderOrder.order("1108", v2 = false, rememberedWebsite = TgResolver.SITE)
         )
     }
