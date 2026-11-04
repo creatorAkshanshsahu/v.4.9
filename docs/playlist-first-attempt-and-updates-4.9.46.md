@@ -380,31 +380,44 @@ The report was exact: `jtv33.m3u8` opens **every** channel in an ordinary IPTV p
 played only a couple of them. A playlist that behaves that way is not a playlist problem — the request
 the app sends differs from the request the player sends.
 
-It did. For every channel the app resolved, the request policy attached
+It did. The live report (`JioM3uLiveTest`) settled it on the first run, for all four probed channels —
+including the two that still played:
+
+    channel 165  Zee Cinema HD          jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
+    channel 1106 &TV HD                 jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
+    channel 471  Sony SAB HD            jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
+    channel 892  Sony Ten 3 Hindi HD    jtv1.mpd  -> HTTP 451, 0 bytes, no redirect
+
+The endpoint never even redirected to the CDN: it answered **HTTP 451** to a request that carried
 
     Origin:  https://allinonereborn2.online
     Referer: https://allinonereborn2.online/
 
-to **every** request, including the ones going to `jiotvmblive.cdn.jio.com` / `jiotvpllive.cdn.jio.com`.
-Jio's CDN treats a foreign browser origin as a hotlink and answers **HTTP 451**; the IPTV player sends
-neither header, which is why the same link worked there. Only the endpoints that ignore the header
-played — the two channels the user still saw.
+which the request policy attached to *every* request it made. The key document answered 200 the whole
+time (315 bytes, 2 keys for 165; 181 bytes, 1 key for 471), so no licence was ever the problem — the
+channel was refused before a manifest existed. An IPTV player sends only the playlist's
+`User-Agent: @allinone_reborn` and works, which is exactly the difference the user reported.
 
-4.9.52 sends what the playlist itself declares and nothing more:
+4.9.53 sends what the playlist itself declares and nothing more:
 
 | request | headers |
 | --- | --- |
-| playlist (`jtv33.m3u8`) and the `jtv1.mpd?id=N` redirect | `User-Agent: @allinone_reborn`, `Origin`/`Referer: allinonereborn2.online` |
+| `jtv33.m3u8` and the first attempt at `jtv1.mpd?id=N` | `User-Agent: @allinone_reborn` only — the request an IPTV player sends, and the one the endpoint answers |
+| later attempts, if that one is refused | the browser-style headers the page itself uses (`Origin`/`Referer`, then the playlist cookie) |
 | the signed Jio CDN link and every segment under it | `User-Agent: @allinone_reborn` only — no `Origin`, no `Referer`, no cookie |
 
 `TgStream.omitOrigin` carries that rule into `StreamRequestPolicy`, so segments inherit it too, and the
-signed `__hdnea__` token keeps following the requests as before. Provider identity is unchanged: the
+signed `__hdnea__` token keeps following the requests as before. The resolver's own probe leads with the
+bare request, so it now follows the redirect and hands Media3 the **signed CDN URL** instead of the
+redirector; the browser-style attempts remain behind it as a fallback for channels that want them. Provider identity is unchanged: the
 stream still reports the playlist as its origin, so provider attribution, remembered sources and the
 source fingerprint all behave exactly as they did.
 
 The ClearKey path is untouched — key document over `GET`, KIDs matched against the manifest, JWK
 licence handed to Media3 — because the refusal happened before any key was ever requested.
 
-CI now prints, per channel, what actually happens: playlist path, key-document status and key count,
-the resolved CDN host, the manifest status/bytes, and whether the MPD declares ContentProtection. Zee
-Cinema HD and &TV are the controls; Sony SAB HD and Sony Ten 3 Hindi HD are the reported failures.
+CI now prints, per channel, what actually happens: playlist path, key-document status and key count, the
+resolved CDN host, the manifest status/bytes, and whether the MPD declares ContentProtection. Zee Cinema
+HD and &TV are the controls; Sony SAB HD and Sony Ten 3 Hindi HD are the reported failures. A run that
+reports `finalHost: jiotv*mblive.cdn.jio.com`, `finalTokens: 1..2` and `manifestStatus: 200` is the proof
+that the channel is reachable; the previous run reported the playlist host and 451 for all four.

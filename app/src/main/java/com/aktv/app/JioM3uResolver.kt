@@ -69,7 +69,11 @@ internal class JioM3uResolver(
         var base = JioM3uProtocol.toTgStream(entry, keys)
         if (type == "mp4") return base
         val plain = JioM3uProtocol.requestHeaders(entry)
-        val attempts = ArrayList<Map<String, String>>(3).apply {
+        val attempts = ArrayList<Map<String, String>>(4).apply {
+            // First the request an IPTV player sends, because that is the one this endpoint answers: a
+            // `jtv1.mpd?id=N` request carrying `Origin`/`Referer` is refused with HTTP 451 before it ever
+            // redirects to the CDN, which is why every channel except the few that ignore it stayed black.
+            add(JioM3uProtocol.mediaHeaders(entry))
             add(plain)
             val cookie = JioM3uProtocol.cookieHeaders(entry)
             if (cookie.isNotEmpty()) add(plain + cookie)

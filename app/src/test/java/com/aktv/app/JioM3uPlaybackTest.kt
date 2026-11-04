@@ -76,6 +76,24 @@ class JioM3uPlaybackTest {
         assertEquals(mapOf("User-Agent" to "@allinone_reborn"), JioM3uProtocol.mediaHeaders(entry))
     }
 
+    @Test fun `the first attempt at a channel carries no browser origin`() {
+        val attempts: MutableList<Map<String, String>> = ArrayList()
+        val resolver = JioM3uResolver(http = { url, headers ->
+            when {
+                url.contains("keyid.php") -> TgResponse(200, keyDoc.toByteArray())
+                url.contains(".mpd") -> {
+                    attempts.add(headers)
+                    TgResponse(200, mpd().toByteArray(), "application/dash+xml", finalUrl = cdnUrl)
+                }
+                else -> TgResponse(200, playlist.toByteArray(), "application/vnd.apple.mpegurl")
+            }
+        })
+        resolver.resolve("143")
+        // The IPTV player's request, and the one this endpoint answers: user agent only, no hotlink headers.
+        assertEquals(setOf("User-Agent"), attempts.first().keys)
+        assertEquals("@allinone_reborn", attempts.first()["User-Agent"])
+    }
+
     @Test fun `a refused request is retried with the playlist's own cookie`() {
         val stream = resolver { call ->
             if (call == 0) TgResponse(403, ByteArray(0)) else TgResponse(200, mpd().toByteArray(), finalUrl = cdnUrl)
