@@ -124,8 +124,12 @@ internal object Updater {
         } ?: throw IOException("Update service returned no body")
         val release = UpdateManifest.parse(body) ?: throw IOException("Update service returned an unusable manifest")
         val prefs = context.getSharedPreferences("aktv", Context.MODE_PRIVATE)
+        // The running binary stays the old one until the system swap finishes, so a build this app already
+        // handed to the installer counts as installed - otherwise the same update is offered on every launch.
+        val handedOver = prefs.getLong("update_installed_code", 0L)
+        val known = maxOf(installedCode(context), handedOver)
         return release.takeIf {
-            UpdateManifest.isNewer(installedCode(context), it, prefs.getString("update_installed_sha", null))
+            UpdateManifest.isNewer(known, it, prefs.getString("update_installed_sha", null))
         }
     }
 

@@ -57,11 +57,17 @@ jobs:
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
           python3 .github/scripts/verify-apk-archives.py out
+      - name: Read the build number
+        if: success()
+        id: build
+        run: |
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1) || version=""
+          echo "version=${version:-unknown}" >> "$GITHUB_OUTPUT"
       - name: Publish the APKs
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-4.9.45
+          name: AK-TV-${{ steps.build.outputs.version }}
           path: |
             out/*.apk
             out/SHA256SUMS
