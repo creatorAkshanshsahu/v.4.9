@@ -17,10 +17,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: 8.9
-          cache-disabled: true
+      - name: Download Gradle 8.9 directly (bypass cache infrastructure)
+        run: |
+          cd /tmp
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-8.9-bin.zip"
+          unzip -q gradle.zip
+          echo "GRADLE_HOME=/tmp/gradle-8.9" >> "$GITHUB_ENV"
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
       - name: Verify the preserved playback contracts
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Compile every variant and run the offline unit tests
