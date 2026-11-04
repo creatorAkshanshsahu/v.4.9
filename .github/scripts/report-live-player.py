@@ -21,7 +21,8 @@ for path in Path('app/build/test-results').glob('*/TEST-com.aktv.app.TgLiveContr
 unique = list(dict.fromkeys(reports))
 # The shelf line is emitted with `put("provider", ...)` before `put("step", ...)`, so the key order is
 # fixed; match either spelling and either key order rather than assuming one serialisation.
-shelf = [line for line in unique if 'sonyShelf' in line and 'LiveCollections' in line]
+shelf = [line for line in unique if 'sonySection' in line and 'SonyPage' in line]
+shelf += [line for line in unique if 'sonyShelf' in line and 'LiveCollections' in line]
 others = [line for line in unique if line not in shelf]
 text = ('LIVE_CASES ' + json.dumps(cases) + '\n' if cases else '') + '\n'.join(shelf + others)
 text = text[:24000]

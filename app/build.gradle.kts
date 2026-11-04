@@ -39,6 +39,7 @@ android {
             it.systemProperty("aktv.ui.previewDir", project.layout.buildDirectory.dir("reports/ui-preview").get().asFile.absolutePath)
             it.systemProperty("aktv.live.tg", project.findProperty("liveTg")?.toString() ?: "false")
             it.systemProperty("aktv.live.frost", project.findProperty("liveFrost")?.toString() ?: "false")
+            it.systemProperty("aktv.live.jio", project.findProperty("liveJio")?.toString() ?: "false")
         }
     }
     flavorDimensions += "abi"

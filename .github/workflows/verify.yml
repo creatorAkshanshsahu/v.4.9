@@ -44,7 +44,9 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: |
-          gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' -PliveTg=true --console=plain 2>&1 | tail -20 || true
+          # One run, so both live reports land in the same result XML: the TG feed and the playlist the
+          # one Sony section is bound to.
+          gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' -PliveTg=true -PliveJio=true --console=plain 2>&1 | tail -20 || true
           python3 .github/scripts/report-live-player.py
       - name: Stage APKs
         if: success()
