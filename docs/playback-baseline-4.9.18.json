@@ -8,13 +8,6 @@
       "unchanged": "Request construction, discovery, cookie selection, caching, DRM and limits are byte-identical apart from the site constant."
     },
     {
-      "change": "Adds forgetPreviousLiveSite(): clears only source_provider_*, source_* and native_compat_* hints that name the previous site.",
-      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-      "from": "0bd1e84f2223a2c6a0256368c3f5de0f30b3d73c90c05c0aafea8082ec27425c",
-      "to": "bcf6e880990094e7f23940949926e5d7c0fa2db3883e4a70fce36ff76be71594",
-      "unchanged": "TG resolve/invalidate/refreshSite logic and the persisted TG function id are unchanged."
-    },
-    {
       "change": "Adds displayName(); provider names shown to the user now follow the configured site. Enum, ordering and sourceKey are unchanged.",
       "file": "app/src/main/java/com/aktv/app/LiveProviders.kt",
       "from": "79d52aaaa8ba1d4f1481c6e45e922a51c2732d7f0287893895c3d72015957975",
@@ -22,11 +15,11 @@
       "unchanged": "Provider order, V2 guard, provider(source) and the source fingerprint are unchanged."
     },
     {
-      "change": "Adds invalidateJio(): the playlist channel provider can drop its cached M3U8 catalogue, cookie and ClearKey key document on a refused request.",
+      "change": "Playlist (JIOM3U) additions only: new invalidateJio(), and jioCatalogue() is now internal because it returns the playlist's internal Entry type.",
       "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-      "from": "2863dc5b17eca54286c95690c0c0dcc17c481558c813ce9092ac11507f37e513",
-      "to": "5832217eb1997d14e8343e0dae8ee3661648c57a936180b01d88ce0c56d879f2",
-      "unchanged": "TG/JJTV resolve, discovery, caching, persisted TG function id and forgetPreviousLiveSite are byte-identical; no existing provider call was modified."
+      "from": "0bd1e84f2223a2c6a0256368c3f5de0f30b3d73c90c05c0aafea8082ec27425c",
+      "to": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
+      "unchanged": "TgResolver/JjtvResolver calls, discovery, caching, the persisted TG function id and forgetPreviousLiveSite are byte-identical; no existing provider call, request or DRM rule was modified."
     }
   ],
   "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -46,7 +39,7 @@
     "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
     "app/src/main/java/com/aktv/app/TgProtocol.kt": "abeff56787f99ca1fae5b418a0a66c393218e34bac7dc7613ac02f93efd085ee",
     "app/src/main/java/com/aktv/app/TgResolver.kt": "e7d1280843ea87bdc35b0c5719f4052ab14e7d402ecd7463a99353128c0af6c1",
-    "app/src/main/java/com/aktv/app/TgServers.kt": "5832217eb1997d14e8343e0dae8ee3661648c57a936180b01d88ce0c56d879f2"
+    "app/src/main/java/com/aktv/app/TgServers.kt": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25"
   },
   "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }
