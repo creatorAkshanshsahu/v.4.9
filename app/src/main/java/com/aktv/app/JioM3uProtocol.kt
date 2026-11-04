@@ -74,7 +74,8 @@ internal object JioM3uProtocol {
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
-            val ext = parseExtinf(line) ?: run { i++; continue }
+            val ext = parseExtinf(line)
+            if (ext == null) { i++; continue }
             val (id, name, category, logo) = ext
 
             var licenseKey: String? = null
