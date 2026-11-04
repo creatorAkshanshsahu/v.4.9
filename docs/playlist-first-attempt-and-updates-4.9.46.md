@@ -201,3 +201,35 @@ newer asset and hands it to the system installer, so the app updates over itself
 `Updater.check()` compares the manifest's `versionCode` with `max(installed versionCode,
 update_installed_code)`. The second term matters because the running process keeps the old binary
 until the system swap completes — without it the same update would be offered on every launch.
+
+## 7. 4.9.47 — why the playlist channels refused to start, and what changed
+
+The 4.9.46 build listed the playlist's channels but none of them played. Two faults, both in the
+hand-over between the playlist and the player:
+
+1. **A Jio CDN token was sent where it does not belong.** The playlist's `#EXTHTTP` cookie is not a
+   cookie for `allinonereborn2.online`; it is a signed Jio CDN token (`st`/`exp`/`acl`/`hmac`) for the
+   channel's manifest path, and the playlist's copy expires within hours. The stream carried it as
+   `TgStream.cookie`, so the request policy re-sent it as `?__hdnea__=…` on every manifest request —
+   the redirector was handed a signature it never minted. The stream no longer carries it; it is used
+   only as a `Cookie` header on the playlist host, and only as a fallback attempt.
+2. **The player was pointed at a 302.** `jtv1.mpd?id=N` only answers with a redirect to
+   `jiotvmblive.cdn.jio.com`, and a refusal at either hop surfaced as an opaque decoder error. The
+   resolver now opens the channel itself: it follows the redirect, checks that the body really is a
+   manifest (`<MPD`, or `#EXTM3U` for HLS), and hands Media3 the **signed CDN address that answered**.
+   If the CDN address is another origin, the playlist's headers are dropped for it, exactly as the
+   redirect would have done.
+
+The probe never removes a candidate: if every attempt fails, the advertised URL is kept and the
+refusal (`HTTP 403`, `network error`, `not a DASH manifest`) is appended to the source label, which is
+what the source list and the playback details dialog show.
+
+One more rule was added while checking the failure mode: a ClearKey licence must name the key id the
+manifest actually uses. When the key document and the MPD's `cenc:default_KID` disagree, a single
+advertised key is now relabelled onto the manifest's key id instead of being offered under a key id no
+sample uses — that case decrypts nothing and shows a black screen with no error text.
+
+The Sony shelf on the Live tab now prefers the playlist's own tiles (they carry their manifest and
+keys, so they play directly) and only falls back to another provider's tile when the playlist does not
+list that channel. The hero's *Play Live* button also stopped playing the first channel of the TG
+catalogue when the hero showed a playlist tile.

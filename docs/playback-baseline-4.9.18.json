@@ -20,6 +20,13 @@
       "from": "0bd1e84f2223a2c6a0256368c3f5de0f30b3d73c90c05c0aafea8082ec27425c",
       "to": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
       "unchanged": "TgResolver/JjtvResolver calls, discovery, caching, the persisted TG function id and forgetPreviousLiveSite are byte-identical; no existing provider call, request or DRM rule was modified."
+    },
+    {
+      "change": "TgResponse gains an optional finalUrl: the address after redirects, so a playlist probe can keep the signed CDN URL instead of the redirecting one.",
+      "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
+      "from": "e7d1280843ea87bdc35b0c5719f4052ab14e7d402ecd7463a99353128c0af6c1",
+      "to": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
+      "unchanged": "Request construction, headers, timeouts, discovery, caching, response decoding and every limit are byte-identical; the new field defaults to null for every existing caller."
     }
   ],
   "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -38,7 +45,7 @@
     "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
     "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
     "app/src/main/java/com/aktv/app/TgProtocol.kt": "abeff56787f99ca1fae5b418a0a66c393218e34bac7dc7613ac02f93efd085ee",
-    "app/src/main/java/com/aktv/app/TgResolver.kt": "e7d1280843ea87bdc35b0c5719f4052ab14e7d402ecd7463a99353128c0af6c1",
+    "app/src/main/java/com/aktv/app/TgResolver.kt": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
     "app/src/main/java/com/aktv/app/TgServers.kt": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25"
   },
   "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"

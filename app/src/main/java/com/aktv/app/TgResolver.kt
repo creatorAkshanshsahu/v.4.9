@@ -12,7 +12,14 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null)
+internal data class TgResponse(
+    val code: Int,
+    val body: ByteArray,
+    val contentType: String = "application/json",
+    val serverTimeMs: Long? = null,
+    /** URL after every redirect, when the transport followed one. Null when the request was not redirected. */
+    val finalUrl: String? = null
+)
 internal fun interface TgTransport { fun get(url: String, headers: Map<String, String>): TgResponse }
 
 internal class TgHttp : TgTransport {
@@ -36,7 +43,9 @@ internal class TgHttp : TgTransport {
                 }
                 output.toByteArray()
             } ?: ByteArray(0)
-            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime)
+            // The signed CDN address behind a playlist redirector is the useful part of a manifest probe.
+            val finalUrl = response.request.url.toString().takeIf { it != url }
+            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime, finalUrl)
         }
     }
 

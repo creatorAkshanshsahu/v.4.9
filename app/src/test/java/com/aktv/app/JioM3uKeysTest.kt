@@ -72,12 +72,15 @@ class JioM3uKeysTest {
         assertNull(drm.optString("licenseUrl").takeIf { it.isNotEmpty() })
     }
 
-    @Test fun `the stream keeps the playlist cookie and browser headers`() {
+    @Test fun `the stream keeps the browser headers but not the CDN token`() {
         val stream = JioM3uProtocol.toTgStream(entry(), JioM3uProtocol.parseKeys(keyDoc))
         assertEquals("dash", stream.type)
         assertEquals(JioM3uResolver.SITE, stream.requestOrigin)
         assertEquals("@allinone_reborn", stream.headers["User-Agent"])
-        assertEquals("__hdnea__=st=1~exp=2~acl=/*~hmac=abc", stream.cookie)
+        // `#EXTHTTP` here is a Jio CDN token, not a cookie for the playlist host: keeping it on the stream
+        // made the request policy re-send it as `?__hdnea__=…` to a host that never minted it.
+        assertEquals("", stream.cookie)
+        assertEquals("__hdnea__=st=1~exp=2~acl=/*~hmac=abc", JioM3uProtocol.cookieHeaders(entry())["Cookie"])
         assertNotNull(stream.drm)
     }
 

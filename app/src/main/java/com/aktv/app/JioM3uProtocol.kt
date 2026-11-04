@@ -128,26 +128,65 @@ internal object JioM3uProtocol {
 
     /** Build a TgStream from an Entry, attaching ClearKey DRM (inline keys and/or a fetched key document). */
     fun toTgStream(entry: Entry, keys: Map<String, String> = emptyMap()): TgStream {
-        val type = when (entry.url.substringAfterLast('.', "").substringBefore('?').lowercase()) {
-            "mpd" -> "dash"
-            "m3u8" -> "hls"
-            else -> "dash"
-        }
-        val headers = linkedMapOf<String, String>()
-        entry.userAgent?.let { headers["User-Agent"] = it }
-        headers["Origin"] = SITE
-        headers["Referer"] = "$SITE/"
-
         val drm = buildDrm(entry, keys)
         return TgStream(
             label = entry.name,
             url = entry.url,
-            type = type,
+            type = mediaType(entry.url),
             drm = drm,
-            headers = headers,
-            cookie = entry.cookie.orEmpty(),
+            headers = requestHeaders(entry),
+            // Deliberately empty: this playlist's `#EXTHTTP` cookie holds a *Jio CDN* token, not a cookie
+            // for the playlist host. Handing it to the request policy made every manifest request carry a
+            // stale `__hdnea__` for the wrong resource; the host mints a fresh one on each redirect.
+            cookie = "",
             requestOrigin = SITE
         )
+    }
+
+    /** "dash", "hls" or "mp4" from the media URL, never from the page. */
+    fun mediaType(url: String): String = when (url.substringAfterLast('.', "").substringBefore('?').lowercase()) {
+        "m3u8" -> "hls"
+        "mp4" -> "mp4"
+        else -> "dash"
+    }
+
+    /** The headers the playlist itself declares for its media URL. */
+    fun requestHeaders(entry: Entry): Map<String, String> {
+        val headers = linkedMapOf<String, String>()
+        entry.userAgent?.takeIf { it.isNotBlank() }?.let { headers["User-Agent"] = it }
+        headers["Origin"] = SITE
+        headers["Referer"] = "$SITE/"
+        return headers
+    }
+
+    /** The playlist's own `#EXTHTTP` cookie, sent only to the playlist host as a last attempt. */
+    fun cookieHeaders(entry: Entry): Map<String, String> =
+        entry.cookie?.takeIf { it.isNotBlank() }?.let { mapOf("Cookie" to it) } ?: emptyMap()
+
+    /** A real manifest, not an HTML error page or a login wall that happens to return 200. */
+    fun isManifest(type: String, body: String): Boolean {
+        val head = body.take(2048)
+        return when (type) {
+            "hls" -> head.trimStart().startsWith("#EXTM3U")
+            "mp4" -> false
+            else -> head.contains("<MPD", true) || head.contains("urn:mpeg:dash", true)
+        }
+    }
+
+    /**
+     * `cenc:default_KID` values advertised by an MPD, normalised to the base64url form ClearKey uses.
+     * A manifest may carry several; an empty list means the manifest declares no content key at all.
+     */
+    fun defaultKids(mpd: String): Set<String> {
+        val out = LinkedHashSet<String>()
+        Regex("""cenc:default_KID\s*=\s*["'](?<kid>[0-9a-fA-F-]{32,36})["']""").findAll(mpd).forEach { match ->
+            val hex = match.groupValues[1].replace("-", "")
+            if (hex.length == 32) {
+                val bytes = ByteArray(16) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+                out.add(java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
+            }
+        }
+        return out
     }
 
     /**

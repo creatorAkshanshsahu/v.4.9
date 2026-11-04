@@ -724,7 +724,7 @@ class MainActivity : AppCompatActivity() {
         jioCatalogLoaded = true
         if (list == allJio) return
         allJio = list; seedAccents(list); updateStatus()
-        if (tab == 2) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
+        if (tab == 2 || tab == 0) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
         if (searchShown) updateResults()
     }
     private fun favTiles(): List<Tile> {
@@ -763,8 +763,20 @@ class MainActivity : AppCompatActivity() {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
             // Curated Sony shelf sits above the generic categories so it is one row away from the hero.
             if (!alwaysOn) for (spec in LiveCollections.shelves) {
+                // Sony's page tiles are JioTV channels. When the playlist already carries them, prefer those
+                // tiles: they arrive with their own manifest, ClearKey document and cookie and play directly
+                // on the native player instead of borrowing another provider's lookup first.
                 val picked = LiveCollections.channels(spec, channels)
-                if (picked.isNotEmpty()) add(Row(spec.title, picked.map { Tile.Ch(it) }))
+                val fromPlaylist = LiveCollections.channels(spec, allJio)
+                fun sameName(a: Channel, b: Channel) =
+                    a.name.lowercase().filter { it.isLetterOrDigit() } == b.name.lowercase().filter { it.isLetterOrDigit() }
+                val preferred = when {
+                    fromPlaylist.isEmpty() -> picked
+                    picked.isEmpty() -> fromPlaylist
+                    // Playlist tiles first: they carry their own manifest and keys, so they play at once.
+                    else -> fromPlaylist + picked.filterNot { t -> fromPlaylist.any { sameName(it, t) } }
+                }
+                if (preferred.isNotEmpty()) add(Row(spec.title, preferred.map { Tile.Ch(it) }))
             }
             if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
@@ -1028,7 +1040,9 @@ class MainActivity : AppCompatActivity() {
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
                 heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
-                    shown = (if (t.c.v2) allV2 else all).ifEmpty { listOf(t.c) }; shownCat = t.c.category
+                    // The hero can show a playlist tile; it must then play that tile, not the TG catalogue's first row.
+                    val pool = when { t.c.v2 -> allV2; t.c.jio -> allJio; else -> all }
+                    shown = pool.ifEmpty { listOf(t.c) }; shownCat = t.c.category
                     play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
                 } })
                 heroChips.addView(chip("ⓘ   Details").apply { setOnClickListener { showHomeChannelDetails(t.c) } })

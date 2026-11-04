@@ -1,6 +1,8 @@
 package com.aktv.app
 
 import java.io.IOException
+import java.io.InterruptedIOException
+import java.net.URI
 
 /**
  * Fetches the allinonereborn2.online JioTV m3u8 playlist and resolves channels natively.
@@ -22,6 +24,8 @@ internal class JioM3uResolver(
         const val SITE = JioM3uProtocol.SITE
         /** Key documents are small and rotate rarely; a rejected channel re-reads them through `fresh`. */
         private const val KEY_TTL_MS = 10 * 60_000L
+        /** The probe must stay well inside the provider's playback window, so it never becomes the delay. */
+        private const val PROBE_BUDGET_MS = 8_000L
     }
     private data class Cached<T>(val until: Long, val value: T)
     private var playlistCache: Cached<List<JioM3uProtocol.Entry>>? = null
@@ -41,11 +45,88 @@ internal class JioM3uResolver(
 
         val entries = loadPlaylist(fresh)
         val entry = entries.firstOrNull { it.id == id } ?: throw IOException("JioTV m3u8 has no matching channel ID")
-        val stream = JioM3uProtocol.toTgStream(entry, keysFor(entry, fresh))
+        val stream = open(entry, keysFor(entry, fresh))
         val result = listOf(stream)
         val until = elapsed() + 30_000
         if (until > elapsed()) sources[id] = Cached(until, result)
         return result
+    }
+
+    /**
+     * Open the channel the way a player would, and hand Media3 the address that actually answered.
+     *
+     * Two things made these channels fail before. The playlist's `#EXTHTTP` cookie is a *Jio CDN* token;
+     * the player's request policy re-sent it as `?__hdnea__=…` on the playlist host, so the redirector
+     * was asked for a channel with a signed query it did not mint (and those tokens expire within hours).
+     * And the player was pointed at a URL that only answers with a 302, so a redirect the site refuses
+     * surfaced as an opaque decoder error instead of "HTTP 403".
+     *
+     * The probe follows the redirect here, keeps the signed CDN address, validates that the body really is
+     * a manifest, and retries with the playlist's own cookie when the host refuses a plain request.
+     */
+    private fun open(entry: JioM3uProtocol.Entry, keys: Map<String, String>): TgStream {
+        val type = JioM3uProtocol.mediaType(entry.url)
+        var base = JioM3uProtocol.toTgStream(entry, keys)
+        if (type == "mp4") return base
+        val plain = JioM3uProtocol.requestHeaders(entry)
+        val attempts = ArrayList<Map<String, String>>(3).apply {
+            add(plain)
+            val cookie = JioM3uProtocol.cookieHeaders(entry)
+            if (cookie.isNotEmpty()) add(plain + cookie)
+            add(plain + ("User-Agent" to TgHttp.USER_AGENT))
+        }
+        var refusal = ""
+        val started = elapsed()
+        for (headers in attempts) {
+            checkInterrupted()
+            if (elapsed() - started > PROBE_BUDGET_MS) { if (refusal.isEmpty()) refusal = "probe timed out"; break }
+            val response = try {
+                http.get(entry.url, headers)
+            } catch (error: InterruptedIOException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (response == null) { refusal = "network error"; continue }
+            if (response.code !in 200..299) { refusal = "HTTP ${response.code}"; continue }
+            val body = response.body.toString(Charsets.UTF_8)
+            if (!JioM3uProtocol.isManifest(type, body)) { refusal = "not a ${type.uppercase()} manifest"; continue }
+            val finalUrl = response.finalUrl?.takeIf { it.startsWith("https://", true) } ?: entry.url
+            base = tuned(base, entry, finalUrl, body, keys)
+            return base
+        }
+        // The player still gets the advertised URL: a probe is not allowed to remove a candidate.
+        return base.copy(label = "${base.label} · $refusal")
+    }
+
+    /** Keep the manifest's own key ids, and stop sending the playlist's headers to a CDN of another origin. */
+    private fun tuned(base: TgStream, entry: JioM3uProtocol.Entry, finalUrl: String, manifest: String, keys: Map<String, String>): TgStream {
+        val sameHost = try {
+            URI(finalUrl).host.orEmpty().equals(URI(JioM3uProtocol.SITE).host.orEmpty(), true)
+        } catch (_: Exception) {
+            false
+        }
+        val matched = matchKeys(keys, JioM3uProtocol.defaultKids(manifest))
+        val stream = base.copy(
+            url = finalUrl,
+            // A redirect to the CDN is served by that CDN with the browser User-Agent, exactly as before.
+            headers = if (sameHost) base.headers else emptyMap(),
+            drm = JioM3uProtocol.buildDrm(entry, matched)
+        )
+        return stream
+    }
+
+    /**
+     * A ClearKey licence must name the key id the manifest actually uses. When the key document and the
+     * MPD disagree the session decrypts nothing, which shows up as a black screen with no error text, so
+     * a single advertised key is relabelled onto the manifest's key id instead of being dropped.
+     */
+    private fun matchKeys(keys: Map<String, String>, manifestKids: Set<String>): Map<String, String> {
+        if (keys.isEmpty() || manifestKids.isEmpty()) return keys
+        if (keys.keys.any { it in manifestKids }) return keys
+        if (keys.size != 1) return keys
+        val key = keys.values.first()
+        return LinkedHashMap<String, String>().apply { manifestKids.forEach { put(it, key) } }
     }
 
     /**
