@@ -142,7 +142,8 @@ class TgLiveContractTest {
         println("TG_NATIVE " + JSONObject().put("provider", "SonyPage").put("step", "sonyCandidates")
             .put("pageTiles", SonyPage.TILES.size).put("bound", boundNames.size)
             .put("catalogueSonyFamily", JSONArray(family)))
-        assertTrue(section.all { it.pinned && it.jio && !it.v2 })
+        // Every tile is pinned to this source: either the playlist carries it, or its own page plays it.
+        assertTrue(section.all { it.pinned && !it.v2 && (it.jio || it.pageOnly) })
         // The playlist currently carries 14 of the page's 22 tiles plus the regional Sony feeds the page
         // omits; the report above lists both sets, so a shrink is visible instead of silent.
         assertTrue("only ${section.size} tiles bound to the live playlist", section.size >= 12)

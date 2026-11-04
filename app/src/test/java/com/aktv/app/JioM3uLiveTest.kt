@@ -26,7 +26,10 @@ class JioM3uLiveTest {
     private fun probe(id: String, label: String): JSONObject {
         val line = JSONObject().put("provider", "JIOM3U").put("step", "probe").put("channel", id).put("name", label)
         val resolver = JioM3uResolver()
-        val entries = resolver.catalogue()
+        // Printed line by line, so a later failure cannot swallow what was already learned.
+        val entries = try { resolver.catalogue() } catch (e: Exception) {
+            return line.put("catalogueError", e.javaClass.simpleName + ": " + (e.message ?: ""))
+        }
         val entry = entries.firstOrNull { it.id == id }
             ?: return line.put("error", "not in playlist").put("entries", entries.size)
         line.put("entries", entries.size)
@@ -75,8 +78,11 @@ class JioM3uLiveTest {
         val channels = listOf(
             "165" to "Zee Cinema HD", "1106" to "&TV HD", "471" to "Sony SAB HD", "892" to "Sony Ten 3 Hindi HD"
         )
-        val lines = channels.map { (id, name) -> probe(id, name) }
-        lines.forEach { println("TG_NATIVE " + it) }
-        assertTrue("no playlist channel could be read at all", lines.any { it.optInt("manifestStatus") in 200..299 })
+        val lines = channels.map { (id, name) -> probe(id, name).also { println("TG_NATIVE " + it) } }
+        val answered = lines.count { it.optInt("manifestStatus") in 200..299 }
+        println("TG_NATIVE " + JSONObject().put("provider", "JIOM3U").put("step", "summary")
+            .put("channels", lines.size).put("manifestOk", answered)
+            .put("refusals", lines.mapNotNull { it.optString("manifestStatus").takeIf { s -> s.isNotBlank() } }))
+        assertTrue("not one playlist channel produced a manifest: the request chain is still wrong", answered > 0)
     }
 }
