@@ -131,7 +131,17 @@ class TgLiveContractTest {
         println("TG_NATIVE " + JSONObject().put("provider", "SonyPage").put("step", "sonySection")
             .put("playlistChannels", entries.size).put("tiles", section.size)
             .put("names", JSONObject(section.associate { it.id to it.name } as Map<*, *>)))
-        // Every tile is playable from this playlist only, and the page's channels are overwhelmingly present.
+        // Which page tiles this playlist cannot serve yet: the report below names them, and names every
+        // Sony-family channel the playlist does carry, so a missing tile is a matching fix, not a guess.
+        val boundNames = section.map { it.name }.toSet()
+        val family = catalogue.map { it.name }.filter { name ->
+            val l = name.lowercase()
+            listOf("sony", "sab", "pix", "max", "bbc earth", "wah", "aath", "pal", "ten 1", "ten 2",
+                "ten 3", "ten 4", "ten 5", "six").any { it in l }
+        }
+        println("TG_NATIVE " + JSONObject().put("provider", "SonyPage").put("step", "sonyCandidates")
+            .put("pageTiles", SonyPage.TILES.size).put("bound", boundNames.size)
+            .put("catalogueSonyFamily", JSONArray(family)))
         assertTrue(section.all { it.pinned && it.jio && !it.v2 })
         assertTrue("only ${section.size} of ${SonyPage.TILES.size} page tiles bound to the live playlist",
             section.size >= SonyPage.TILES.size - 2)
