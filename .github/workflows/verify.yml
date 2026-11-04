@@ -74,3 +74,35 @@ jobs:
             out/apk-validation.json
           if-no-files-found: error
           retention-days: 30
+
+  # The in-app updater reads `update.json` from the rolling `latest` release, so every verified push
+  # republishes the release and the installed app can pull the new build over itself.
+  publish:
+    needs: unit
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AK-TV-*
+          path: out
+          merge-multiple: true
+      - name: Build the in-app update manifest
+        run: |
+          test -s out/AK-TV-arm32.apk
+          test -s out/AK-TV-arm64.apk
+          python3 .github/scripts/publish-update.test.py
+          python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+      - name: Publish the rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            out/AK-TV-arm32.apk out/AK-TV-arm64.apk out/update.json out/SHA256SUMS \
+            --target "$GITHUB_SHA" \
+            --title "AK TV latest build" --notes-file out/update-notes.md

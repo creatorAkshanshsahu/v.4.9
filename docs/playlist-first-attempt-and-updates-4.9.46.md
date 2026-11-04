@@ -181,3 +181,23 @@ Not yet done:
   [native-live-player.md](native-live-player.md).
 - A Ranged `GET` answered with an error is only used to *order* sources. It never proves that decoding
   will succeed.
+
+## 6. Where the builds live
+
+Every verified push to this branch republishes one rolling GitHub release, tagged `latest`:
+
+| Asset | Purpose |
+| --- | --- |
+| `AK-TV-arm32.apk` | 32-bit build (older/cheaper boxes) |
+| `AK-TV-arm64.apk` | 64-bit build (most phones and TV sticks) |
+| `update.json` | the manifest the in-app updater reads |
+| `SHA256SUMS` | checksums of both APKs |
+
+Direct links: `https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/AK-TV-arm64.apk`
+and `.../AK-TV-arm32.apk`. Installing either APK once is the only manual step; afterwards
+**Update → Install** (or the **Check for updates** button in *Native playback details*) downloads the
+newer asset and hands it to the system installer, so the app updates over itself.
+
+`Updater.check()` compares the manifest's `versionCode` with `max(installed versionCode,
+update_installed_code)`. The second term matters because the running process keeps the old binary
+until the system swap completes — without it the same update would be offered on every launch.
