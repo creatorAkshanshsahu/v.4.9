@@ -132,7 +132,8 @@ On the device:
   higher, or when the same code was re-published with a different SHA-256 than the build this app last
   installed.
 - The check runs at launch (throttled to once every six hours) and shows a **Download and install**
-  prompt; nothing downloads without that tap.
+  prompt; nothing downloads without that tap. `Native playback details` (MENU/INFO, or a tap on the
+  status line) carries a **Check for updates** button for a manual check.
 - The download is bounded (300 MiB), and the file must match the published SHA-256 before it is used.
 - The APK's package name and `versionCode` are read from the downloaded file before the installer is
   started, and its signature is compared with the installed app. A mismatch is explained instead of

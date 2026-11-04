@@ -26,8 +26,9 @@ import java.util.concurrent.TimeUnit
 internal object UpdateConfig {
     const val OWNER = "creatorAkshanshsahu"
     const val REPO = "v.4.9"
-    const val MANIFEST_URL = "https://github.com/$OWNER/$REPO/releases/latest/download/update.json"
-    const val ASSET_BASE = "https://github.com/$OWNER/$REPO/releases/latest/download"
+    // Plain concatenation keeps these compile-time constants (no template in a const initializer).
+    const val ASSET_BASE = "https://github.com/" + OWNER + "/" + REPO + "/releases/latest/download"
+    const val MANIFEST_URL = ASSET_BASE + "/update.json"
     /** Automatic checks are throttled; an explicit check always runs. */
     const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
     const val MAX_APK_BYTES = 300L * 1024 * 1024
@@ -197,11 +198,15 @@ internal object Updater {
     }
 
     /** Hands the verified APK to the system installer through this app's FileProvider. */
-    fun install(context: Context, file: File) {
+    fun install(context: Context, file: File): Boolean = try {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", file)
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
+        true
+    } catch (_: Exception) {
+        // A box without a package installer activity, or a revoked grant, must not crash the app.
+        false
     }
 }

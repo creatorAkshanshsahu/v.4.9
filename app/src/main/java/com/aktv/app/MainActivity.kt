@@ -2098,6 +2098,14 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this@MainActivity, "Report copied — no URLs or keys", Toast.LENGTH_SHORT).show()
                 }
             }, LinearLayout.LayoutParams(-1, -2))
+            // The only manual trigger: the automatic check already runs at launch, throttled.
+            addView(Button(this@MainActivity).apply {
+                this.text = "Check for updates"
+                setOnClickListener {
+                    Toast.makeText(this@MainActivity, "Checking GitHub for a newer build…", Toast.LENGTH_SHORT).show()
+                    checkForUpdates(interactive = true)
+                }
+            }, LinearLayout.LayoutParams(-1, -2))
         }
         val dialog = AlertDialog.Builder(this).setTitle("Native playback details")
             .setView(holder).setNegativeButton("Close", null).setPositiveButton("Retry", null)
@@ -2711,7 +2719,7 @@ class MainActivity : AppCompatActivity() {
                         AlertDialog.Builder(this)
                             .setTitle("One-time reinstall needed")
                             .setMessage("This build was signed with a different key than the copy installed now, so Android cannot install it over the old app. Uninstall AK TV once and install this download; every later update installs itself.")
-                            .setPositiveButton("Install anyway") { _, _ -> Updater.install(this, file) }
+                            .setPositiveButton("Install anyway") { _, _ -> installUpdate(file) }
                             .setNegativeButton("Cancel", null)
                             .show()
                         return@runOnUiThread
@@ -2727,7 +2735,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     prefs.edit().putString("update_installed_sha", release.sha256)
                         .putLong("update_installed_code", release.versionCode).apply()
-                    Updater.install(this, file)
+                    installUpdate(file)
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -2736,6 +2744,12 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "Update failed: ${error.message?.take(140) ?: "network error"}", Toast.LENGTH_LONG).show()
                 }
             }
+        }
+    }
+
+    private fun installUpdate(file: java.io.File) {
+        if (!Updater.install(this, file)) {
+            Toast.makeText(this, "This device has no package installer available for the downloaded update.", Toast.LENGTH_LONG).show()
         }
     }
 

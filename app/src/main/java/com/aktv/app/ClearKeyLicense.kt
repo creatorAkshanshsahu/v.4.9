@@ -37,7 +37,8 @@ class ClearKeyLicenseCallback(
         if (uuid != C.CLEARKEY_UUID) throw IOException("Not a ClearKey key request")
         val builder = Request.Builder().url(url)
         headers.forEach { (name, value) -> builder.header(name, value) }
-        request.headers.forEach { (name, value) -> builder.header(name, value) }
+        // The platform type can be null when Media3 creates a request without headers.
+        request.headers?.forEach { (name, value) -> builder.header(name, value) }
         client.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("ClearKey key response HTTP ${response.code}")
             val body = response.body ?: throw IOException("ClearKey key response was empty")
