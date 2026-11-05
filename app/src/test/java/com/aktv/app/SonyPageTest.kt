@@ -1,6 +1,7 @@
 package com.aktv.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -114,5 +115,24 @@ class SonyPageTest {
         assertEquals("https://suniliv.pages.dev/ptest1?id=", SonyPage.PAGE)
         assertTrue(SonyPage.TITLE.isNotBlank())
         assertTrue(SonyPage.TILES.all { it.names.isNotEmpty() && it.logo.endsWith(".png") && it.title.isNotBlank() })
+    }
+
+    /**
+     * The same 22 tiles in the JioTV section are the playlist's channels, so they play natively there; only
+     * the Live TV copy of the section opens the site's player. A tile the playlist does not carry has nothing
+     * to play natively and keeps its page instead of going silent.
+     */
+    @Test fun `the JioTV copy of the section plays the playlist, not the page`() {
+        val playlist = listOf(channel("892", "Sony Ten 3 Hindi HD"), channel("287", "Sony SAB HD"))
+        val native = SonyPage.playlistChannels(playlist)
+        assertEquals(SonyPage.TILES.size, native.size)
+        val tenThree = native.first { it.name == "SONY TEN 3" }
+        assertEquals("jio:892", tenThree.key)
+        assertNull("the JioTV tile must play the playlist natively", tenThree.page)
+        // A tile the playlist does not carry keeps the page: it has no native source at all.
+        val tenThreeHd = native.first { it.name == "SONY TEN 3 HD" }
+        assertTrue(tenThreeHd.page != null && tenThreeHd.pageOnly)
+        // The Live TV copy is untouched and still opens the page for every tile.
+        assertTrue(SonyPage.channels(playlist).all { it.page != null })
     }
 }

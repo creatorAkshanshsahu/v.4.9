@@ -135,4 +135,13 @@ internal object SonyPage {
         "hd", "sd", "uhd", "4k", "hindi", "english", "tamil", "telugu", "bengali", "kannada",
         "malayalam", "marathi", "punjabi", "gujarati", "hd1"
     )
+
+    /**
+     * The same 22 tiles for the JioTV section, where the playlist is the player: a tile the playlist carries
+     * keeps that identity and plays natively, so it must not carry the page - those are the Live TV tiles. A
+     * tile the playlist does not carry has nothing to play natively, so it keeps its page rather than going
+     * silent.
+     */
+    fun playlistChannels(pool: List<MainActivity.Channel>): List<MainActivity.Channel> =
+        channels(pool).map { if (it.jio) it.copy(page = null) else it }
 }

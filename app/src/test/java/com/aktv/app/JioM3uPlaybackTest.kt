@@ -168,4 +168,47 @@ class JioM3uPlaybackTest {
             JioM3uProtocol.defaultKids("""<ContentProtection cenc:default_KID="eb19113c11ce5cfb80c89696765a0187"/>"""))
         assertTrue(JioM3uProtocol.defaultKids("<MPD/>").isEmpty())
     }
+
+    /**
+     * The playlist file is the whole section: when the host refused it (4.9.59 answered `HTTP 415` and the
+     * tab went empty) the next request shape is tried, the one that answers is remembered, and the copy that
+     * answered last time is kept on disk so a refusal can never empty the section again.
+     */
+    @Test fun `a refused playlist request retries the next shape and remembers the one that answered`() {
+        val file = java.io.File(java.nio.file.Files.createTempDirectory("playlist").toFile(), "jiotv.m3u8")
+        val asked = mutableListOf<Map<String, String>>()
+        val transport = TgTransport { url, headers ->
+            when {
+                url.contains("keyid.php") -> TgResponse(200, keyDoc.toByteArray())
+                url.contains(".mpd") -> TgResponse(200, mpd().toByteArray(), finalUrl = cdnUrl)
+                else -> {
+                    asked.add(headers)
+                    if (asked.size == 1) TgResponse(415, ByteArray(0)) else TgResponse(200, playlist.toByteArray())
+                }
+            }
+        }
+        val resolver = JioM3uResolver(http = transport, cacheFile = file)
+        assertEquals(listOf("143"), resolver.catalogue().map { it.id })
+        // The first ask is the plain browser request: no Origin, no player user agent.
+        assertNull(asked.first()["Origin"])
+        assertNull(asked.first()["User-Agent"])
+        assertEquals(2, asked.size)
+        assertTrue("the playlist that answered is kept on disk", file.exists())
+        // ... and the shape that answered is asked first next time, so the refusal is not repeated.
+        resolver.catalogue(fresh = true)
+        assertEquals(3, asked.size)
+        assertEquals("@allinone_reborn", asked.last()["User-Agent"])
+    }
+
+    @Test fun `a refused refresh keeps the section on the last good playlist`() {
+        val file = java.io.File(java.nio.file.Files.createTempDirectory("playlist").toFile(), "jiotv.m3u8")
+        file.writeText(playlist)
+        val refusing = JioM3uResolver(http = { _, _ -> TgResponse(415, ByteArray(0)) }, cacheFile = file)
+        assertEquals(listOf("143"), refusing.catalogue().map { it.id })
+        assertEquals(listOf("143"), refusing.catalogue(fresh = true).map { it.id })
+
+        // Without a copy to fall back on the refusal is still reported by its status, never as "no channels".
+        val cold = JioM3uResolver(http = { _, _ -> TgResponse(415, ByteArray(0)) })
+        assertEquals("JioTV m3u8 HTTP 415", runCatching { cold.catalogue() }.exceptionOrNull()?.message)
+    }
 }

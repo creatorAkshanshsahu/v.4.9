@@ -575,3 +575,34 @@ after the page is gone - the shape of an out-of-memory kill that arrives minutes
 is somewhere else. `BrowserActivity` now shuts the engine down when it closes **if the box is short of
 memory** (`isLowRamDevice`, or under 300 MB free); a box with room keeps the warm engine and still opens
 the next page instantly. Losing the warm engine costs a second on the next page, not a crash.
+
+## 17. 4.9.60 — `HTTP 415` on the playlist, and the section that must not go empty
+
+The JioTV tab came back as *"JioTV channels didn't load (JioTV m3u8 HTTP 415)"*. The host now refuses the
+request this build had been sending for the playlist itself - its own `User-Agent`, the site as
+`Origin`/`Referer`, and an `application/vnd.apple.mpegurl` `Accept`. Nothing about that request is wrong
+in principle; the front door simply stopped accepting it.
+
+Three things changed, and each of them alone would have kept the section alive:
+
+1. **The file is asked for in several shapes.** A plain browser request first (`Accept: */*`, nothing
+   else), then an IPTV player's own identity, then the shape 4.9.54 shipped. The first shape that returns
+   a body this build can parse wins, and it is remembered for the rest of the session, so the refusal is
+   not paid again on the next refresh.
+2. **A body is only accepted if it is a playlist.** A 200 that lists no channels is a refusal, not an
+   empty section, so the next shape is tried instead of the tab going blank.
+3. **The last good playlist is kept on disk** (`files/jiotv-playlist.m3u8`, no tokens, cookies or keys)
+   and used when every shape is refused, for five minutes at a time before the network is asked again.
+   The file describes the same channels for days: each channel's own address, cookie and ClearKey are
+   still resolved fresh at the moment it is played. An outage can therefore delay the *list*, never empty
+   it - and when there is no copy to fall back on, the tab says `HTTP 415` rather than pretending there
+   are no channels.
+
+### The Sony row inside JioTV plays the playlist
+
+4.9.58 decided which player to use from the tile, not the channel's name: a tile carrying a page opens the
+page. That is right on Live TV and wrong inside JioTV, where the playlist is the player and the viewer
+asked for native playback there. `SonyPage.playlistChannels(...)` now builds the JioTV copy of the section
+with the page removed from every tile the playlist actually carries, so those tiles play natively like
+every other channel in that section; a tile the playlist does not carry (there is no native source at
+all) keeps its page instead of going silent. Live TV's copy is untouched.

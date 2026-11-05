@@ -41,6 +41,13 @@
    "from": "73b1736da6362bb7a841381ab3c8bc0442469c7113255e1e4e44e0f7ab149ab9",
    "to": "0e7e2393e3d338fc84aa1eee47ac20501b7b9132216f3da6f2d4c39b9095481c",
    "unchanged": "Token handling, channel-scope learning, header sanitising, redirect taint rules and every origin check are unchanged; only the branch that builds Origin/Referer is guarded by the new flag, which is false for every provider except the playlist."
+  },
+  {
+   "change": "JioM3uResolver construction only: init() now hands the playlist resolver the app-private cache file (files/jiotv-playlist.m3u8) so a refused playlist refresh cannot empty the JioTV section.",
+   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+   "from": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
+   "to": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
+   "unchanged": "Provider order, the JIOM3U dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
   }
  ],
  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -60,7 +67,7 @@
   "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
   "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
   "app/src/main/java/com/aktv/app/TgResolver.kt": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
-  "app/src/main/java/com/aktv/app/TgServers.kt": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25"
+  "app/src/main/java/com/aktv/app/TgServers.kt": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05"
  },
  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }

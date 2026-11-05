@@ -20,7 +20,7 @@ object TgServers {
         forgetPreviousLiveSite(ctx)
         resolver.close()
         jjtv = JjtvResolver()
-        jioM3u = JioM3uResolver()
+        jioM3u = JioM3uResolver(cacheFile = java.io.File(ctx.filesDir, "jiotv-playlist.m3u8"))
         resolver = TgResolver(initialFunction = prefs.getString("native_function", null), saveFunction = {
             prefs.edit().putString("native_function", it).apply()
         })

@@ -18,7 +18,9 @@ internal class JioM3uResolver(
     private val http: TgTransport = TgHttp(),
     private val playlist: String = JioM3uProtocol.PLAYLIST,
     private val now: () -> Long = System::currentTimeMillis,
-    private val elapsed: () -> Long = { System.nanoTime() / 1_000_000 }
+    private val elapsed: () -> Long = { System.nanoTime() / 1_000_000 },
+    /** The last playlist that answered, kept on disk so a refused refresh cannot empty the section. */
+    private val cacheFile: java.io.File? = null
 ) {
     companion object {
         const val SITE = JioM3uProtocol.SITE
@@ -34,6 +36,8 @@ internal class JioM3uResolver(
     private val sources = HashMap<String, Cached<List<TgStream>>>()
     private val keyCache = HashMap<String, Cached<Map<String, String>>>()
     private val tokenClock = HttpReferenceClock(now, elapsed)
+    /** Index into [playlistRequests] of the shape that last answered; tried first next time. */
+    @Volatile private var playlistShape = 0
 
     @Synchronized
     fun resolve(id: String, fresh: Boolean = false): List<TgStream> {
@@ -194,28 +198,93 @@ internal class JioM3uResolver(
 
     private fun loadPlaylist(fresh: Boolean): List<JioM3uProtocol.Entry> {
         playlistCache?.takeIf { !fresh && it.until > elapsed() }?.let { return it.value }
-        val body = fetchPlaylist(fresh)
+        val body = try {
+            fetchPlaylist(fresh).also(::keepPlaylist)
+        } catch (error: Exception) {
+            if (error is InterruptedIOException) throw error
+            // A refused request must not empty the section. The last good copy describes the same channels,
+            // and each channel's own address, cookie and keys are still resolved fresh when it is played.
+            return lastGoodPlaylist() ?: throw error
+        }
         val entries = JioM3uProtocol.parse(body)
         require(entries.isNotEmpty()) { "JioTV m3u8 playlist was empty" }
-        val until = elapsed() + 30 * 60_000  // playlist URL is stable; refresh every 30 min
-        playlistCache = Cached(until, entries)
-        catalog = Cached(until, entries.associateBy { it.id })
+        cache(entries, 30 * 60_000)  // the playlist URL is stable; refresh every 30 min
         return entries
     }
 
+    private fun cache(entries: List<JioM3uProtocol.Entry>, ttlMs: Long) {
+        val until = elapsed() + ttlMs
+        playlistCache = Cached(until, entries)
+        catalog = Cached(until, entries.associateBy { it.id })
+    }
+
+    /** The playlist that answered last time, retried after five minutes rather than cached for thirty. */
+    private fun lastGoodPlaylist(): List<JioM3uProtocol.Entry>? {
+        val file = cacheFile ?: return null
+        val text = try { if (file.exists()) file.readText() else "" } catch (_: Exception) { "" }
+        if (text.isBlank()) return null
+        val entries = JioM3uProtocol.parse(text)
+        if (entries.isEmpty()) return null
+        cache(entries, 5 * 60_000)
+        return entries
+    }
+
+    /** Kept on disk only so a refused refresh cannot empty the section: no tokens, cookies or keys. */
+    private fun keepPlaylist(body: String) {
+        val file = cacheFile ?: return
+        try { file.writeText(body) } catch (_: Exception) { }
+    }
+
+    /**
+     * The playlist file itself, asked for the way whichever client the host currently accepts asks for it.
+     *
+     * 4.9.59 hit `JioTV m3u8 HTTP 415` and the whole JioTV section went empty: the player-shaped request this
+     * build had been sending (its own `User-Agent`, the site as `Origin`/`Referer`, an mpegurl `Accept`) is
+     * refused by the front door now. A browser-shaped request is tried first, then an IPTV player's own, then
+     * the shape that used to work, and the one that answers is remembered for the rest of the session.
+     */
     private fun fetchPlaylist(fresh: Boolean): String {
         val url = if (fresh) "$playlist?_aktv_refresh=${now()}" else playlist
-        val response = http.get(url, linkedMapOf(
-            "Origin" to SITE,
-            "Referer" to "$SITE/",
-            "Accept" to "application/vnd.apple.mpegurl, application/x-mpegurl",
-            "User-Agent" to JioM3uProtocol.UA_OVERRIDE,
-        ))
-        tokenClock.observe(response.serverTimeMs)
-        if (response.code !in 200..299) throw JioM3uHttpException(response.code)
-        require(response.body.size <= TgProtocol.MAX_BODY * 4) { "JioTV m3u8 playlist too large" }
-        return response.body.toString(Charsets.UTF_8)
+        val shapes = playlistRequests()
+        var status = 0
+        var refusal = "network error"
+        for (index in shapes.indices) {
+            val position = (playlistShape + index) % shapes.size
+            checkInterrupted()
+            val response = try {
+                http.get(url, shapes[position])
+            } catch (error: InterruptedIOException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (response == null) { refusal = "network error"; continue }
+            tokenClock.observe(response.serverTimeMs)
+            if (response.code !in 200..299) { status = response.code; refusal = "HTTP ${response.code}"; continue }
+            require(response.body.size <= TgProtocol.MAX_BODY * 4) { "JioTV m3u8 playlist too large" }
+            val body = response.body.toString(Charsets.UTF_8)
+            if (JioM3uProtocol.parse(body).isEmpty()) { refusal = "the file listed no channels"; continue }
+            playlistShape = position
+            return body
+        }
+        throw JioM3uHttpException(status, refusal)
     }
+
+    /**
+     * Most conservative first, because a refusal here costs the whole section: a plain browser request, then
+     * an IPTV player's own identity, then the player-shaped request this build shipped with.
+     */
+    private fun playlistRequests(): List<Map<String, String>> = listOf(
+        linkedMapOf("Accept" to "*/*"),
+        linkedMapOf("Accept" to "*/*", "User-Agent" to JioM3uProtocol.UA_OVERRIDE),
+        linkedMapOf("Accept" to "application/vnd.apple.mpegurl, application/x-mpegurl"),
+        linkedMapOf("Origin" to SITE, "Referer" to "$SITE/", "Accept" to "*/*"),
+        linkedMapOf(
+            "Origin" to SITE, "Referer" to "$SITE/",
+            "Accept" to "application/vnd.apple.mpegurl, application/x-mpegurl",
+            "User-Agent" to JioM3uProtocol.UA_OVERRIDE
+        ),
+    )
 
     @Synchronized
     fun invalidate() {
@@ -223,4 +292,6 @@ internal class JioM3uResolver(
     }
 }
 
-internal class JioM3uHttpException(val status: Int) : IOException("JioTV m3u8 HTTP $status")
+internal class JioM3uHttpException(val status: Int, val reason: String? = null) : IOException(
+    if (status > 0) "JioTV m3u8 HTTP $status" else "JioTV m3u8 unavailable (${reason ?: "network error"})"
+)

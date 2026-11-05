@@ -815,7 +815,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun jioRows(channels: List<Channel>): List<Row> {
         return buildList {
-            val sony = SonyPage.channels(channels.ifEmpty { allJio })
+            // In this section the playlist is the player, so the Sony tiles here play natively like every
+            // other channel in it; only Live TV's copy of the section opens the page.
+            val sony = SonyPage.playlistChannels(channels.ifEmpty { allJio })
             sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
             if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
