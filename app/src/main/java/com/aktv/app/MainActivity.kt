@@ -1116,7 +1116,7 @@ class MainActivity : AppCompatActivity() {
     private fun guideHasSchedule(g: Guide?) = g != null && (g.now != null || g.next != null || g.upcoming.isNotEmpty())
 
     private fun fetchGuide(c: Channel, cb: (Guide?) -> Unit) {
-        if (c.v2 || c.pageOnly) { cb(null); return }
+        if (c.v2 || c.page != null) { cb(null); return }
         Epg.cached(c.id)?.let { cb(it); return }
         val leader = synchronized(guideWaiters) {
             val existing = guideWaiters[c.id]
@@ -1370,7 +1370,9 @@ class MainActivity : AppCompatActivity() {
         requestedNativeProvider = null
         val ch = shown[current]
         pageFallbackFor = null
-        if (ch.pageOnly) { rememberChannel(ch); playOnSourcePage(ch); return }
+        // Every Sony tile plays the site's own player for its slug: that is the source, and it is what the
+        // user asked to open. Native providers are not tried for these tiles at all.
+        if (ch.page != null) { rememberChannel(ch); playOnSourcePage(ch); return }
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
         home.visibility = View.INVISIBLE
         heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
@@ -1428,7 +1430,7 @@ class MainActivity : AppCompatActivity() {
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
         ch.id, ch.v2, ch.jio, prefs.getString("source_provider_${ch.key}", null), requestedProvider(ch),
-        ch.pinned, ch.pageOnly
+        ch.pinned, ch.page != null
     )
     private fun providerMode(ch: Channel) = if (requestedProvider(ch) == null) "Auto" else "Selected"
     private fun savedCompatibility(ch: Channel, provider: LiveProvider): Boolean = prefs.getBoolean(
@@ -3059,7 +3061,7 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- focus-driven stream prefetch (metadata only, no second decoder) ----------
     private fun scheduleSourceWarmup(channel: Channel) {
-        if (layer.visibility == View.VISIBLE || searchShown || channel.pageOnly) return
+        if (layer.visibility == View.VISIBLE || searchShown || channel.page != null) return
         pendingWarmupChannel = channel
         ui.removeCallbacks(sourceWarmupRunnable)
         ui.postDelayed(sourceWarmupRunnable, 260)

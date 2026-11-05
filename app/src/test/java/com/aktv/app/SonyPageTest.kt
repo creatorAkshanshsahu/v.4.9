@@ -5,9 +5,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The `allinonereborn2.online/sony/` page lists 22 Sony tiles. Each one must appear in the app and must
- * play: a tile the site's playlist carries plays natively from that playlist, and a tile it does not
- * carry keeps its own player page (`suniliv.pages.dev/ptest1?id=<slug>`) so it is never silent.
+ * The section is the `allinonereborn2.online/sony/` page and nothing else: 22 tiles, the page's own order,
+ * the page's own labels and logos, and every one of them opens that site's player for its slug inside the
+ * app. Nothing is added to the page's list and nothing is guessed into it.
  */
 class SonyPageTest {
 
@@ -16,128 +16,83 @@ class SonyPageTest {
             id, name, "Sports", logo.ifEmpty { "https://logo.example/$id.png" }, v2 = false, jio = jio
         )
 
-    private fun bound(section: List<MainActivity.Channel>) = section.filter { !it.pageOnly }
-
-    /** The page's own order, as far as the sampled playlist carries those channels. */
-    @Test fun `the page's channels come back in the page's order`() {
-        val catalogue = listOf(
-            channel("892", "Sony Ten 3 Hindi HD"),
-            channel("162", "Sony Ten 1 HD"),
-            channel("291", "SET HD"),
-            channel("1393", "Sony Wah"),
-            channel("471", "Sony SAB HD"),
-            channel("852", "Sony BBC Earth HD English")
-        )
+    /** Nothing the page does not list, nothing it lists twice. */
+    @Test fun `the section is exactly the page's 22 tiles`() {
+        assertEquals(22, SonyPage.TILES.size)
+        assertEquals(22, SonyPage.TILES.map { it.slug }.distinct().size)
+        assertEquals(22, SonyPage.channels(emptyList()).size)
         assertEquals(
-            listOf("SET HD", "Sony SAB HD", "Sony Wah", "Sony Ten 1 HD", "Sony Ten 3 Hindi HD", "Sony BBC Earth HD English"),
-            bound(SonyPage.channels(catalogue)).map { it.name }
+            22,
+            SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD"), channel("1587", "Sony Yay Tamil"))).size
         )
     }
 
-    /** Every page tile is present: the playlist plays what it carries, the site's page plays the rest. */
-    @Test fun `all 22 page channels are tiles and every tile has a source`() {
-        val section = SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD"), channel("162", "Sony Ten 1 HD")))
-        assertEquals(22, section.count { it.page != null })
-        assertEquals(SonyPage.TILES.size, SonyPage.TILES.map { it.slug }.distinct().size)
+    /** Channels the page does not list are never pulled in, however Sony-branded they are. */
+    @Test fun `regional Sony channels that are not tiles stay out`() {
+        val catalogue = listOf(
+            channel("1587", "Sony Yay Tamil"), channel("1927", "SONY YAY Bengali"), channel("484", "Sony MAX1"),
+            channel("154", "Sony SAB SD"), channel("1407", "Sony BBC Earth HD Telugu"), channel("1", "Mahaa Max")
+        )
+        assertEquals(
+            SonyPage.TILES.map { it.slug },
+            SonyPage.channels(catalogue).map { it.page!!.removePrefix(SonyPage.PAGE) }
+        )
+    }
+
+    /** Every tile opens the site's player: that is the source, and it needs no playlist channel. */
+    @Test fun `every tile carries its own player page`() {
+        val section = SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD")))
+        assertTrue(section.all { it.page != null && it.page!!.startsWith(SonyPage.PAGE) })
         assertTrue(section.all { it.pinned })
-        // A tile the playlist carries plays natively and keeps its page as the fallback.
-        val native = bound(section)
-        assertEquals(2, native.size)
-        assertTrue(native.all { it.jio && it.page!!.startsWith(SonyPage.PAGE) })
-        // A tile it does not carry has no native provider at all and plays its page inside the app.
-        val pageOnly = section.filter { it.pageOnly }
-        assertEquals(20, pageOnly.size)
-        assertTrue(pageOnly.all { !it.jio && it.page!!.startsWith(SonyPage.PAGE) && it.name.isNotBlank() && it.logo.isNotBlank() })
-        pageOnly.forEach {
+        section.forEach {
             assertEquals(
                 emptyList<LiveProvider>(),
                 ChannelProviderOrder.playbackOrder(
-                    it.id, v2 = it.v2, jio = it.jio, rememberedWebsite = null, pinned = it.pinned, pageOnly = it.pageOnly
+                    it.id, v2 = it.v2, jio = it.jio, rememberedWebsite = TgResolver.SITE, pinned = it.pinned, pageOnly = it.page != null
                 )
             )
         }
     }
 
-    /** The tile that carries a playlist channel is pinned to the playlist, never to another provider. */
-    @Test fun `a bound tile is pinned to the playlist only`() {
-        val picked = bound(SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD"))))
-        assertEquals(listOf("Sony Ten 3 Hindi HD"), picked.map { it.name })
-        assertTrue(picked.single().jio && picked.single().pinned)
+    /** The page's own labels, in the page's own order. */
+    @Test fun `tiles use the page's labels and order`() {
+        val section = SonyPage.channels(emptyList())
         assertEquals(
-            listOf(LiveProvider.JIOM3U),
-            ChannelProviderOrder.playbackOrder(
-                picked.single().id, v2 = false, jio = true, rememberedWebsite = TgResolver.SITE,
-                pinned = true, pageOnly = false
-            )
+            listOf(
+                "SONY HD", "SAB HD", "SONY MARATHI", "SONY PAL", "SONY AATH", "SONY YAY", "SONY MAX HD",
+                "SONY MAX", "SONY WAH", "SONY MAX2", "SONY PIX HD", "SONY TEN 1 HD", "SONY TEN 1",
+                "SONY TEN 2 HD", "SONY TEN 2", "SONY TEN 3 HD", "SONY TEN 3", "SONY TEN 4 HD", "SONY TEN 4",
+                "SONY TEN 5 HD", "SONY TEN 5", "BBC EARTH"
+            ),
+            section.map { it.name }
         )
-    }
-
-    /** The page and the playlist publish the same CDN logo file, so a renamed channel still binds. */
-    @Test fun `a channel is matched by its published logo when the name differs`() {
-        val catalogue = listOf(
-            channel("999", "Sports Feed 03", logo = "https://jiotvimages.cdn.jio.com/dare_images/images/Ten3_HD.png")
-        )
-        val picked = bound(SonyPage.channels(catalogue))
-        assertEquals(listOf("Sports Feed 03"), picked.map { it.name })
-        assertTrue(picked.single().pinned)
-    }
-
-    /** Every other Sony channel the source carries is added after the page's own tiles. */
-    @Test fun `the section also carries Sony channels the page does not list`() {
-        val catalogue = listOf(
-            channel("872", "Sony Yay Hindi"),
-            channel("1587", "Sony Yay Tamil"),
-            channel("1927", "SONY YAY Bengali"),
-            channel("484", "Sony MAX1"),
-            channel("1407", "Sony BBC Earth HD Telugu"),
-            channel("483", "Sony MAX2")
-        )
-        val extras = SonyPage.channels(catalogue).drop(22)
         assertEquals(
-            listOf("Sony Yay Tamil", "SONY YAY Bengali", "Sony MAX1"),
-            extras.map { it.name }
+            listOf(
+                "sony-hd", "sab-hd", "sony-marathi", "sony-pal", "sony-aath", "sony-yay", "sony-max-hd",
+                "sony-max", "sony-wah", "sony-max2", "sony-pix-hd", "sony-ten-1-hd", "sony-ten-1",
+                "sony-ten-2-hd", "sony-ten-2", "sony-ten-3-hd", "sony-ten-3", "sony-ten-4-hd", "sony-ten-4",
+                "sony-ten-5-hd", "sony-ten-5", "bbc-earth"
+            ),
+            section.map { it.page!!.removePrefix(SonyPage.PAGE) }
         )
-        assertTrue(extras.all { it.pinned && it.jio && it.page == null })
+        assertTrue(section.all { it.logo.startsWith("https://jiotvimages.cdn.jio.com/dare_images/images/") })
     }
 
-    /** Channels that merely share a word with a Sony brand are not Sony channels. */
-    @Test fun `lookalike channels are never pulled into the section`() {
-        val catalogue = listOf(
-            channel("1", "Mahaa Max"), channel("2", "Jaya Max"), channel("3", "Aakash Aath"),
-            channel("4", "MK Six"), channel("5", "Animax"), channel("6", "Sony Wah")
-        )
-        val section = SonyPage.channels(catalogue)
-        assertEquals(listOf("Sony Wah"), bound(section).map { it.name })
-        assertEquals(22, section.size)
-    }
-
-    /** One catalogue entry becomes one tile: the plain and HD page tiles cannot both claim it. */
-    @Test fun `a single catalogue entry never fills two page tiles`() {
+    /** A tile whose channel is in the playlist keeps that identity, so favourites still line up. */
+    @Test fun `a bound tile keeps the playlist channel identity but plays the page`() {
         val section = SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD")))
-        assertEquals(1, bound(section).size)
-        // The HD slug it did not fill keeps its own page, so it is still a playable tile of the section.
-        assertTrue(section.any { it.id == "page:sony-ten-3-hd" && it.pageOnly })
-        assertEquals(1, section.count { it.jio })
+        val tenThree = section.first { it.page!!.endsWith("sony-ten-3") }
+        assertEquals("jio:892", tenThree.key)
+        assertTrue(tenThree.page != null)
+        // The HD tile the playlist does not carry keeps its own slug and still opens the player.
+        val tenThreeHd = section.first { it.page!!.endsWith("sony-ten-3-hd") }
+        assertEquals("page:sony-ten-3-hd", tenThreeHd.id)
+        assertTrue(tenThreeHd.pageOnly)
     }
 
-    @Test fun `both Ten 3 page tiles survive when the catalogue has both`() {
-        val catalogue = listOf(channel("892", "Sony Ten 3 HD"), channel("1892", "Sony Ten 3"))
-        assertEquals(listOf("Sony Ten 3 HD", "Sony Ten 3"), bound(SonyPage.channels(catalogue)).map { it.name })
-    }
-
-    @Test fun `an empty catalogue never produces a row`() {
-        assertTrue(SonyPage.channels(emptyList()).isEmpty())
-        val v2 = MainActivity.Channel("162", "Sony Ten 1 HD", "Sports", "", v2 = true, jio = false)
-        assertTrue(SonyPage.channels(listOf(v2)).isEmpty())
-    }
-
-    /** One section, built from this page and its playlist; nothing else in the app lists Sony channels. */
-    @Test fun `the section is the page's own and carries all 22 tiles`() {
+    @Test fun `the page and its player are the only source names used`() {
+        assertEquals("https://suniliv.pages.dev/ptest1?id=", SonyPage.PAGE)
         assertTrue(SonyPage.TITLE.isNotBlank())
-        assertEquals(22, SonyPage.TILES.size)
-        assertEquals(SonyPage.TILES.size, SonyPage.TILES.map { it.slug }.distinct().size)
         assertTrue(SonyPage.TILES.all { it.names.isNotEmpty() && it.logo.endsWith(".png") && it.title.isNotBlank() })
-        assertTrue(SonyPage.TILES.all { SonyPage.pageUrl(it.slug) == SonyPage.PAGE + it.slug })
-        assertTrue(SonyPage.TILES.all { SonyPage.pageUrl(it.slug).startsWith("https://suniliv.pages.dev/ptest1?id=") })
     }
 }

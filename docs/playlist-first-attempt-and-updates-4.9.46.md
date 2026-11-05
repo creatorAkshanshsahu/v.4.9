@@ -424,3 +424,23 @@ stays a plain `Cookie` header: it is never re-sent as a `?__hdnea__=` query para
 the redirector in 4.9.47. Provider identity, remembered sources, the source fingerprint and the whole
 ClearKey path (key document over `GET`, KIDs matched against the manifest, JWK licence to Media3) are
 unchanged.
+
+## 12. 4.9.55 — the page's tiles, all of them, all opening the page's own player
+
+Two corrections, both from using 4.9.54 on the device.
+
+**The section was larger than the page.** 4.9.50 added "every other Sony channel the playlist brands
+Sony" — the regional Yay feeds, BBC Earth Tamil/Telugu, SAB SD, MAX1 — which turned 22 links into 34
+tiles. The user asked for the page's list, not an interpretation of it. The section is now exactly the 22
+links the page publishes, in its order, with its own labels (`SONY HD`, `SAB HD`, `SONY TEN 3 HD`,
+`BBC EARTH`, …) and its own logo files. Nothing is added and nothing is guessed.
+
+**Only two tiles reached the player.** Those two were the page-only slugs (Ten 3 HD, Ten 5), which went
+straight to the page; the other twenty tried the native playlist first, and on the device that attempt
+never ended in the player. Every tile of the section now opens the site's player for its slug, with no
+native attempt and no fallback chain — tapping a Sony tile is that page, full screen, in the app. A tile
+whose channel is also in the playlist keeps that channel's identity so favourites and recents still line
+up, but it plays the same page as the rest.
+
+`ChannelProviderOrder.playbackOrder(..., pageOnly = true)` returns no native provider for these tiles, so
+nothing can start a stream from somewhere else even if a later change forgets the routing.

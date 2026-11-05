@@ -26,28 +26,28 @@ internal object SonyPage {
 
     /** Page order, exactly as the page lists the channels. */
     val TILES: List<Tile> = listOf(
-        Tile("sony-hd", "Sony HD", listOf("set hd", "sony hd", "sony entertainment television hd"), "Sony_HD.png"),
+        Tile("sony-hd", "SONY HD", listOf("set hd", "sony hd", "sony entertainment television hd"), "Sony_HD.png"),
         Tile("sab-hd", "SAB HD", listOf("sony sab hd", "sony sab"), "Sony_SAB_HD.png"),
-        Tile("sony-marathi", "Sony Marathi", listOf("sony marathi"), "Sony_Marathi_SD.png"),
-        Tile("sony-pal", "Sony Pal", listOf("sony pal"), "Sony_Pal.png"),
-        Tile("sony-aath", "Sony Aath", listOf("sony aath", "aath"), "Sony_aath.png"),
-        Tile("sony-yay", "Sony Yay", listOf("sony yay hindi", "sony yay"), "Sony_Yay_Hindi.png"),
-        Tile("sony-max-hd", "Sony Max HD", listOf("sony max hd"), "Sony_Max_HD.png"),
-        Tile("sony-max", "Sony Max", listOf("sony max sd", "sony max"), "Sony_Max_SD.png"),
-        Tile("sony-wah", "Sony Wah", listOf("sony wah"), "Sony_Wah.png"),
-        Tile("sony-max2", "Sony Max 2", listOf("sony max2"), "Sony_MAX2.png"),
-        Tile("sony-pix-hd", "Sony Pix HD", listOf("sony pix hd", "sony pix"), "Sony_Pix_HD.png"),
-        Tile("sony-ten-1-hd", "Sony Ten 1 HD", listOf("sony ten 1 hd"), "Ten_HD.png"),
-        Tile("sony-ten-1", "Sony Ten 1", listOf("sony ten 1 sd", "sony ten 1"), "Ten_1.png"),
-        Tile("sony-ten-2-hd", "Sony Ten 2 HD", listOf("sony ten 2 hd"), "Ten2_HD.png"),
-        Tile("sony-ten-2", "Sony Ten 2", listOf("sony ten 2 sd", "sony ten 2"), "Ten2_HD.png"),
-        Tile("sony-ten-3-hd", "Sony Ten 3 HD", listOf("sony ten 3 hd"), "Ten3_HD.png"),
-        Tile("sony-ten-3", "Sony Ten 3", listOf("sony ten 3 hindi hd", "sony ten 3"), "Ten3_HD.png"),
-        Tile("sony-ten-4-hd", "Sony Ten 4 HD", listOf("sony ten 4 hd"), "Ten_4_HD_Telugu.png"),
-        Tile("sony-ten-4", "Sony Ten 4", listOf("sony ten 4 sd", "sony ten 4"), "Ten_4_Telugu.png"),
-        Tile("sony-ten-5-hd", "Sony Ten 5 HD", listOf("sony ten 5 hd"), "Six_HD.png"),
-        Tile("sony-ten-5", "Sony Ten 5", listOf("sony ten 5 sd", "sony ten 5"), "Six_HD.png"),
-        Tile("bbc-earth", "Sony BBC Earth", listOf("bbc earth"), "Sony_BBC_Earth_HD.png")
+        Tile("sony-marathi", "SONY MARATHI", listOf("sony marathi"), "Sony_Marathi_SD.png"),
+        Tile("sony-pal", "SONY PAL", listOf("sony pal"), "Sony_Pal.png"),
+        Tile("sony-aath", "SONY AATH", listOf("sony aath", "aath"), "Sony_aath.png"),
+        Tile("sony-yay", "SONY YAY", listOf("sony yay hindi", "sony yay"), "Sony_Yay_Hindi.png"),
+        Tile("sony-max-hd", "SONY MAX HD", listOf("sony max hd"), "Sony_Max_HD.png"),
+        Tile("sony-max", "SONY MAX", listOf("sony max sd", "sony max"), "Sony_Max_SD.png"),
+        Tile("sony-wah", "SONY WAH", listOf("sony wah"), "Sony_Wah.png"),
+        Tile("sony-max2", "SONY MAX2", listOf("sony max2"), "Sony_MAX2.png"),
+        Tile("sony-pix-hd", "SONY PIX HD", listOf("sony pix hd", "sony pix"), "Sony_Pix_HD.png"),
+        Tile("sony-ten-1-hd", "SONY TEN 1 HD", listOf("sony ten 1 hd"), "Ten_HD.png"),
+        Tile("sony-ten-1", "SONY TEN 1", listOf("sony ten 1 sd", "sony ten 1"), "Ten_1.png"),
+        Tile("sony-ten-2-hd", "SONY TEN 2 HD", listOf("sony ten 2 hd"), "Ten2_HD.png"),
+        Tile("sony-ten-2", "SONY TEN 2", listOf("sony ten 2 sd", "sony ten 2"), "Ten2_HD.png"),
+        Tile("sony-ten-3-hd", "SONY TEN 3 HD", listOf("sony ten 3 hd"), "Ten3_HD.png"),
+        Tile("sony-ten-3", "SONY TEN 3", listOf("sony ten 3 hindi hd", "sony ten 3"), "Ten3_HD.png"),
+        Tile("sony-ten-4-hd", "SONY TEN 4 HD", listOf("sony ten 4 hd"), "Ten_4_HD_Telugu.png"),
+        Tile("sony-ten-4", "SONY TEN 4", listOf("sony ten 4 sd", "sony ten 4"), "Ten_4_Telugu.png"),
+        Tile("sony-ten-5-hd", "SONY TEN 5 HD", listOf("sony ten 5 hd"), "Six_HD.png"),
+        Tile("sony-ten-5", "SONY TEN 5", listOf("sony ten 5 sd", "sony ten 5"), "Six_HD.png"),
+        Tile("bbc-earth", "BBC EARTH", listOf("bbc earth"), "Sony_BBC_Earth_HD.png")
     )
 
     /** The one Sony row. There is no other Sony shelf anywhere in the app. */
@@ -65,28 +65,25 @@ internal object SonyPage {
     private fun logoFile(value: String) = value.substringAfterLast('/').substringBefore('?').lowercase()
 
     /**
-     * The section: the page's tiles in page order, then any other Sony channel the playlist carries that
-     * the page does not list (Sony's regional Yay and BBC Earth feeds, SAB SD, MAX1 …), so the section is
-     * every Sony channel this source has. A channel is used once and every tile is pinned to the playlist.
+     * The section, and it is only the page: one tile per link the site publishes, in the site's order,
+     * with the site's own label and logo. Nothing is added that the page does not list, and nothing is
+     * dropped from it — 22 tiles, always.
      *
-     * A page tile the playlist does not carry is left out rather than filled from another provider. The
-     * live playlist currently carries 14 of the page's 22 tiles: its SD twins and the Ten 4/Ten 5 feeds
-     * are web-player-only, and showing them from a different source is exactly what was rejected.
+     * Every tile plays that site's own player for its slug inside the app, because that is the source the
+     * user asked for. A tile whose channel is also in the site's playlist keeps that channel's identity
+     * (so favourites and recents line up), but the player is still the page's, not a native fallback.
      */
     fun channels(catalogue: List<MainActivity.Channel>): List<MainActivity.Channel> {
         val pool = catalogue.filter { !it.v2 }.distinctBy { it.key }
-        if (pool.isEmpty()) return emptyList()
         val names = pool.map { normalise(it.name) to it }.toMap()
         val files = pool.map { logoFile(it.logo) to it }.toMap()
         val taken = HashSet<String>()
-        val assigned = HashMap<String, MainActivity.Channel>()
 
-        /** A channel's normalised words without a leading "sony", so `BBC Earth HD` can meet `bbc earth`. */
         fun words(channel: MainActivity.Channel): List<String> =
             channel.name.lowercase().split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
                 .let { if (it.firstOrNull() == "sony") it.drop(1) else it }
 
-        /** The page's name, optionally followed only by a quality or language word. */
+        /** The tile's name, optionally followed only by a quality or language word. */
         fun qualifies(channel: MainActivity.Channel, alias: String): Boolean {
             val wanted = alias.split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() }
                 .let { if (it.firstOrNull() == "sony") it.drop(1) else it }
@@ -97,8 +94,8 @@ internal object SonyPage {
         }
 
         // Exact name, then the CDN logo file, then the name plus a quality/language suffix. Each pass is
-        // global, so an exact match always beats a loose one - `Sony MAX1` can never claim the MAX tile
-        // before the MAX2 tile has had its exact chance.
+        // global, so an exact match always beats a loose one.
+        val assigned = HashMap<String, MainActivity.Channel>()
         for (tile in TILES) {
             val hit = tile.names.map(::normalise).firstNotNullOfOrNull { alias ->
                 names[alias]?.takeIf { it.key !in taken }
@@ -117,31 +114,20 @@ internal object SonyPage {
             taken.add(hit.key); assigned[tile.slug] = hit
         }
 
-        val out = ArrayList<MainActivity.Channel>(TILES.size)
-        // Page order first, then the rest of the source's Sony channels in the order it lists them.
-        for (tile in TILES) {
+        // The page in page order, and nothing else. A tile keeps its playlist identity when there is one.
+        return TILES.map { tile ->
             val bound = assigned[tile.slug]
-            if (bound != null) {
-                out.add(bound.copy(jio = true, pinned = true, page = pageUrl(tile.slug)))
-            } else {
-                // The page lists this channel but the playlist does not carry it (the SD twins and the
-                // Ten 4/Ten 5 feeds). It is still a tile of this section: it plays the site's own player
-                // for its slug, inside the app, so no tile of the section is ever left without a picture.
-                out.add(
-                    MainActivity.Channel(
-                        id = "page:" + tile.slug, name = tile.title, category = "Sony",
-                        logo = LOGO + tile.logo, v2 = false, jio = false, pinned = true,
-                        page = pageUrl(tile.slug)
-                    )
-                )
-            }
+            MainActivity.Channel(
+                id = bound?.id ?: "page:" + tile.slug,
+                name = tile.title,
+                category = "Sony",
+                logo = LOGO + tile.logo,
+                v2 = false,
+                jio = bound != null,
+                pinned = true,
+                page = pageUrl(tile.slug)
+            )
         }
-        for (channel in pool) {
-            if (channel.key in taken || !normalise(channel.name).startsWith("sony")) continue
-            taken.add(channel.key)
-            out.add(channel.copy(jio = true, pinned = true))
-        }
-        return out
     }
 
     /** Words that may follow a page name without changing which channel it is. */
