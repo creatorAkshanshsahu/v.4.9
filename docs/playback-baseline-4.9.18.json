@@ -83,6 +83,13 @@
    "from": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146",
    "to": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
    "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line stays as it was; the resolver itself is unchanged."
+  },
+  {
+   "change": "jioCatalogue() now reads only the JioTV playlist (catalogueOf) instead of the merged catalogue, and cachedJioCatalogue() exposes the disk copy so a section can paint before the network answers.",
+   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+   "from": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
+   "to": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
+   "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), refreshSite(), tataCatalogue() and every TG/JJTV path are unchanged; the resolver itself is untouched by this edit."
   }
  ],
  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -102,7 +109,7 @@
   "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
   "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
   "app/src/main/java/com/aktv/app/TgResolver.kt": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
-  "app/src/main/java/com/aktv/app/TgServers.kt": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03"
+  "app/src/main/java/com/aktv/app/TgServers.kt": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036"
  },
  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }

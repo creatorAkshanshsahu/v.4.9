@@ -751,6 +751,17 @@ class MainActivity : AppCompatActivity() {
         if (jioCatalogLoaded) return
         jioMsg = "Loading JioTV channels…"; updateStatus()
         io.execute {
+            // The list that answered last time is on disk: put the section up from it immediately, then let the
+            // network replace it. This is what made 4.9.61 feel instant and this section feel slow.
+            if (allJio.isEmpty()) {
+                val cached = try { TgServers.cachedJioCatalogue() } catch (_: Exception) { emptyList() }
+                if (cached.isNotEmpty()) {
+                    val channels = cached.map { e ->
+                        Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
+                    }
+                    runOnUiThread { applyJio(channels) }
+                }
+            }
             // The site's two lists are independent: one being refused must not take the other with it.
             try {
                 val entries = TgServers.jioCatalogue()

@@ -225,6 +225,13 @@ internal class JioM3uResolver(
     @Synchronized
     fun catalogueOf(url: String, fresh: Boolean = false): List<JioM3uProtocol.Entry> = entriesFor(url, fresh)
 
+    /**
+     * What the disk already holds for a list, without any network at all: the section can be on screen in
+     * the time a file read takes, and the refresh that follows only replaces it when it really arrives.
+     */
+    @Synchronized
+    fun cachedCatalogue(url: String = playlist): List<JioM3uProtocol.Entry> = lastGoodPlaylist(url) ?: emptyList()
+
     @Synchronized
     fun categoryGroups(fresh: Boolean = false): List<Pair<String, List<JioM3uProtocol.Entry>>> {
         return JioM3uProtocol.categories(catalogue(fresh))

@@ -734,3 +734,17 @@ Three changes, all in the same place:
   matches the installed code. Freshly installing a release can never hide the next one.
 
 The manual route is unchanged and still the fastest: **Playback details → Check for updates**.
+
+## 23. 4.9.66 — the section paints from disk again
+
+Two things had made the JioTV tab slower than 4.9.61, and both were mine:
+
+- `jioCatalogue()` returned the **merged** result of both of the site's lists, so the JioTV section waited for
+  the second list before it could draw anything. Each tab now loads only its own list, and `resolve()` still
+  searches every list, so a TATA channel still plays from either tab.
+- the cache on disk was only consulted **after** a request failed, and the request may now take 45 seconds on
+  a slow link. The disk copy is read **first**: the section appears in the time a file read takes, and the
+  network answer replaces it when it arrives.
+
+Selecting the TATA tab is what puts that list on screen; if it has never loaded, it says so and a second
+selection retries it.

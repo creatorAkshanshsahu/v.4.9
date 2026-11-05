@@ -55,7 +55,15 @@ object TgServers {
     }
 
     /** Returns all channel entries from the JioTV m3u8 playlist, for building the UI catalogue. */
-    internal fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> = jioM3u.catalogue(fresh)
+    /**
+     * The JioTV list on its own. It used to merge both of the site's lists here, which made this section wait
+     * for the second one too; each tab now loads its own list and neither can slow the other down.
+     */
+    internal fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> =
+        jioM3u.catalogueOf(JioM3uProtocol.PLAYLIST, fresh)
+
+    /** What is already on disk for a list, so a section can paint before the network answers. */
+    internal fun cachedJioCatalogue(): List<JioM3uProtocol.Entry> = jioM3u.cachedCatalogue()
 
     /** The site's second list, on its own, so its section is built from it alone. */
     internal fun tataCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> =
