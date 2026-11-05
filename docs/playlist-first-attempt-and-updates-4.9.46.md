@@ -686,3 +686,35 @@ server did not answer in time", "the server refused the connection" - instead of
 The second list (`TATA · Playlist`) sits at the top of the JioTV tab rather than below the Sony row: the TV
 rail is full (Live, Always on, JioTV, Movies, Series, Search), so the site's second list is a section inside
 JioTV, and it now renders as soon as it loads even when the first list has not.
+
+## 21. 4.9.64 — the crash on Back, the seventh tab, and a stream that only exists in script
+
+### The crash
+
+`refreshRowsKeepFocus` rebuilt the rows for a channel tab with the VOD branch:
+
+```kotlin
+else -> continueRow() + vodRows[tab - 3]
+```
+
+On the JioTV tab that is `vodRows[-1]`, and it threw `ArrayIndexOutOfBoundsException: length=2; index=-1`
+from `closePlayer` → `dispatchKeyEvent` — so Back, out of a player, back to the JioTV tab, closed the app.
+Every tab now has its own branch, and the two helpers `channelsTab` / `vodTab` / `vodRowsFor(t)` are the only
+way the code asks what a tab is. `vodRows` can no longer be indexed by a tab that is not 3 or 4, anywhere.
+
+### The seventh tab
+
+The TV rail is Live, Always on, JioTV, Movies, Series, **TATA** - the site's second list has its own tab now,
+with the site's own order, one row per category it declares, its own header, its own count and its own
+message when it cannot load. Selecting the tab again retries it.
+
+### OG: a stream that only exists after the page runs
+
+`Vidstuck: no address on its page · Vidfast: no address on its page · Vidlink: no address on its page` is the
+truth about those pages: they contain no address. The address is built by their scripts, and only the request
+they then make names it. So the last resort is no longer a scrape but a **run**: `MediaSniffer` loads the
+site's own player page in a hidden browser with JavaScript on, records every address the page's fetch/XHR/
+`<video src>` asks for (plus the bodies of its JSON answers), and takes the first `.m3u8`/`.mp4` it finds -
+skipping `.mpd`, because that is Widevine here. That manifest is then played by the same native Media3
+player as everything else, with the site as `Referer`. It is the same stream the site plays; the app simply
+plays it natively, as asked.

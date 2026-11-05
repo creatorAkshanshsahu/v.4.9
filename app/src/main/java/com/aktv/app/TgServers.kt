@@ -20,6 +20,8 @@ object TgServers {
         forgetPreviousLiveSite(ctx)
         resolver.close()
         jjtv = JjtvResolver()
+        // The OG player's stream only exists after its scripts run, so the resolver needs the browser engine.
+        OgNative.appContext = ctx.applicationContext
         jioM3u = JioM3uResolver(
             // The list can be a megabyte over a link that is barely moving: it gets its own timeouts.
             playlistHttp = TgHttp(readTimeoutSeconds = 30, callTimeoutSeconds = 45),

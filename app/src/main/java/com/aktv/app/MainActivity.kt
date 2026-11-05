@@ -104,6 +104,7 @@ class MainActivity : AppCompatActivity() {
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
     /** The site's second list (its "tata" playlist): its own section, played by the same native resolver. */
     private var tataJio = listOf<Channel>()
+    private var tataMsg = "Loading TATA channels…"
     /** Keys of the Sony section's tiles: playlist-only channels, re-pinned wherever they reappear. */
     private var sonyPinned = setOf<String>(); private var sonyTiles = listOf<Channel>()
     /** The channel whose page player was opened by the fallback, so a retry never bounces into it twice. */
@@ -194,9 +195,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
     private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segJio: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
-    private val segs by lazy { listOf(segLive, segV2, segJio, segSites, segSeries) }   // TV rail: Live, Always on, JioTV, Movies, Series
+    // TV rail: Live, Always on, JioTV, Movies, Series, TATA
+    private val segTata by lazy { findViewById<TextView>(R.id.segTata) }
+    private val segs by lazy { listOf(segLive, segV2, segJio, segSites, segSeries, segTata) }
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
-    private val segBgs by lazy { List(5) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
+    private val segBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
     private val phoneSegBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
@@ -435,7 +438,7 @@ class MainActivity : AppCompatActivity() {
         intro.onReveal = { home.alpha = 1f }
         intro.onDone = {
             home.alpha = 1f; intro.visibility = View.GONE
-            if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs[tab].requestFocus()
+            if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(tab)?.requestFocus()
             else segs[tab].requestFocus()
         }
         Movies.diskDir = File(filesDir, "tmdb").apply { mkdirs() }
@@ -502,13 +505,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun layoutHero() {
         val dm = resources.displayMetrics
-        HomeChrome.apply(findViewById(R.id.home), dm.widthPixels, dm.heightPixels, dp, tab >= 3)
+        HomeChrome.apply(findViewById(R.id.home), dm.widthPixels, dm.heightPixels, dp, vodTab)
         val searchWidth = minOf(340f, dm.widthPixels / dp * 0.43f)
         findViewById<View>(R.id.searchInputColumn).layoutParams.width = (searchWidth * dp).toInt()
         findViewById<View>(R.id.home).requestLayout()
     }
 
-    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2 -> Accent.SIGNAL; else -> Accent.INDIGO }
+    /** Tabs that show a channel list; 3 and 4 are the VOD shelves. Never index vodRows with anything else. */
+    private val channelsTab get() = tab <= 2 || tab == 5
+    private val vodTab get() = tab == 3 || tab == 4
+    private fun vodRowsFor(t: Int) = if (t == 3 || t == 4) vodRows[t - 3] else emptyList<Row>()
+
+    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2, 5 -> Accent.SIGNAL; else -> Accent.INDIGO }
 
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
         val accent = sectionAccent()
@@ -527,19 +535,25 @@ class MainActivity : AppCompatActivity() {
         phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tab == i) }
         phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)
-        findViewById<TextView>(R.id.sectionTitle).text = when (tab) { 0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; else -> "Series" }
+        findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
+            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; else -> "TATA"
+        }
         findViewById<TextView>(R.id.sectionKicker).apply {
             // The Sony section is the newest part of Live TV, so name it in the header.
             val sonyLive = tab == 0 && SonyPage.channels(allJio).isNotEmpty()
             text = when (tab) {
                 0 -> if (sonyLive) "LIVE · SONY SECTION INCLUDED" else "LIVE, RIGHT NOW"
                 1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · SONY SECTION · NATIVE CLEARKEY"
-                3 -> "YOUR NEXT MOVIE NIGHT"; else -> "STORIES THAT KEEP GOING"
+                3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"
+                else -> "TATA PLAYLIST · NATIVE CLEARKEY"
             }
             setTextColor(sectionAccent())
         }
-        val count = when (tab) { 0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; else -> vodRows[tab - 3].sumOf { it.tiles.size } }
-        findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 3) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
+        val count = when (tab) {
+            0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; 5 -> tataJio.size
+            else -> vodRowsFor(tab).sumOf { it.tiles.size }
+        }
+        findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (channelsTab) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
 
     /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
@@ -673,7 +687,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatus() {
         val msg = when { tab == 0 && all.isEmpty() -> v1Msg; tab == 1 && allV2.isEmpty() -> "Loading 24/7 channels…"
             tab == 2 && allJio.isEmpty() -> jioMsg
-            tab >= 3 && vodRows[tab - 3].isEmpty() -> {
+            tab == 5 && tataJio.isEmpty() -> tataMsg
+            vodTab && vodRowsFor(tab).isEmpty() -> {
                 val idx = tab - 3; val w = if (tab == 4) "series" else "movies"
                 if (vodLoading[idx]) "Loading $w…"
                 else vodError[idx]?.let { "Couldn't load $w ($it). Select this tab again to retry." }
@@ -729,7 +744,7 @@ class MainActivity : AppCompatActivity() {
         loadJioChannels()
     }
 
-    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; else -> all }
+    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; else -> all }
 
     /** Loads the JioTV m3u8 playlist and builds a channel catalogue from it. */
     private fun loadJioChannels() {
@@ -761,9 +776,16 @@ class MainActivity : AppCompatActivity() {
                 val tata = TgServers.tataCatalogue().map { e ->
                     Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
                 }
-                if (tata.isNotEmpty()) runOnUiThread { applyTata(tata) }
-            } catch (_: Exception) {
-                // No second list today: the JioTV section is unaffected and the row is simply absent.
+                runOnUiThread { if (tata.isNotEmpty()) applyTata(tata) }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (tataJio.isEmpty()) {
+                        tataMsg = if (jioRetried) "TATA channels didn't load (${why(e)}). Select this tab again to retry."
+                        else "Loading TATA channels…"
+                        if (tab == 5) updateStatus()
+                        if (!jioRetried) ui.postDelayed({ loadJioChannels() }, 5_000)
+                    }
+                }
             }
         }
     }
@@ -771,8 +793,17 @@ class MainActivity : AppCompatActivity() {
     private fun applyTata(list: List<Channel>) {
         if (list == tataJio) return
         tataJio = list; seedAccents(list)
-        if (tab == 2 && allJio.isEmpty()) { updateStatus() }
-        if (tab == 2) refreshRows()
+        if (tab == 5) { refreshRows(); updateStatus() } else updateStatus()
+        if (searchShown) updateResults()
+    }
+
+    /** The site's second list, on its own tab: the site's order, then one row per category it declares. */
+    private fun tataRows(list: List<Channel>): List<Row> {
+        if (list.isEmpty()) return emptyList()
+        val out = ArrayList<Row>()
+        out.add(Row("TATA · Playlist", featuredChannels(list).map { Tile.Ch(it) }))
+        out.addAll(list.groupBy { it.category }.toSortedMap().map { (name, items) -> Row("TATA · $name", items.map { Tile.Ch(it) }) })
+        return out
     }
 
     private fun applyJio(list: List<Channel>) {
@@ -847,11 +878,6 @@ class MainActivity : AppCompatActivity() {
         return buildList {
             // In this section the playlist is the player, so the Sony tiles here play natively like every
             // other channel in it; only Live TV's copy of the section opens the page.
-            // The site's second list, as its own section, played by the same native resolver as the first.
-            if (tataJio.isNotEmpty()) {
-                add(Row("TATA · Playlist", featuredChannels(tataJio).map { Tile.Ch(it) }))
-                addAll(tataJio.groupBy { it.category }.toSortedMap().map { (name, items) -> Row("TATA · $name", items.map { Tile.Ch(it) }) })
-            }
             val sony = SonyPage.playlistChannels(channels.ifEmpty { allJio })
             sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
             if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
@@ -955,7 +981,8 @@ class MainActivity : AppCompatActivity() {
             0 -> liveRows(all)
             1 -> liveRows(allV2, alwaysOn = true)
             2 -> jioRows(allJio)
-            else -> { loadVod(tab); continueRow() + vodRows[tab - 3] }
+            5 -> tataRows(tataJio)
+            else -> { loadVod(tab); continueRow() + vodRowsFor(tab) }
         }
         setHeroCollapsed(false)
         inner.clear()
@@ -983,7 +1010,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun switchTab(t: Int) {
         if (t == tab) {
-            if (t >= 3 && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
+            if ((t == 3 || t == 4) && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
+            // Selecting TATA again is how you retry it once it has said it failed.
+            if (t == 5 && tataJio.isEmpty()) {
+                jioRetried = false; jioCatalogLoaded = false; tataMsg = "Loading TATA channels…"
+                updateStatus(); loadJioChannels()
+            }
             return
         }
         val dir = if (t > tab) 1 else -1
@@ -1088,8 +1120,8 @@ class MainActivity : AppCompatActivity() {
             setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
         }
         showCinematicFallback(t)
-        heroTagline.visibility = if (tab < 3 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
-        heroSubheading.text = if (tab < 3) "A clearer view of what’s next." else "Find your next story."
+        heroTagline.visibility = if (channelsTab && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
+        heroSubheading.text = if (channelsTab) "A clearer view of what’s next." else "Find your next story."
         when (t) {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
@@ -1225,7 +1257,7 @@ class MainActivity : AppCompatActivity() {
             else "Live TV, curated for your next moment."
         val d = n?.desc?.takeIf { it.isNotBlank() } ?: fallback
         heroDesc.text = d
-        heroDesc.visibility = if (compact || tab >= 3) View.GONE else View.VISIBLE
+        heroDesc.visibility = if (compact || vodTab) View.GONE else View.VISIBLE
         heroNext.visibility = if (nx != null && !compact) View.VISIBLE else View.GONE
         if (nx != null) heroNext.text = progLine("NEXT", nx, range = false)
     }
@@ -2482,7 +2514,7 @@ class MainActivity : AppCompatActivity() {
         home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
             if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
         } }
-        if (tab < 3) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
+        if (channelsTab) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
     }
 
     private fun shortOk() {
@@ -2643,7 +2675,7 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         refreshProgrammeFeed()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
-        if (tab >= 3 && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
+        if (vodTab && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
@@ -3214,7 +3246,7 @@ class MainActivity : AppCompatActivity() {
     private fun schedulePreview(c: Channel?) {
         stopPreview()
         // no live preview on the movie tabs, while the hero is folded away, or by default on weak boxes (it runs a second decoder)
-        if (c != null && tab < 3 && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
+        if (c != null && channelsTab && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
     }
     private fun stopPreview() {
         ui.removeCallbacks(previewRunnable); previewToken++; previewJob?.cancel(true)
@@ -3229,7 +3261,7 @@ class MainActivity : AppCompatActivity() {
         old?.let { try { it.release() } catch (_: Exception) {} }
     }
     private fun previewIsCurrent(ch: Channel, token: Int) = token == previewToken && layer.visibility != View.VISIBLE &&
-        !searchShown && tab < 3 && !heroCollapsed && (heroTile as? Tile.Ch)?.c?.key == ch.key
+        !searchShown && channelsTab && !heroCollapsed && (heroTile as? Tile.Ch)?.c?.key == ch.key
 
     private fun startPreview() {
         val ch = (heroTile as? Tile.Ch)?.c ?: return
@@ -3316,7 +3348,9 @@ class MainActivity : AppCompatActivity() {
         rows = when (tab) {
             0 -> liveRows(all)
             1 -> liveRows(allV2, alwaysOn = true)
-            else -> continueRow() + vodRows[tab - 3]
+            2 -> jioRows(allJio)
+            5 -> tataRows(tataJio)
+            else -> continueRow() + vodRowsFor(tab)
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()
         val shift = rows.size - old.size
@@ -3390,7 +3424,7 @@ class MainActivity : AppCompatActivity() {
                         focusAnim(x, f)
                         if (f) {
                             setHero(t)
-                            if (tab < 3) scheduleSourceWarmup(t.c)
+                            if (channelsTab) scheduleSourceWarmup(t.c)
                             fetchGuide(t.c) { guide ->
                                 if (nowCaption.tag == t.c.key) nowCaption.text = if (t.c.v2) "Always-on · no schedule feed" else guide?.now?.title ?: "Programme information unavailable"
                             }

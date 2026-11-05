@@ -119,9 +119,11 @@
         <TextView android:id="@+id/segSites" style="@style/Widget.AKTV.RailItem" android:text="Movies" android:drawableTop="@drawable/ic_nav_movies"
             android:nextFocusUp="@id/segJio" android:nextFocusDown="@id/segSeries" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/segSeries" style="@style/Widget.AKTV.RailItem" android:text="Series" android:drawableTop="@drawable/ic_nav_series"
-            android:nextFocusUp="@id/segSites" android:nextFocusDown="@id/searchBtn" android:nextFocusRight="@id/rows"/>
+            android:nextFocusUp="@id/segSites" android:nextFocusDown="@id/segTata" android:nextFocusRight="@id/rows"/>
+        <TextView android:id="@+id/segTata" style="@style/Widget.AKTV.RailItem" android:text="TATA" android:drawableTop="@drawable/ic_nav_tata"
+            android:nextFocusUp="@id/segSeries" android:nextFocusDown="@id/searchBtn" android:nextFocusRight="@id/rows"/>
         <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
-            android:nextFocusUp="@id/segSeries" android:nextFocusRight="@id/rows"/>
+            android:nextFocusUp="@id/segTata" android:nextFocusRight="@id/rows"/>
         <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
         <LinearLayout android:id="@+id/navProfile" android:layout_width="match_parent" android:layout_height="58dp"
             android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="2dp" android:paddingEnd="2dp">

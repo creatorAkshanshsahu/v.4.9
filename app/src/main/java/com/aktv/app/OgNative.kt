@@ -1,5 +1,6 @@
 package com.aktv.app
 
+import android.content.Context
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.util.concurrent.TimeUnit
@@ -51,6 +52,9 @@ internal object OgNative {
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true).followSslRedirects(false).build()
 
+    /** The application context, so a page whose stream only exists after its scripts run can still be read. */
+    @Volatile var appContext: Context? = null
+
     /** What each server said, so a title with no source explains itself instead of just failing. */
     @Volatile private var outcome = ""
 
@@ -73,6 +77,14 @@ internal object OgNative {
             }
             if (found.size >= MAX_CANDIDATES) break
         }
+        // No page named an address, because these players build it in script. So run the site's own player
+        // in a browser and read the manifest request it makes - the same stream, played natively here.
+        if (found.isEmpty()) {
+            val player = playerUrl(title)
+            val sniffed = appContext?.let { ctx -> runCatching { MediaSniffer.find(ctx, player) }.getOrNull() }
+            notes += "site player: " + if (sniffed == null) "no manifest" else "manifest found"
+            sniffed?.let { url -> sourceOf(url, "player", "OG site player")?.let { found += it } }
+        }
         outcome = notes.joinToString(" · ").take(220)
         if (found.isEmpty()) throw FrostResolveException(kind = "empty")
         return found.toList()
@@ -92,23 +104,31 @@ internal object OgNative {
         iframe(body)?.let { nested ->
             absolute(nested, page)?.let { url -> fetch(url)?.let { inner -> addresses += candidates(inner, url) } }
         }
-        return addresses.mapNotNull { url ->
-            val format = format(url) ?: return@mapNotNull null
-            FrostSource(
-                provider = FrostProvider.OG,
-                identity = "og:${server.key}:${url.hashCode()}",
-                url = url,
-                format = format,
-                quality = "",
-                language = "",
-                hevc = null,
-                headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to "$SITE/"),
-                subtitles = emptyList(),
-                credentialOrigin = url,
-                scraperName = "OG ${server.label}"
-            )
-        }
+        return addresses.mapNotNull { url -> sourceOf(url, server.key, "OG ${server.label}") }
     }
+
+    /** One media address, as a source the native player can take. */
+    private fun sourceOf(url: String, key: String, label: String): FrostSource? {
+        val format = format(url) ?: return null
+        return FrostSource(
+            provider = FrostProvider.OG,
+            identity = "og:$key:${url.hashCode()}",
+            url = url,
+            format = format,
+            quality = "",
+            language = "",
+            hevc = null,
+            headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to "$SITE/", "Origin" to SITE),
+            subtitles = emptyList(),
+            credentialOrigin = url,
+            scraperName = label
+        )
+    }
+
+    /** The address of the page the site's own player shows for a title. */
+    fun playerUrl(title: FrostTitle): String =
+        "$SITE/player?id=${title.id}&type=${kind(title)}" +
+            if (title.isSeries) "&season=${title.season}&episode=${title.episode}" else ""
 
     fun cancel() { client.dispatcher.cancelAll() }
 
