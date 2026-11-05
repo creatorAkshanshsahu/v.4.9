@@ -135,4 +135,25 @@ class SonyPageTest {
         // The Live TV copy is untouched and still opens the page for every tile.
         assertTrue(SonyPage.channels(playlist).all { it.page != null })
     }
+
+    /**
+     * The page labels a tile by its slug (`sony-yay`); the playlist spells the same channel its own way.
+     * A channel the playlist carries must bind - and so play natively - even when the two spellings differ,
+     * because the alternative is the site's browser player, which the viewer asked us to stop using.
+     */
+    @Test fun `a tile binds through its own slug when the playlist spells the name differently`() {
+        val bound = SonyPage.playlistChannels(listOf(channel("1587", "Sony YAY")))
+        val yay = bound.first { it.name == "SONY YAY" }
+        assertTrue("a playlist channel must make the tile native", yay.jio)
+        assertNull("a bound tile has no page to open", yay.page)
+
+        val unbound = SonyPage.channels(listOf(channel("1587", "Sony YAY"))).first { it.name == "SONY YAY" }
+        assertEquals("only an unbound tile keeps the site's page", SonyPage.pageUrl("sony-yay"), unbound.page)
+    }
+
+    @Test fun `a slug implies its own names`() {
+        val bound = SonyPage.playlistChannels(listOf(channel("900", "Sony Ten 3")))
+        assertTrue(bound.first { it.name == "SONY TEN 3" }.jio)
+        assertNull(bound.first { it.name == "SONY TEN 3" }.page)
+    }
 }

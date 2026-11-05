@@ -61,6 +61,20 @@ internal object SonyPage {
 
     private fun normalise(value: String) = value.lowercase().filter { it.isLetterOrDigit() }
 
+    /**
+     * The names a slug implies: `sony-ten-3-hd` gives "sony ten 3 hd", "sony ten 3" and "ten 3 hd", so a
+     * playlist that writes the channel as "Sony Ten 3" still binds.
+     */
+    private fun slugNames(slug: String): List<String> {
+        val words = slug.split('-').filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        val out = LinkedHashSet<String>()
+        out += words.joinToString(" ")
+        if (words.size > 2 && words.last() in setOf("hd", "sd")) out += words.dropLast(1).joinToString(" ")
+        if (words.size > 1) out += words.drop(1).joinToString(" ")
+        return out.toList()
+    }
+
     /** The logo file name a URL points at, e.g. `Ten3_HD.png` for either CDN path. */
     private fun logoFile(value: String) = value.substringAfterLast('/').substringBefore('?').lowercase()
 
@@ -110,6 +124,15 @@ internal object SonyPage {
         for (tile in TILES) {
             if (tile.slug in assigned) continue
             val hit = pool.firstOrNull { it.key !in taken && tile.names.any { alias -> qualifies(it, alias) } }
+                ?: continue
+            taken.add(hit.key); assigned[tile.slug] = hit
+        }
+        // Last pass: the page's slug is itself a name - `sony-yay` is "Sony Yay", `sony-ten-3-hd` is
+        // "Sony Ten 3 HD". The playlist spells some of these differently from the page's own labels, and a
+        // channel the playlist carries must play natively rather than fall back to the site's browser.
+        for (tile in TILES) {
+            if (tile.slug in assigned) continue
+            val hit = pool.firstOrNull { it.key !in taken && slugNames(tile.slug).any { alias -> qualifies(it, alias) } }
                 ?: continue
             taken.add(hit.key); assigned[tile.slug] = hit
         }

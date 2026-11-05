@@ -938,3 +938,17 @@ within a minute or two, and nothing about the check is expensive: it is one smal
 
 `updates.json` itself is unchanged: same asset, same manifest, same SHA-256 verification before the installer
 is invoked.
+
+## 34. 4.9.77 — the Sony tiles the playlist spells differently
+
+The page's 22 tiles are addressed by **slug** - `sony-yay`, `sony-ten-3-hd` - and each slug is also a name.
+The playlist spells several of them its own way ("Sony YAY" for `sony-yay`, "Sony Ten 3" for `sony-ten-3-hd`),
+so the exact-name and logo passes missed and those tiles kept the site's browser player. A third pass now
+binds them by what the slug says: `sony-ten-3-hd` yields "sony ten 3 hd", "sony ten 3" and "ten 3 hd".
+
+That matters because the site's own player (`suniliv.pages.dev/ptest1.html?id=<slug>`) is **not readable**: it
+is a script player behind an anti-bot screen ("Brave Shields Detected"), with no manifest in its markup. What
+*is* readable is the same site's **playlist** (`jtv33.m3u8`), which carries these Sony channels with their
+native manifest (`jtv1.mpd?id=<n>`), their ClearKey document (`jtv-fetch/keyid.php?id=<n>`) and their cookie.
+So every tile that the playlist carries now plays **natively** - the same channel the page plays, on this
+app's player - and only a tile the playlist does not carry at all keeps the page as its last resort.
