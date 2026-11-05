@@ -22,7 +22,15 @@ internal data class TgResponse(
 )
 internal fun interface TgTransport { fun get(url: String, headers: Map<String, String>): TgResponse }
 
-internal class TgHttp : TgTransport {
+internal class TgHttp(
+    /** A playlist on a slow TV link needs far longer than a channel lookup, so the caller sets this. */
+    readTimeoutSeconds: Long = 6,
+    callTimeoutSeconds: Long = 12
+) : TgTransport {
+    private val client: OkHttpClient = if (readTimeoutSeconds == 6L && callTimeoutSeconds == 12L) shared else
+        OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS).build()
+
     override fun get(url: String, headers: Map<String, String>): TgResponse {
         checkInterrupted()
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT)
@@ -51,7 +59,7 @@ internal class TgHttp : TgTransport {
 
     companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-        private val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
+        private val shared = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(6, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
     }
 }

@@ -109,6 +109,8 @@ class MainActivity : AppCompatActivity() {
     /** The channel whose page player was opened by the fallback, so a retry never bounces into it twice. */
     private var pageFallbackFor: String? = null
     private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
+    /** The section gets one silent retry before it is allowed to say it failed. */
+    private var jioRetried = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
     private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
     private var favs = setOf<String>(); private var heroTile: Tile? = null
@@ -618,7 +620,9 @@ class MainActivity : AppCompatActivity() {
         e is ApiException && e.code == 400 -> "unknown channel"
         e is ApiException && e.code >= 500 -> "the TG TV server is busy (HTTP ${e.code}), try again in a moment"
         e is ApiException -> "HTTP ${e.code}"
-        e is java.net.UnknownHostException || e is java.net.SocketTimeoutException || e is java.net.ConnectException -> "no connection to the server"
+        e is java.net.UnknownHostException -> "the server's address did not resolve (DNS)"
+        e is java.net.SocketTimeoutException -> "the server did not answer in time"
+        e is java.net.ConnectException -> "the server refused the connection"
         else -> e.message ?: e.javaClass.simpleName
     }
 
@@ -742,7 +746,15 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { applyJio(channels) }
             } catch (e: Exception) {
                 runOnUiThread {
-                    if (allJio.isEmpty()) { jioMsg = "JioTV channels didn't load (${why(e)}). Check the connection and reopen the app."; updateStatus() }
+                    if (allJio.isEmpty() && !jioRetried) {
+                        // One quiet retry, because a TV link that is barely moving drops the first request.
+                        jioRetried = true; jioCatalogLoaded = false
+                        jioMsg = "Loading JioTV channels…"; updateStatus()
+                        ui.postDelayed({ loadJioChannels() }, 5_000)
+                    } else if (allJio.isEmpty()) {
+                        jioMsg = "JioTV channels didn't load (${why(e)}). Check the connection and reopen the app."
+                        updateStatus()
+                    }
                 }
             }
             try {
@@ -759,7 +771,8 @@ class MainActivity : AppCompatActivity() {
     private fun applyTata(list: List<Channel>) {
         if (list == tataJio) return
         tataJio = list; seedAccents(list)
-        if (tab == 2) { refreshRows(); }
+        if (tab == 2 && allJio.isEmpty()) { updateStatus() }
+        if (tab == 2) refreshRows()
     }
 
     private fun applyJio(list: List<Channel>) {
@@ -834,15 +847,15 @@ class MainActivity : AppCompatActivity() {
         return buildList {
             // In this section the playlist is the player, so the Sony tiles here play natively like every
             // other channel in it; only Live TV's copy of the section opens the page.
-            val sony = SonyPage.playlistChannels(channels.ifEmpty { allJio })
-            sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
-            if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
-            if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             // The site's second list, as its own section, played by the same native resolver as the first.
             if (tataJio.isNotEmpty()) {
                 add(Row("TATA · Playlist", featuredChannels(tataJio).map { Tile.Ch(it) }))
                 addAll(tataJio.groupBy { it.category }.toSortedMap().map { (name, items) -> Row("TATA · $name", items.map { Tile.Ch(it) }) })
             }
+            val sony = SonyPage.playlistChannels(channels.ifEmpty { allJio })
+            sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
+            if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
+            if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })

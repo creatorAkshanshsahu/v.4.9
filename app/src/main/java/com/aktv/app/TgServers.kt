@@ -21,8 +21,11 @@ object TgServers {
         resolver.close()
         jjtv = JjtvResolver()
         jioM3u = JioM3uResolver(
+            // The list can be a megabyte over a link that is barely moving: it gets its own timeouts.
+            playlistHttp = TgHttp(readTimeoutSeconds = 30, callTimeoutSeconds = 45),
             extra = listOf(JioM3uProtocol.TATA_PLAYLIST),
             cacheDir = java.io.File(ctx.filesDir, "playlists"),
+            legacyCacheFile = java.io.File(ctx.filesDir, "jiotv-playlist.m3u8"),
             // The site's front door refuses a scriptless client (HTTP 415 on every request shape), so the
             // last resort is the same request read through the browser engine.
             browser = { url -> BrowserFetch.playlist(ctx, url) }

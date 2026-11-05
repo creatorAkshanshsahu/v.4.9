@@ -25,6 +25,10 @@ internal class JioM3uResolver(
     private val cacheDir: java.io.File? = null,
     /** The file the primary playlist is kept in, when a caller wants to name it. */
     private val cacheFile: java.io.File? = null,
+    /** Where 4.9.61 and earlier kept the primary list; an upgrade must not lose the copy that answered. */
+    private val legacyCacheFile: java.io.File? = null,
+    /** A playlist is a large file on a slow link, so it may use a transport with its own timeouts. */
+    private val playlistHttp: TgTransport? = null,
     /**
      * Reads a URL through a browser engine when plain HTTP is refused. The site's front door answers a
      * scriptless client with `HTTP 415` and lets a real browser through, so this is the only way the
@@ -228,18 +232,27 @@ internal class JioM3uResolver(
 
     private fun entriesFor(url: String, fresh: Boolean): List<JioM3uProtocol.Entry> {
         catalogs[url]?.takeIf { !fresh && it.until > elapsed() }?.let { return it.value }
-        val body = try {
-            fetchPlaylist(url, fresh).also { keepPlaylist(url, it) }
-        } catch (error: Exception) {
-            if (error is InterruptedIOException) throw error
-            // A refused request must not empty the section. The last good copy describes the same channels,
-            // and each channel's own address, cookie and keys are still resolved fresh when it is played.
-            return lastGoodPlaylist(url) ?: throw error
+        var failure: Exception? = null
+        // A TV on a slow link drops the first request often enough that one silent retry is worth it.
+        for (attempt in 0..1) {
+            try {
+                val body = fetchPlaylist(url, fresh)
+                val entries = JioM3uProtocol.parse(body)
+                if (entries.isEmpty()) throw IOException("JioTV m3u8 playlist was empty")
+                keepPlaylist(url, body)
+                cache(url, entries, 30 * 60_000)  // a playlist URL is stable; refresh every 30 min
+                return entries
+            } catch (error: Exception) {
+                if (error is InterruptedIOException) throw error
+                failure = error
+                if (attempt == 0) {
+                    try { Thread.sleep(700) } catch (_: InterruptedException) { throw InterruptedIOException("Cancelled") }
+                }
+            }
         }
-        val entries = JioM3uProtocol.parse(body)
-        require(entries.isNotEmpty()) { "JioTV m3u8 playlist was empty" }
-        cache(url, entries, 30 * 60_000)  // a playlist URL is stable; refresh every 30 min
-        return entries
+        // A refused request must not empty the section. The last good copy describes the same channels,
+        // and each channel's own address, cookie and keys are still resolved fresh when it is played.
+        return lastGoodPlaylist(url) ?: throw (failure ?: IOException("JioTV m3u8 playlist unavailable"))
     }
 
     private fun cache(url: String, entries: List<JioM3uProtocol.Entry>, ttlMs: Long) {
@@ -247,9 +260,15 @@ internal class JioM3uResolver(
     }
 
     /** The file a playlist is kept in: one per URL, named by its own hash. */
-    private fun cacheFileFor(url: String): java.io.File? =
-        cacheFile?.takeIf { url == playlist }
-            ?: cacheDir?.let { java.io.File(it, "playlist-" + Integer.toHexString(url.hashCode()) + ".m3u") }
+    private fun cacheFileFor(url: String): java.io.File? {
+        cacheFile?.takeIf { url == playlist }?.let { return it }
+        val dir = cacheDir ?: return null
+        val named = java.io.File(dir, "playlist-" + Integer.toHexString(url.hashCode()) + ".m3u")
+        if (named.exists()) return named
+        // 4.9.61 and earlier kept the primary list in one file of its own; an upgrade must still read it.
+        if (url == playlist) legacyCacheFile?.takeIf { it.exists() }?.let { return it }
+        return named
+    }
 
     /** The copy of a playlist that answered last time, retried after five minutes rather than thirty. */
     private fun lastGoodPlaylist(url: String): List<JioM3uProtocol.Entry>? {
@@ -285,7 +304,7 @@ internal class JioM3uResolver(
             val position = (playlistShape + index) % shapes.size
             checkInterrupted()
             val response = try {
-                http.get(url, shapes[position])
+                (playlistHttp ?: http).get(url, shapes[position])
             } catch (error: InterruptedIOException) {
                 throw error
             } catch (_: Exception) {
@@ -304,7 +323,7 @@ internal class JioM3uResolver(
         // through the browser engine gets past the gate the site puts in front of it, and the body it returns
         // is the playlist itself - which is the only remaining way to keep these channels.
         lastPlaylistStatus = status
-        browser?.invoke(playlist)?.let { text ->
+        if (status in setOf(0, 403, 415, 429, 503)) browser?.invoke(playlist)?.let { text ->
             if (JioM3uProtocol.parse(text).isNotEmpty()) return text
         }
         throw JioM3uHttpException(status, refusal)

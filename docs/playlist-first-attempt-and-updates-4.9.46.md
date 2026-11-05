@@ -662,3 +662,27 @@ playback details: `Vidstuck: HTTP 403 · Vidfast: no address on its page · Vidl
 the difference between "OG does not work" and a fixable answer, and it is what the next round is built
 from. The request also carries `Origin` as well as `Referer` now, because some embed hosts check the
 former.
+
+## 20. 4.9.63 — a slow link, an upgrade, and where the second list lives
+
+4.9.62 reported *"no connection to the server"* on a TV whose status bar showed 7 KB/s. That is the shape of
+the problem: the playlist is a large file, `TgHttp` gave it 12 seconds, and the first request on a link that
+slow is dropped. Three things follow:
+
+1. **The playlist gets its own transport** - 30 s read, 45 s call - so a slow link is slow, not failed. Media
+   probes keep the short timeouts they need.
+2. **One silent retry** per list, 700 ms apart, and one silent retry of the whole section (5 s later) before
+   the tab is allowed to say it failed.
+3. **The copy kept by 4.9.61 is still read**: the cache moved into `files/playlists/`, but the old
+   `files/jiotv-playlist.m3u8` is consulted when the new file is not there yet, so an upgrade does not lose
+   the list that answered yesterday.
+
+The browser-engine read is now only attempted for a *gate* (`403`, `415`, `429`, `503`), never for a dead
+connection, where waiting for a browser would only make the section slower to say what is wrong.
+
+The section message also names the real reason now - "the server's address did not resolve (DNS)", "the
+server did not answer in time", "the server refused the connection" - instead of one phrase for all three.
+
+The second list (`TATA · Playlist`) sits at the top of the JioTV tab rather than below the Sony row: the TV
+rail is full (Live, Always on, JioTV, Movies, Series, Search), so the site's second list is a section inside
+JioTV, and it now renders as soon as it loads even when the first list has not.

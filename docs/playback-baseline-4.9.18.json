@@ -62,6 +62,20 @@
    "from": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
    "to": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
    "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
+  },
+  {
+   "change": "TgHttp gains optional read/call timeouts so a large playlist can be fetched on a slow link; the default construction is byte-for-byte the shared client every other call already used.",
+   "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
+   "from": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
+   "to": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
+   "unchanged": "Request building, headers, bounded body read, redirect/final-url reporting and the default 5/6/12 s client are unchanged."
+  },
+  {
+   "change": "JioM3uResolver construction only: the playlist resolver now gets a slow-link transport, keeps its lists in cacheDir, still reads the 4.9.61 cache file, and exposes tataCatalogue().",
+   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+   "from": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
+   "to": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146",
+   "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
   }
  ],
  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -80,8 +94,8 @@
   "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
   "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
   "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
-  "app/src/main/java/com/aktv/app/TgResolver.kt": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
-  "app/src/main/java/com/aktv/app/TgServers.kt": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03"
+  "app/src/main/java/com/aktv/app/TgResolver.kt": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
+  "app/src/main/java/com/aktv/app/TgServers.kt": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146"
  },
  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }
