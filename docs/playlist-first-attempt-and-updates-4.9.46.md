@@ -766,3 +766,20 @@ manifest, the servers' own player pages one at a time.
 The report is no longer truncated to two lines. Each line is a fact - `site player: 41 requests, 7 script(s),
 no manifest`, `Vidstuck player: manifest found` - the card carries 320 characters of it, and **Playback
 details** carries all of it, followed by the usual diagnostics, so one screenshot answers the question.
+
+## 25. 4.9.68 — the master, not the audio track; and a source that stays in the list
+
+The sniffer worked in 4.9.67 - the menu showed `1. OG · OG Vidfast · HLS` - but the film played **sound over
+a black screen**, because the first manifest a player fetches is often an **audio rendition** and that is what
+was taken. Now the sniffer keeps watching for six seconds after the first manifest, collects every candidate,
+and then **reads** them: the one that lists `#EXT-X-STREAM-INF` with a `RESOLUTION` is the master, and the
+master is what the native player needs. Audio-named addresses are only used when nothing else exists, and the
+report says `N manifest(s), none carries video` when that is the truth.
+
+Two other things that made it feel broken:
+
+- **the OG entry disappeared from the menu** after one failure, because starting a source replaced `sources`
+  with the next provider's list. OG sources found for the title are now kept separately and always listed;
+- **the second try cost a full search again**. `OgNative` remembers what it found for a title for 30 minutes,
+  so opening the film again starts from the same stream immediately. The whole search is also capped at 45
+  seconds, so a title that cannot be found fails in a bounded time instead of a minute.

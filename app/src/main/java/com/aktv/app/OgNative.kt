@@ -64,8 +64,19 @@ internal object OgNative {
     @Volatile private var report = ""
     fun lastReport(): String = report
 
+    /** What was found for a title, so a second open is instant and the entry never vanishes from the menu. */
+    private data class Memo(val until: Long, val sources: List<FrostSource>)
+    private val memo = HashMap<String, Memo>()
+    private fun memoKey(t: FrostTitle) = "${t.type}:${t.id}:${t.season}:${t.episode}"
+
+    fun cached(title: FrostTitle): List<FrostSource> = synchronized(memo) {
+        memo[memoKey(title)]?.takeIf { it.until > System.currentTimeMillis() }?.sources
+    } ?: emptyList()
+
     /** Every server, in the site's order: the player's own preflight drops the ones that do not answer. */
-    fun resolve(title: FrostTitle): List<FrostSource> {
+    fun resolve(title: FrostTitle, fresh: Boolean = false): List<FrostSource> {
+        // A stream found for this title a moment ago is reused: starting a film must not cost another search.
+        cached(title).takeIf { !fresh && it.isNotEmpty() }?.let { return it }
         val found = LinkedHashSet<FrostSource>()
         val notes = mutableListOf<String>()
         for (server in SERVERS) {
@@ -90,7 +101,11 @@ internal object OgNative {
             notes += "site player: " + (if (sniffed == null) MediaSniffer.lastSummary else "manifest found")
             sniffed?.let { url -> sourceOf(url, "player", "OG site player")?.let { found += it } }
             if (found.isEmpty()) {
+                // A viewer will not wait a minute: the whole search gets a deadline, and the servers are
+                // asked in the site's own order until it expires.
+                val deadline = System.currentTimeMillis() + 45_000
                 for (server in SERVERS) {
+                    if (System.currentTimeMillis() > deadline) { notes += "search deadline reached"; break }
                     val hit = runCatching { MediaSniffer.find(ctx, server.embed(title), "$SITE/") }.getOrNull()
                     notes += "${server.label} player: " + (if (hit == null) MediaSniffer.lastSummary else "manifest found")
                     if (hit != null) {
@@ -105,7 +120,9 @@ internal object OgNative {
         report = notes.joinToString("\n")
         outcome = notes.joinToString(" · ").take(320)
         if (found.isEmpty()) throw FrostResolveException(kind = "empty")
-        return found.toList()
+        val result = found.toList()
+        synchronized(memo) { memo[memoKey(title)] = Memo(System.currentTimeMillis() + 30 * 60_000, result) }
+        return result
     }
 
     /** One server, as the native sources its page names. */

@@ -74,6 +74,8 @@ class MoviePlayerActivity : Activity() {
     private var episodes = emptyList<Pair<Int, Int>>()
     private var provider = FrostProvider.FROST
     private var sources = emptyList<FrostSource>()
+    /** OG sources found for this title in this session: they stay in the menu even after another provider runs. */
+    private var ogCache = emptyList<FrostSource>()
     private var currentSource: FrostSource? = null
     private val recovery = VodRecovery()
     private val sourceRecovery = VodStartupPolicy()
@@ -356,6 +358,7 @@ class MoviePlayerActivity : Activity() {
             ui.post {
                 if (!foreground || token != generation || request != title) return@post
                 result.fold(onSuccess = { list ->
+                    if (nextProvider == FrostProvider.OG && list.isNotEmpty()) ogCache = list
                     val remembered = prefs.getString("vod_source_${request.progressKey}", null)
                     val favored = preferred ?: remembered?.takeUnless { it == avoidIdentity }
                     val ordered = VodSourceOrder.prioritize(list, favored, avoidIdentity)
@@ -645,13 +648,19 @@ class MoviePlayerActivity : Activity() {
     private fun showSources() {
         val labels = mutableListOf("Reload TG FROST (native)", "Try TG OUT (native)",
             "Reload OG servers (native · Vidstuck / Vidfast / Vidlink)")
-        labels.addAll(sources.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
+        // The OG sources this title already produced stay listable: picking another provider used to replace
+        // the list, so the only OG entry disappeared exactly when it was needed again.
+        val ogFound = (ogCache.ifEmpty { OgNative.cached(title) }).distinctBy { it.identity }
+        val firstFound = labels.size
+        labels.addAll(ogFound.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
+        val firstSource = labels.size
+        val listed = sources.filter { source -> ogFound.none { it.identity == source.identity } }
+        labels.addAll(listed.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
         // The site's own servers, last in the list and clearly marked as not native: picking one plays the
         // title on that site's player inside the app, which is where those servers live.
         val og = OgSources.menu(title.type, title.id, title.season, title.episode)
         val firstOg = labels.size
         labels.addAll(og.map { it.first })
-        val snapshot = sources
         val request = title
         showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language / server")
             .setItems(labels.toTypedArray()) { _, index ->
@@ -662,7 +671,8 @@ class MoviePlayerActivity : Activity() {
                     index == 1 -> begin(FrostProvider.OUT)
                     index == 2 -> begin(FrostProvider.OG)
                     index >= firstOg -> openOgServer(index - firstOg)
-                    else -> snapshot.getOrNull(index - 3)?.let { begin(it.provider, it) }
+                    index >= firstSource -> listed.getOrNull(index - firstSource)?.let { begin(it.provider, it) }
+                    else -> ogFound.getOrNull(index - firstFound)?.let { begin(it.provider, it) }
                 }
             }.setNegativeButton("Close", null).create())
     }

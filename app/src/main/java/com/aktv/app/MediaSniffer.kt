@@ -9,6 +9,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.util.concurrent.CountDownLatch
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,8 +31,11 @@ internal object MediaSniffer {
     private const val MAX_STEPS = 30          // ~21 s
     private val MEDIA = Regex("""^https?://[^\s"'<>]+?\.(m3u8|mp4)(?:\?.*)?$""", RegexOption.IGNORE_CASE)
 
-    /** What the last attempt saw, for the player's own report: "loads 41 requests, no manifest". */
+    /** What the last attempt saw, for the player's own report: "41 requests, 7 script(s), no manifest". */
     @Volatile var lastSummary: String = "not attempted"
+
+    private const val KEEP_AFTER_FIRST_MS = 6_000L
+    private val AUDIO_ONLY = Regex("""(?i)(audio|/a[0-9]+/|_a\.m3u8|aud_)""")
 
     fun find(context: Context, target: String, referer: String? = null): String? {
         if (Looper.myLooper() == Looper.getMainLooper()) return null
@@ -38,13 +43,60 @@ internal object MediaSniffer {
         val reader = Reader(context.applicationContext, target, referer, latch)
         Handler(Looper.getMainLooper()).post { reader.start() }
         val ok = try {
-            latch.await(STEP_MS * MAX_STEPS + 6_000, TimeUnit.MILLISECONDS)
+            latch.await(STEP_MS * MAX_STEPS + 8_000, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt(); false
         }
-        lastSummary = reader.summary()
-        return if (ok) reader.found else null
+        val found = if (ok) reader.hits.toList() else emptyList<String>()
+        // The page may fetch an audio rendition before the real one, so a manifest is not the answer until it
+        // has been read: a master with video variants is the one the native player needs, or the player would
+        // play sound over a black screen and never finish starting.
+        val chosen = choose(found)
+        lastSummary = when {
+            chosen != null -> if (found.size > 1) "manifest found (${found.size} candidates)" else "manifest found"
+            found.isNotEmpty() -> "${found.size} manifest(s), none carries video"
+            else -> reader.summary()
+        }
+        return chosen
     }
+
+    /** The master playlist that lists video variants, else the first manifest that is not an audio track. */
+    private fun choose(found: List<String>): String? {
+        if (found.isEmpty()) return null
+        for (url in found.take(6)) {
+            val body = peek(url) ?: continue
+            if (body.contains("#EXT-X-STREAM-INF", true) && body.contains("RESOLUTION", true)) return url
+        }
+        for (url in found.take(6)) {
+            if (AUDIO_ONLY.containsMatchIn(url)) continue
+            val body = peek(url) ?: return url
+            if (body.contains("#EXT-X-STREAM-INF", true) || body.contains("#EXTINF", true)) return url
+        }
+        return found.firstOrNull { !AUDIO_ONLY.containsMatchIn(it) }
+    }
+
+    /** Reads a manifest directly, so the choice is made on what it contains rather than on its name. */
+    private fun peek(url: String): String? = try {
+        val request = Request.Builder().url(url).header("User-Agent", TgHttp.USER_AGENT)
+            .header("Referer", "https://theogpiratebot.online/").build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) null else response.body?.byteStream()?.let { input ->
+                val buffer = ByteArray(64 * 1024)
+                var read = 0
+                while (read < buffer.size) {
+                    val count = input.read(buffer, read, buffer.size - read)
+                    if (count < 0) break
+                    read += count
+                }
+                String(buffer, 0, read, Charsets.UTF_8)
+            }
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private val client = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS).build()
 
     private fun mediaOf(url: String?): String? {
         if (url == null || url.length > 2048) return null
@@ -62,14 +114,14 @@ internal object MediaSniffer {
         private val latch: CountDownLatch
     ) {
         private val app = context
-        var found: String? = null
+        val hits = LinkedHashSet<String>()
         private var web: WebView? = null
         private var done = false
         private var requests = 0
         private var scripts = 0
+        private var firstAt = 0L
 
         fun summary(): String = when {
-            found != null -> "manifest found"
             web == null && requests == 0 -> "no browser engine on this device"
             requests == 0 -> "page never loaded (no request reached the network)"
             else -> "$requests requests, $scripts script(s), no manifest"
@@ -92,10 +144,11 @@ internal object MediaSniffer {
                         requests++
                         val url = request.url?.toString().orEmpty()
                         if (url.contains(".js", true)) scripts++
-                        val media = mediaOf(url)
-                        if (media != null) {
-                            finish(media)
-                            return null
+                        mediaOf(url)?.let { media ->
+                            // Keep watching for a moment: a master playlist usually follows an audio
+                            // rendition, and the master is the one that carries the picture.
+                            if (hits.isEmpty()) firstAt = System.currentTimeMillis()
+                            hits += media
                         }
                         return null
                     }
@@ -117,11 +170,11 @@ internal object MediaSniffer {
                 } else {
                     view.loadUrl(target)
                 }
-                Handler(Looper.getMainLooper()).postDelayed({ finish(null) }, STEP_MS * MAX_STEPS)
+                Handler(Looper.getMainLooper()).postDelayed({ finish() }, STEP_MS * MAX_STEPS)
                 Handler(Looper.getMainLooper()).post { poll(0) }
             } catch (_: Throwable) {
                 web = null
-                finish(null)
+                finish()
             }
         }
 
@@ -145,16 +198,17 @@ internal object MediaSniffer {
         private fun poll(step: Int) {
             val view = web ?: return
             if (done) return
-            if (step >= MAX_STEPS) return finish(null)
+            val keepUntil = firstAt + KEEP_AFTER_FIRST_MS
+            if (hits.isNotEmpty() && System.currentTimeMillis() >= keepUntil) return finish()
+            if (step >= MAX_STEPS) return finish()
             // A second nudge later on: some players attach their handler after the first paint.
             if (step == 6 || step == 14) nudge(view)
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)
         }
 
-        private fun finish(value: String?) {
+        private fun finish() {
             if (done) return
             done = true
-            found = value
             val view = web
             web = null
             try { view?.stopLoading(); view?.destroy() } catch (_: Throwable) { }
