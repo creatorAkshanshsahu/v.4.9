@@ -2815,18 +2815,28 @@ class MainActivity : AppCompatActivity() {
      */
     private fun checkForUpdates(interactive: Boolean, force: Boolean = false) {
         if (updateChecking || updateDownloading) return
+        val code = Updater.installedCode(this)
         val last = prefs.getLong("update_checked_at", 0L)
         val since = System.currentTimeMillis() - last
+        // A build that was installed after the last check has never been asked about, so its first launch
+        // always asks: the throttle exists to spare GitHub, never to hide a release from a fresh install.
+        val fresh = prefs.getLong("update_checked_code", -1L) != code
         // A network callback may fire for every network on a TV that sits behind a flapping router, so even
         // a forced check keeps a floor; the launch check and the menu remain the deliberate asks.
-        if (!interactive && (if (force) since < 120_000L else since < UpdateConfig.CHECK_INTERVAL_MS)) return
+        if (!interactive && !fresh &&
+            (if (force) since < UpdateConfig.BUILD_GRACE_MS else since < UpdateConfig.CHECK_INTERVAL_MS)) return
         updateChecking = true
         io.execute {
             var reachable = true
             val release = try { Updater.check(this) } catch (_: Exception) { reachable = false; null }
             runOnUiThread {
                 updateChecking = false
-                prefs.edit().putLong("update_checked_at", System.currentTimeMillis()).apply()
+                // Only a check that actually reached GitHub counts against the interval; a failed one is
+                // retried on the next launch instead of being silenced for twenty minutes.
+                if (reachable || release != null) {
+                    prefs.edit().putLong("update_checked_at", System.currentTimeMillis())
+                        .putLong("update_checked_code", code).apply()
+                }
                 if (release != null) promptUpdate(release)
                 else if (interactive) {
                     Toast.makeText(this, if (reachable) "AK TV $appVersion is the latest published build." else

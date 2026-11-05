@@ -29,8 +29,13 @@ internal object UpdateConfig {
     // Plain concatenation keeps these compile-time constants (no template in a const initializer).
     const val ASSET_BASE = "https://github.com/" + OWNER + "/" + REPO + "/releases/latest/download"
     const val MANIFEST_URL = ASSET_BASE + "/update.json"
-    /** Automatic checks are throttled; an explicit check always runs. */
-    const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    /**
+     * Automatic checks are throttled; an explicit check always runs. Six hours was too long: a build pushed
+     * an hour after the last check reached nobody until the next half-day, which is exactly what happened
+     * between 4.9.62 and 4.9.63. BUILD_GRACE_MS is the floor a network callback must observe.
+     */
+    const val CHECK_INTERVAL_MS = 20 * 60 * 1000L
+    const val BUILD_GRACE_MS = 120_000L
     const val MAX_APK_BYTES = 300L * 1024 * 1024
 }
 

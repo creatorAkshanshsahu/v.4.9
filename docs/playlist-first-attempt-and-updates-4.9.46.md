@@ -718,3 +718,19 @@ site's own player page in a hidden browser with JavaScript on, records every add
 skipping `.mpd`, because that is Widevine here. That manifest is then played by the same native Media3
 player as everything else, with the site as `Referer`. It is the same stream the site plays; the app simply
 plays it natively, as asked.
+
+## 22. 4.9.65 — an update nobody was told about
+
+4.9.64 was published while a 4.9.63 installation was inside its **six-hour** automatic-check throttle, and
+the throttle had been stamped in `SharedPreferences`, which survives an install. So the release existed, the
+app was one version behind, and nothing said so — for up to six more hours.
+
+Three changes, all in the same place:
+
+- the automatic interval is **20 minutes**, not six hours;
+- a **failed** check no longer counts: the timestamp is written only when GitHub actually answered, so a
+  flaky launch is retried on the next one instead of silencing the app;
+- **a build that was installed after the last check always asks**, because `update_checked_code` no longer
+  matches the installed code. Freshly installing a release can never hide the next one.
+
+The manual route is unchanged and still the fastest: **Playback details → Check for updates**.
