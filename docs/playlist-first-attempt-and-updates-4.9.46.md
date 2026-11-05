@@ -837,3 +837,18 @@ Each page is loaded the way it needs to be: the embed through the Referer wrappe
 profile screen can be passed. The profile is clicked, and the title is then **re-opened by its own address**
 - at most once, so it cannot loop - because the profile screen (or the home screen it leads to) replaces the
 page that was asked for. The whole walk has a 45-second ceiling.
+
+## 29. 4.9.72 — the app that never asked again
+
+4.9.65 shortened the interval to twenty minutes, and it still did not help: the check ran **only at start-up**
+and when the network changed. A television - or a phone with the app left open - can stay in front for days,
+so a build published at noon was never noticed at six in the evening. Two changes:
+
+- the check is **repeated while the app is in front** (every five minutes, still subject to the twenty-minute
+  floor, cancelled when the app goes to the background), so an open app learns about a release;
+- the **version label in the rail is tappable** on the phone layout and runs the check directly, so the
+  update route no longer depends on finding Playback details first.
+
+`https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/update.json` was verified to be the
+release's own manifest (`/releases/latest` resolves to the rolling `latest` tag), so the failure was never the
+address - it was that nobody asked.

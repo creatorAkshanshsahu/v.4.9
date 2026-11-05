@@ -175,6 +175,14 @@ class MainActivity : AppCompatActivity() {
     private val appVersion by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" }
     // In-app update (GitHub release). One check and one download at a time, never blocking playback.
     private var updateChecking = false
+    /** How often a running app asks GitHub again. The check itself keeps a 20-minute floor. */
+    private val updateTicker = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed) return
+            checkForUpdates(interactive = false)
+            ui.postDelayed(this, UPDATE_TICK_MS)
+        }
+    }
     private var updateNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var updateDownloading = false
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
@@ -453,7 +461,15 @@ class MainActivity : AppCompatActivity() {
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         watchNetworkForUpdates()
         ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 6_000)
-        findViewById<TextView>(R.id.navVersion).text = appVersion
+        // The version in the rail is also a touch route to the update check, for the phone layout.
+        findViewById<TextView>(R.id.navVersion).apply {
+            text = appVersion
+            isClickable = true
+            setOnClickListener {
+                Toast.makeText(this@MainActivity, "Checking GitHub for a newer build…", Toast.LENGTH_SHORT).show()
+                checkForUpdates(interactive = true)
+            }
+        }
         intro.start()
     }
 
@@ -2684,6 +2700,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // A television can sit on this screen for days. A check that only ran at launch would never see a
+        // build published in between, so the check is repeated while the app is in front.
+        ui.removeCallbacks(updateTicker); ui.postDelayed(updateTicker, UPDATE_TICK_MS)
+        checkForUpdates(interactive = false)
         refreshProgrammeFeed()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
         if (vodTab && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
@@ -2697,6 +2717,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        ui.removeCallbacks(updateTicker)
         // Reaching pause means the system did not kill this run; the next start can rely on it.
         CrashLog.endSession(this)
         super.onPause()
@@ -2824,6 +2845,10 @@ class MainActivity : AppCompatActivity() {
      * of the file it last installed. A push that publishes a new build therefore reaches an installed
      * app on its own, and a tap on "Update" installs it over this one.
      */
+    private companion object {
+        const val UPDATE_TICK_MS = 5 * 60_000L
+    }
+
     private fun checkForUpdates(interactive: Boolean, force: Boolean = false) {
         if (updateChecking || updateDownloading) return
         val code = Updater.installedCode(this)
