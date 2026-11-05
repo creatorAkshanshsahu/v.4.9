@@ -45,7 +45,7 @@ object Accent {
     val NIGHT = 0xFF0A0C11.toInt()
     val SURFACE = 0xFF12151C.toInt()
     val SURFACE_HI = 0xFF1C212B.toInt()
-    /** Primary crimson used for focus fills, live badges and active controls. */
+    /** Primary glossy crimson used for focus fills, live badges and active controls. */
     val CRIMSON = 0xFFE00E27.toInt()
     val CRIMSON_BRIGHT = 0xFFFF2D48.toInt()
     val CRIMSON_DEEP = 0xFF7C0512.toInt()
@@ -61,7 +61,21 @@ object Accent {
     val TEXT = 0xFFF7F8FA.toInt()
     val DIM = 0xFFB7BECB.toInt()
     val FAINT = 0xFF7B8496.toInt()
-}
+
+    /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
+    fun glossStops(): IntArray = intArrayOf(CRIMSON_BRIGHT, CRIMSON, CRIMSON_DEEP)
+
+    /**
+     * Makes any logo colour usable as a tint. The sampled hue is pulled most of the way to the brand
+     * crimson so channel artwork still varies, but every surface reads as one crimson identity.
+     */
+    fun normalize(c: Int?): Int {
+        if (c == null) return CRIMSON_BRIGHT
+        val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
+        if (hsl[1] < 0.18f) return CRIMSON_BRIGHT
+        val hue = projectHue(hsl[0])
+        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.62f), hsl[2].coerceIn(0.46f, 0.60f)))
+    }
 
     /**
      * Fold any hue onto the red arc (335..25 degrees) instead of blending toward it in RGB, which
