@@ -162,7 +162,8 @@ internal object MediaSniffer {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) = Unit
 
                     override fun onPageFinished(view: WebView, url: String?) {
-                        nudge(view, 4)
+                        // A page callback must never take the app down with it.
+                        try { nudge(view, 4) } catch (_: Throwable) { }
                     }
                 }
                 if (referer != null) {
@@ -192,8 +193,12 @@ internal object MediaSniffer {
          * replaced the page that was asked for. The reopen happens at most once, so it cannot loop.
          */
         private fun nudge(view: WebView, step: Int) {
-            val target = org.json.JSONObject.quote(target)
-            val route = org.json.JSONObject.quote(URI(target).path.orEmpty())
+            // The address is quoted for the script; the route must be read from the real one. Shadowing the
+            // field with the quoted form threw URISyntaxException on every page load (4.9.73 crash).
+            val route = org.json.JSONObject.quote(
+                runCatching { URI(this.target).path.orEmpty() }.getOrDefault("")
+            )
+            val targetJs = org.json.JSONObject.quote(this.target)
             val late = if (step >= 9) 1 else 0
             val js = """
                 (function(){
@@ -229,7 +234,7 @@ internal object MediaSniffer {
                       var noVideo = !document.querySelector('video');
                       if(gate || ($late===1 && lost && noVideo)){
                         window.__akReopen = 1;
-                        setTimeout(function(){ location.href = $target; }, 2500);
+                        setTimeout(function(){ location.href = $targetJs; }, 2500);
                       }
                     }
                   }catch(e){}
@@ -245,7 +250,7 @@ internal object MediaSniffer {
             if (hits.isNotEmpty() && System.currentTimeMillis() >= keepUntil) return finish()
             if (step >= maxSteps) return finish()
             // A second nudge later on: some players attach their handler after the first paint.
-            if (step == 4 || step == 9 || step == 15) nudge(view, step)
+            if (step == 4 || step == 9 || step == 15) try { nudge(view, step) } catch (_: Throwable) { }
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)
         }
 

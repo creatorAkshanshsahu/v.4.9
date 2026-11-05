@@ -874,3 +874,20 @@ session and moved to the front, so the next title starts with the server that wo
 The card and Playback details now name each attempt: `server elfurain: manifest found`,
 `server vidfast: 21 requests, 4 script(s), no manifest`. That is the difference between "the site refused us"
 and "we asked the wrong server".
+
+## 31. 4.9.74 — the crash on the first page load
+
+```
+java.net.URISyntaxException: Illegal character in scheme name at index 0:
+  "https:\/\/tgvid.lovable.app\/embed\/movie\/1507696"
+  at MediaSniffer$Reader.nudge(MediaSniffer.kt:196)
+```
+
+That quoted, slash-escaped address is the giveaway: `nudge()` built the JSON-quoted form of the address into a
+local named `target`, and then read `URI(target).path` - so the URI was parsed from the *quoted* string, whose
+first character is `"`. Index 0 is not a scheme, and the exception travelled out of `onPageFinished` and killed
+the app.
+
+The route is now read from `this.target`, the real address, inside `runCatching`, and the quoted form has its
+own name. Both page callbacks (`onPageFinished` and the poll) also wrap the nudge, so a page callback can never
+take the process down again.
