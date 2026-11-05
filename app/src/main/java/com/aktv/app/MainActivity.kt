@@ -112,6 +112,8 @@ class MainActivity : AppCompatActivity() {
     private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
     /** The section gets one silent retry before it is allowed to say it failed. */
     private var jioRetried = false
+    /** The second list has its own loader and its own retry. */
+    private var tataLoaded = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
     private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
     private var favs = setOf<String>(); private var heroTile: Tile? = null
@@ -460,6 +462,9 @@ class MainActivity : AppCompatActivity() {
         // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         watchNetworkForUpdates()
+        SiteBrowserGate.load(this, prefs.getBoolean("site_browser", SiteBrowserGate.defaultFor(this)).takeIf {
+            prefs.contains("site_browser")
+        })
         ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 6_000)
         // The version in the rail is also a touch route to the update check, for the phone layout.
         findViewById<TextView>(R.id.navVersion).apply {
@@ -763,6 +768,31 @@ class MainActivity : AppCompatActivity() {
     private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; else -> all }
 
     /** Loads the JioTV m3u8 playlist and builds a channel catalogue from it. */
+    /**
+     * The site's second list, loaded on its own thread. It used to run after the JioTV list in the same
+     * coroutine, so a slow JioTV fetch kept the TATA tab empty for the whole of it.
+     */
+    private fun loadTataChannels() {
+        if (tataLoaded) return
+        tataLoaded = true
+        io.execute {
+            try {
+                val tata = TgServers.tataCatalogue().map { e ->
+                    Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
+                }
+                runOnUiThread { if (tata.isNotEmpty()) applyTata(tata) else tataMsg = "TATA list is empty."; if (tab == 5) updateStatus() }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    tataLoaded = false
+                    if (tataJio.isEmpty()) {
+                        tataMsg = "TATA didn't load (${why(e)}). Select this tab again to retry."
+                        if (tab == 5) updateStatus()
+                    }
+                }
+            }
+        }
+    }
+
     private fun loadJioChannels() {
         if (jioCatalogLoaded) return
         jioMsg = "Loading JioTV channels…"; updateStatus()
@@ -799,22 +829,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            try {
-                val tata = TgServers.tataCatalogue().map { e ->
-                    Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
-                }
-                runOnUiThread { if (tata.isNotEmpty()) applyTata(tata) }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    if (tataJio.isEmpty()) {
-                        tataMsg = if (jioRetried) "TATA channels didn't load (${why(e)}). Select this tab again to retry."
-                        else "Loading TATA channels…"
-                        if (tab == 5) updateStatus()
-                        if (!jioRetried) ui.postDelayed({ loadJioChannels() }, 5_000)
-                    }
-                }
-            }
         }
+        loadTataChannels()
     }
 
     private fun applyTata(list: List<Channel>) {
@@ -883,7 +899,9 @@ class MainActivity : AppCompatActivity() {
         val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
         // The one Sony section. Every tile is a channel of allinonereborn2.online/sony, resolved from that
         // site's own playlist and pinned to it: no TG or GioTV lookup is ever tried for these.
-        val sony = SonyPage.channels(allJio)
+        // Native first: a Sony tile bound to a channel of the site's own playlist plays that channel on this
+        // app's player. Only a tile the playlist does not carry keeps the site's page as its last resort.
+        val sony = SonyPage.playlistChannels(allJio)
         sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
@@ -1040,8 +1058,8 @@ class MainActivity : AppCompatActivity() {
             if ((t == 3 || t == 4) && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
             // Selecting TATA again is how you retry it once it has said it failed.
             if (t == 5 && tataJio.isEmpty()) {
-                jioRetried = false; jioCatalogLoaded = false; tataMsg = "Loading TATA channels…"
-                updateStatus(); loadJioChannels()
+                tataLoaded = false; tataMsg = "Loading TATA channels…"
+                updateStatus(); loadTataChannels()
             }
             return
         }
@@ -3417,7 +3435,7 @@ class MainActivity : AppCompatActivity() {
             val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
             HomeChrome.styleTile(v, poster = t == 1, landscape = t == 3, compact = compact, dp = dp)
-            if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }
+            if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 20f); v.clipToOutline = true }
             return VH(v)
         }
         override fun onBindViewHolder(h: VH, i: Int, payloads: MutableList<Any>) {

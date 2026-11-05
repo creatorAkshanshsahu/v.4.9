@@ -28,6 +28,8 @@ internal object BrowserFetch {
     /** The playlist text, or null when the browser is missing, still gated, or slow. Never on the UI thread. */
     fun playlist(context: Context, url: String): String? {
         if (Looper.myLooper() == Looper.getMainLooper()) return null
+        // Same rule as the site-player search: a TV whose browser engine takes the process down never runs it.
+        if (!SiteBrowserGate.allowed) return null
         val latch = CountDownLatch(1)
         val reader = Reader(context.applicationContext, url, latch)
         Handler(Looper.getMainLooper()).post { reader.start() }

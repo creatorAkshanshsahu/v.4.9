@@ -891,3 +891,35 @@ the app.
 The route is now read from `this.target`, the real address, inside `runCatching`, and the quoted form has its
 own name. Both page callbacks (`onPageFinished` and the poll) also wrap the nudge, so a page callback can never
 take the process down again.
+
+## 32. 4.9.75 — Sony natively, the TATA list read properly, and a TV that survives
+
+### The TATA list was never parsed
+
+`#EXTINF` was matched by **position**: `tvg-id`, then `group-title`, then `tvg-logo`, in that order. The JioTV
+list happens to write them in that order; the site's second list does not, so `parse()` returned **zero
+entries** and the tab stayed empty while JioTV worked. Attributes are now read by name, `#EXTINF` ids fall back
+to the `id=` in the address, relative addresses resolve against **their own** playlist (`/playlist/ttv6t.m3u`,
+not `jtv33.m3u8`), and the second list loads on **its own thread** instead of behind the first one, with its own
+retry, so a slow JioTV fetch cannot delay it.
+
+### Sony plays natively
+
+The Live TV Sony row is now built with the playlist-bound tiles (`SonyPage.playlistChannels`): a tile that the
+site's own playlist carries plays that channel on **this app's player**, with its native manifest and its
+ClearKey document - not the site's browser player. Only a tile the playlist does not carry keeps the page as
+its last resort.
+
+### The TV
+
+The browser engine is the one part of this app that can take the whole process down on a television, and it was
+being created repeatedly (once per server, per title). It is now **off by default on a TV or a low-RAM device**
+(`SiteBrowserGate`): the native paths never touch it there, and the JioTV/OG/site-player paths say so instead of
+crashing. On a phone it stays on. The switch is the last entry of **Change source** (`Site player search: ON/OFF`),
+so a box that survives it can be turned back on deliberately.
+
+### The look
+
+A new identity, built around the mark the viewer actually uses: ink-black ground (`#050609`), lacquered crimson
+accents (`#E00E27`), cool neutral greys instead of the previous purple cast, larger corner radii on every tile,
+a quieter rail, and the launcher icon is the AK TV mark itself.

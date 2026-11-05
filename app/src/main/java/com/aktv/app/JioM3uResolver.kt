@@ -244,7 +244,7 @@ internal class JioM3uResolver(
         for (attempt in 0..1) {
             try {
                 val body = fetchPlaylist(url, fresh)
-                val entries = JioM3uProtocol.parse(body)
+                val entries = JioM3uProtocol.parse(body, url)
                 if (entries.isEmpty()) throw IOException("JioTV m3u8 playlist was empty")
                 keepPlaylist(url, body)
                 cache(url, entries, 30 * 60_000)  // a playlist URL is stable; refresh every 30 min
@@ -282,7 +282,7 @@ internal class JioM3uResolver(
         val file = cacheFileFor(url) ?: return null
         val text = try { if (file.exists()) file.readText() else "" } catch (_: Exception) { "" }
         if (text.isBlank()) return null
-        val entries = JioM3uProtocol.parse(text)
+        val entries = JioM3uProtocol.parse(text, url)
         if (entries.isEmpty()) return null
         cache(url, entries, 5 * 60_000)
         return entries
@@ -322,7 +322,7 @@ internal class JioM3uResolver(
             if (response.code !in 200..299) { status = response.code; refusal = "HTTP ${response.code}"; continue }
             require(response.body.size <= TgProtocol.MAX_BODY * 4) { "JioTV m3u8 playlist too large" }
             val body = response.body.toString(Charsets.UTF_8)
-            if (JioM3uProtocol.parse(body).isEmpty()) { refusal = "the file listed no channels"; continue }
+            if (JioM3uProtocol.parse(body, url).isEmpty()) { refusal = "the file listed no channels"; continue }
             playlistShape = position
             return body
         }
@@ -331,7 +331,7 @@ internal class JioM3uResolver(
         // is the playlist itself - which is the only remaining way to keep these channels.
         lastPlaylistStatus = status
         if (status in setOf(0, 403, 415, 429, 503)) browser?.invoke(playlist)?.let { text ->
-            if (JioM3uProtocol.parse(text).isNotEmpty()) return text
+            if (JioM3uProtocol.parse(text, playlist).isNotEmpty()) return text
         }
         throw JioM3uHttpException(status, refusal)
     }

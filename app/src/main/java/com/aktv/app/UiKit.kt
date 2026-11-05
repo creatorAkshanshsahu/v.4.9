@@ -41,41 +41,27 @@ internal object ImmersiveUi {
  * bright-crimson cues. Names are stable so layouts, players and tests keep one source of truth.
  */
 object Accent {
-    val ABYSS = 0xFF07040A.toInt()
-    val NIGHT = 0xFF0C0710.toInt()
-    val SURFACE = 0xFF17101B.toInt()
-    val SURFACE_HI = 0xFF241528.toInt()
-    /** Primary glossy crimson used for focus fills, live badges and active controls. */
-    val CRIMSON = 0xFFE11D2E.toInt()
-    val CRIMSON_BRIGHT = 0xFFFF3448.toInt()
-    val CRIMSON_DEEP = 0xFF8C0F1C.toInt()
-    val WINE = 0xFF4A0812.toInt()
+    val ABYSS = 0xFF050609.toInt()
+    val NIGHT = 0xFF0A0C11.toInt()
+    val SURFACE = 0xFF12151C.toInt()
+    val SURFACE_HI = 0xFF1C212B.toInt()
+    /** Primary crimson used for focus fills, live badges and active controls. */
+    val CRIMSON = 0xFFE00E27.toInt()
+    val CRIMSON_BRIGHT = 0xFFFF2D48.toInt()
+    val CRIMSON_DEEP = 0xFF7C0512.toInt()
+    val WINE = 0xFF2B0A10.toInt()
     /** Near-white with a warm cast; the specular highlight in gloss gradients. */
-    val GLOSS_HI = 0xFFFFEBEE.toInt()
+    val GLOSS_HI = 0xFFFFF0F2.toInt()
     val SIGNAL = CRIMSON_BRIGHT
-    val ION = 0xFFFF5C6B.toInt()
-    val INDIGO = 0xFFC2185B.toInt()
-    val DEEP = 0xFF2A1520.toInt()
+    val ION = 0xFFFF5A6E.toInt()
+    val INDIGO = 0xFF7C3AED.toInt()
+    val DEEP = 0xFF1A1F28.toInt()
     val LIVE = CRIMSON_BRIGHT
-    val GOLD = 0xFFE7B969.toInt()
-    val TEXT = 0xFFFCF7F8.toInt()
-    val DIM = 0xFFC4B4BA.toInt()
-    val FAINT = 0xFF8E7781.toInt()
-
-    /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
-    fun glossStops(): IntArray = intArrayOf(CRIMSON_BRIGHT, CRIMSON, CRIMSON_DEEP)
-
-    /**
-     * Makes any logo colour usable as a tint. The sampled hue is pulled most of the way to the brand
-     * crimson so channel artwork still varies, but every surface reads as one crimson identity.
-     */
-    fun normalize(c: Int?): Int {
-        if (c == null) return CRIMSON_BRIGHT
-        val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        if (hsl[1] < 0.18f) return CRIMSON_BRIGHT
-        val hue = projectHue(hsl[0])
-        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.62f), hsl[2].coerceIn(0.46f, 0.60f)))
-    }
+    val GOLD = 0xFFF2C879.toInt()
+    val TEXT = 0xFFF7F8FA.toInt()
+    val DIM = 0xFFB7BECB.toInt()
+    val FAINT = 0xFF7B8496.toInt()
+}
 
     /**
      * Fold any hue onto the red arc (335..25 degrees) instead of blending toward it in RGB, which

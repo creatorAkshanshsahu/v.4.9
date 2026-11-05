@@ -73,7 +73,7 @@ internal object JioM3uProtocol {
     /** A media URL line: starts with http and is not a comment or directive. */
     private val mediaUrl = Regex("""^https?://\S+$""")
 
-    fun parse(body: String): List<Entry> {
+    fun parse(body: String, base: String = PLAYLIST): List<Entry> {
         val lines = body.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val entries = ArrayList<Entry>(200)
         var i = 0
@@ -99,26 +99,38 @@ internal object JioM3uProtocol {
                 j++
             }
             if (j < lines.size && mediaUrl.matches(lines[j])) {
-                url = resolveUrl(lines[j], PLAYLIST)
+                url = resolveUrl(lines[j], base)
                 j++
             }
-            if (url != null && id.isNotBlank()) {
-                entries.add(Entry(id, name, category, logo, url, licenseKey, licenseType, userAgent, cookie))
+            if (url != null) {
+                // Some lists carry the channel number only in the address; some carry no id at all.
+                val key = id.ifBlank { Regex("[?&]id=(\\d{1,10})").find(url)?.groupValues?.get(1).orEmpty() }
+                if (key.isNotBlank()) entries.add(Entry(key, name, category, logo, url, licenseKey, licenseType, userAgent, cookie))
             }
             i = j
         }
         return entries
     }
 
+    /**
+     * `#EXTINF` is read by attribute name, not by position. The JioTV list happens to write
+     * `tvg-id, group-title, tvg-logo` in that order; the site's second list does not, and a positional
+     * pattern silently produced **zero** entries for it - which is exactly why the TATA section stayed empty
+     * while the JioTV one worked.
+     */
     private fun parseExtinf(line: String): Quad? {
-        extinf.matchEntire(line)?.let { m ->
-            return Quad(m.groupValues[1], m.groupValues[4].trim(), m.groupValues[2], m.groupValues[3])
-        }
-        extinfNamed.matchEntire(line)?.let { m ->
-            return Quad(m.groupValues[3].trim(), m.groupValues[1], m.groupValues[2], m.groupValues[4])
-        }
-        return null
+        if (!line.startsWith("#EXTINF", true)) return null
+        val comma = line.lastIndexOf(',')
+        if (comma < 0 || comma == line.lastIndex) return null
+        val name = line.substring(comma + 1).trim()
+        if (name.isEmpty()) return null
+        val head = line.substring(0, comma)
+        val attrs = attribute.findAll(head).associate { it.groupValues[1].lowercase() to it.groupValues[2].trim() }
+        val id = attrs["tvg-id"].orEmpty().ifBlank { attrs["tvg-chno"].orEmpty() }.ifBlank { attrs["channel-id"].orEmpty() }
+        return Quad(id, name, attrs["group-title"].orEmpty(), attrs["tvg-logo"].orEmpty())
     }
+
+    private val attribute = Regex("""([A-Za-z0-9_-]+)="([^"]*)"""")
 
     private data class Quad(val id: String, val name: String, val category: String, val logo: String)
 

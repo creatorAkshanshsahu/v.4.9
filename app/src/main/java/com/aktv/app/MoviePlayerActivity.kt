@@ -661,12 +661,23 @@ class MoviePlayerActivity : Activity() {
         val og = OgSources.menu(title.type, title.id, title.season, title.episode)
         val firstOg = labels.size
         labels.addAll(og.map { it.first })
+        // The last entry is the switch for the browser engine itself, because on a TV it is the one thing that
+        // can take the app down, and on a TV it starts off.
+        val firstGate = labels.size
+        labels.add("Site player search: " + (if (SiteBrowserGate.allowed) "ON" else "OFF") +
+            (if (SiteBrowserGate.allowed) "" else " · " + SiteBrowserGate.reason))
         val request = title
         showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language / server")
             .setItems(labels.toTypedArray()) { _, index ->
                 if (title != request) return@setItems
                 desiredPlay = true
                 when {
+                    index == firstGate -> {
+                        val next = !SiteBrowserGate.allowed
+                        prefs.edit().putBoolean("site_browser", next).apply()
+                        SiteBrowserGate.load(this, next)
+                        Toast.makeText(this, if (next) "Site player search is on. A TV whose browser engine crashes will close the app." else "Site player search is off. Native sources only.", Toast.LENGTH_LONG).show()
+                    }
                     index == 0 -> begin(FrostProvider.FROST)
                     index == 1 -> begin(FrostProvider.OUT)
                     index == 2 -> begin(FrostProvider.OG)

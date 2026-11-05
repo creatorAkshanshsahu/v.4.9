@@ -43,6 +43,10 @@ internal object MediaSniffer {
 
     fun find(context: Context, target: String, referer: String? = null, timeoutMs: Long = STEP_MS * MAX_STEPS): String? {
         if (Looper.myLooper() == Looper.getMainLooper()) return null
+        if (!SiteBrowserGate.allowed) {
+            lastSummary = SiteBrowserGate.summary()
+            return null
+        }
         val latch = CountDownLatch(1)
         val steps = (timeoutMs / STEP_MS).toInt().coerceIn(6, MAX_STEPS)
         val reader = Reader(context.applicationContext, target, referer, steps, latch)
