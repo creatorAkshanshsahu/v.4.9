@@ -1,6 +1,7 @@
 package com.aktv.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -88,6 +89,28 @@ class SonyPageTest {
         val tenThreeHd = section.first { it.page!!.endsWith("sony-ten-3-hd") }
         assertEquals("page:sony-ten-3-hd", tenThreeHd.id)
         assertTrue(tenThreeHd.pageOnly)
+    }
+
+    /** A Sony channel reached from any other row opens the same player, matched by its name. */
+    @Test fun `a Sony channel outside the row is matched to its page by name`() {
+        assertEquals(SonyPage.pageUrl("sony-ten-3"), SonyPage.pageFor("Sony Ten 3 Hindi HD"))
+        assertEquals(SonyPage.pageUrl("sony-hd"), SonyPage.pageFor("SET HD"))
+        assertEquals(SonyPage.pageUrl("sab-hd"), SonyPage.pageFor("Sony SAB HD"))
+        assertEquals(SonyPage.pageUrl("sony-marathi"), SonyPage.pageFor("Sony Marathi SD"))
+        assertEquals(SonyPage.pageUrl("bbc-earth"), SonyPage.pageFor("BBC Earth HD"))
+        assertEquals(SonyPage.pageUrl("sab-hd"), SonyPage.pageFor("SAB HD"))
+        assertEquals(SonyPage.pageUrl("sony-max2"), SonyPage.pageFor("Sony MAX2"))
+    }
+
+    /** A channel that is not one of the page's tiles never gets its slug - not even a Sony one. */
+    @Test fun `brands the page does not list are never given a slug`() {
+        assertNull(SonyPage.pageFor("Sony Yay Tamil"))
+        assertNull(SonyPage.pageFor("SONY YAY Bengali"))
+        assertNull(SonyPage.pageFor("Sony MAX1"))
+        assertNull(SonyPage.pageFor("Sony BBC Earth HD Telugu"))
+        assertNull(SonyPage.pageFor("Sony SAB SD"))
+        assertNull(SonyPage.pageFor("Sony Six"))
+        assertNull(SonyPage.pageFor(""))
     }
 
     @Test fun `the page and its player are the only source names used`() {

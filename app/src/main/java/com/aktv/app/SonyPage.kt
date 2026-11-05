@@ -130,6 +130,35 @@ internal object SonyPage {
         }
     }
 
+    /**
+     * The page's own player for a channel, looked up by the channel's *name*.
+     *
+     * This is what makes "every Sony channel loads that player" true outside the Sony row as well: the
+     * same channel reached from the playlist's category rows, from favourites, from recents or from
+     * search has no slug of its own, but its name is one of the page's tiles.
+     *
+     * Two rules only, and both refuse to guess:
+     * 1. the name is exactly one of the page's own names (`Sony Ten 3 Hindi HD`, `SET HD`, `Sony MAX2`);
+     * 2. the name is a tile's title, optionally with a trailing `HD`/`SD` (`Sony Marathi SD`).
+     *
+     * A channel the page does not list never gets a slug - not `Sony SAB SD`, not `Sony Yay Tamil`, not
+     * `Sony MAX1`, not `Sony Six`.
+     */
+    fun pageFor(name: String): String? {
+        val wanted = normalise(name)
+        if (wanted.isEmpty()) return null
+        for (tile in TILES) {
+            if (tile.names.any { normalise(it) == wanted }) return pageUrl(tile.slug)
+        }
+        val bare = wanted.removeSuffix("hd").removeSuffix("sd")
+        if (bare.isEmpty()) return null
+        for (tile in TILES) {
+            val title = normalise(tile.title)
+            if (bare == title || bare == "sony" + title) return pageUrl(tile.slug)
+        }
+        return null
+    }
+
     /** Words that may follow a page name without changing which channel it is. */
     private val SUFFIX_WORDS = setOf(
         "hd", "sd", "uhd", "4k", "hindi", "english", "tamil", "telugu", "bengali", "kannada",

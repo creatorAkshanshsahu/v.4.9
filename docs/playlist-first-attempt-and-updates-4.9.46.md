@@ -444,3 +444,23 @@ up, but it plays the same page as the rest.
 
 `ChannelProviderOrder.playbackOrder(..., pageOnly = true)` returns no native provider for these tiles, so
 nothing can start a stream from somewhere else even if a later change forgets the routing.
+
+## 13. 4.9.56 — the same Sony channel opens the player from every row, not only from the Sony row
+
+4.9.55 made all 22 page tiles open the site's player, but only the tiles *in that row* carry a slug. The
+same channels also appear in the playlist's category rows, in favourites, in recents and in search, and
+those copies have no slug - so tapping `Sony Ten 1 HD` there still went down the native path, which is the
+behaviour that was reported as "only Ten 3 HD and Ten 5 open the player".
+
+`SonyPage.pageFor(name)` closes that gap by matching a channel's **name** to the page's list, and only by
+name:
+
+1. the name is exactly one of the page's own names (`Sony Ten 3 Hindi HD`, `SET HD`, `Sony MAX2`);
+2. or it is a tile's title with a trailing `HD`/`SD` (`Sony Marathi SD` → `SONY MARATHI`).
+
+Anything else gets no slug, deliberately: `Sony SAB SD`, `Sony Yay Tamil`, `SONY YAY Bengali`, `Sony MAX1`,
+`Sony BBC Earth HD Telugu` and `Sony Six` are not page tiles, so they stay native instead of being shown
+as a tile the page does not have. A test pins both directions.
+
+From this build, tapping any channel the page lists - from any row - opens
+`suniliv.pages.dev/ptest1?id=<slug>` full screen in the app.

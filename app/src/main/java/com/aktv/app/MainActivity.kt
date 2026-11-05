@@ -1370,9 +1370,11 @@ class MainActivity : AppCompatActivity() {
         requestedNativeProvider = null
         val ch = shown[current]
         pageFallbackFor = null
-        // Every Sony tile plays the site's own player for its slug: that is the source, and it is what the
-        // user asked to open. Native providers are not tried for these tiles at all.
-        if (ch.page != null) { rememberChannel(ch); playOnSourcePage(ch); return }
+        // Every Sony channel plays the site's own player: the section's tiles carry their slug, and a Sony
+        // channel reached from the playlist's category rows, favourites, recents or search is matched by
+        // name. Native providers are not tried for any of them.
+        val page = ch.page ?: SonyPage.pageFor(ch.name)
+        if (page != null) { rememberChannel(ch); playOnSourcePage(ch, page); return }
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
         home.visibility = View.INVISIBLE
         heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
@@ -2365,12 +2367,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun fail(message: String) {
         val failed = shown.getOrNull(current)
-        if (!healthScanActive && failed?.page != null && pageFallbackFor != failed.key) {
+        if (!healthScanActive && failed != null && pageFallbackFor != failed.key &&
+            (failed.page != null || SonyPage.pageFor(failed.name) != null)) {
             // The playlist refused every source. The channel is still this site's, so its own player page
             // plays it inside the app: the tile must never end on a black screen or an error card.
             recordChannelPlayback(failed, ChannelPlaybackOutcome.FAILED, "$message · opening the source page",
                 providerName(currentNativeProvider), serverIdx + 1)
-            playOnSourcePage(failed)
+            playOnSourcePage(failed, failed.page ?: SonyPage.pageFor(failed.name))
             return
         }
         if (healthScanActive) {
@@ -2396,8 +2399,8 @@ class MainActivity : AppCompatActivity() {
      * the bundled browser, full screen with D-pad control. This is the section's fallback: same source,
      * played by the site's own player, never a different provider and never a silent tile.
      */
-    private fun playOnSourcePage(ch: Channel) {
-        val page = ch.page ?: return
+    private fun playOnSourcePage(ch: Channel, url: String? = null) {
+        val page = url ?: ch.page ?: return
         pageFallbackFor = ch.key
         ++playToken; resolveJob?.cancel(true)
         endNativeSession(); releasePlayer()
