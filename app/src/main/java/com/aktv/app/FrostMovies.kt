@@ -26,7 +26,10 @@ internal data class FrostTitle(val id: Int, val type: String, val season: Int = 
 }
 
 internal enum class FrostProvider(val id: String, val label: String) {
-    FROST("tgflix", "TG FROST"), OUT("tgout", "TG OUT")
+    FROST("tgflix", "TG FROST"), OUT("tgout", "TG OUT"),
+    // theogpiratebot.online's own servers (Vidstuck, Vidfast, Vidlink…), read from each server's page and
+    // played by this same native player: the addresses are media, not embeds.
+    OG("og", "OG")
     // TG BOLT and TGVID are iframe players, not verified native source contracts.
 }
 
@@ -193,6 +196,9 @@ internal class FrostResolver(
 ) {
     /** No bundled sources, browser context, global cookie jar, or cached credentials. */
     fun resolve(title: FrostTitle, provider: FrostProvider = FrostProvider.FROST): List<FrostSource> {
+        // OG has no endpoint of this app's own: its sources are the media addresses each of that site's
+        // servers names on its page for the title, so they are resolved per server instead.
+        if (provider == FrostProvider.OG) return OgNative.resolve(title)
         val request = Request.Builder().url(FrostProtocol.endpoint(base, provider, title))
             .header("User-Agent", TgHttp.USER_AGENT).header("Accept", "application/json")
             .header("Cache-Control", "no-store").build()
@@ -215,7 +221,7 @@ internal class FrostResolver(
         }
     }
 
-    fun cancel() { client.dispatcher.cancelAll() }
+    fun cancel() { client.dispatcher.cancelAll(); OgNative.cancel() }
 }
 
 /** Independent VOD transport. Never applies Jio token rewriting, live offsets or ClearKey overrides. */

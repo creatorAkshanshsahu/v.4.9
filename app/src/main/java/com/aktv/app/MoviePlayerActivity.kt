@@ -642,7 +642,8 @@ class MoviePlayerActivity : Activity() {
         }.setNegativeButton("Close", null).create())
     }
     private fun showSources() {
-        val labels = mutableListOf("Reload TG FROST (native)", "Try TG OUT (native)")
+        val labels = mutableListOf("Reload TG FROST (native)", "Try TG OUT (native)",
+            "Reload OG servers (native · Vidstuck / Vidfast / Vidlink)")
         labels.addAll(sources.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
         // The site's own servers, last in the list and clearly marked as not native: picking one plays the
         // title on that site's player inside the app, which is where those servers live.
@@ -658,8 +659,9 @@ class MoviePlayerActivity : Activity() {
                 when {
                     index == 0 -> begin(FrostProvider.FROST)
                     index == 1 -> begin(FrostProvider.OUT)
+                    index == 2 -> begin(FrostProvider.OG)
                     index >= firstOg -> openOgServer(index - firstOg)
-                    else -> snapshot.getOrNull(index - 2)?.let { begin(it.provider, it) }
+                    else -> snapshot.getOrNull(index - 3)?.let { begin(it.provider, it) }
                 }
             }.setNegativeButton("Close", null).create())
     }

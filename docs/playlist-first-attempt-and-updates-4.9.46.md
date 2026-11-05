@@ -606,3 +606,30 @@ asked for native playback there. `SonyPage.playlistChannels(...)` now builds the
 with the page removed from every tile the playlist actually carries, so those tiles play natively like
 every other channel in that section; a tile the playlist does not carry (there is no native source at
 all) keeps its page instead of going silent. Live TV's copy is untouched.
+
+## 18. 4.9.61 — the site's servers, played by our own player
+
+theogpiratebot.online lists its servers by name (`?server=vidstucki`, `vidfast`, `vidlink`, …) and embeds a
+third party player for each. Those players are pages, but a page for a title names the media address it is
+about to play - a bare `.m3u8`/`.mp4`, the JSON field it keeps that address in (`file`, `playlist`, `source`,
+`src`, `hls`), or, when one server wraps another, one more embed in an iframe. That is what `OgNative`
+reads:
+
+1. each of the site's server families is asked for the title in its own scheme
+   (`vidstuck.xyz/embed/movie/<tmdb>`, `vidstuck.xyz/embed/tv/<tmdb>/<s>/<e>`, `vidfast.pro/...`,
+   `vidlink.pro/...`), with a browser identity and the site as the referrer;
+2. the media addresses the page names are taken from the body, one iframe hop deep, with escaped slashes
+   resolved;
+3. only **HLS and MP4 over https** are kept. A DASH manifest from these hosts means Widevine, which this
+   app never touches, and an embed page or a plain http address is not media;
+4. what is left becomes ordinary native sources (`FrostProvider.OG`), so the existing preflight probes
+   them, the existing source menu switches between them, and the existing Media3 player plays them - the
+   same path as TG FROST and TG OUT, with no browser anywhere.
+
+In the movie/series player the source menu gains **"Reload OG servers (native · Vidstuck / Vidfast /
+Vidlink)"**. Because the provider is a normal member of the provider list, it is also what the player
+falls back to when both TG providers have nothing.
+
+Addresses are read fresh for every title; a stored one would be dead within hours. A server that names no
+address contributes no source rather than a black screen, and when every server is silent the card says so
+with the player's own diagnostics.
