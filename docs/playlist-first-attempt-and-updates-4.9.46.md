@@ -820,3 +820,20 @@ including `/watch/movie/{id}`, answers with that profile screen first. So the fa
 
 `tgflix.qzz.io`, which the viewer also listed, answers *"This deployment is temporarily paused"* - that host
 has nothing to play and is not used.
+
+## 28. 4.9.71 — the route the site really uses
+
+`tgflix.lovable.app/play/{tmdbId}` is the viewer's own address for a title, and `/watch/movie/{id}` - what
+4.9.70 tried - is not a route on that deployment: the app was passing the profile screen and then asking for
+a page that does not exist, which is why nothing was found. The fallback now walks the addresses this family
+of sites actually plays on, in this order:
+
+1. `tgvid.lovable.app/embed/movie/{id}` - the documented embed player, and the only one with **no profile
+   screen** in front of it;
+2. `tgflix.lovable.app/play/{id}` - the viewer's route, behind "Who's Watching?";
+3. `tgfrost.lovable.app/watch/movie/{id}` - the host the app's own API has always used.
+
+Each page is loaded the way it needs to be: the embed through the Referer wrapper, `tgflix` directly so the
+profile screen can be passed. The profile is clicked, and the title is then **re-opened by its own address**
+- at most once, so it cannot loop - because the profile screen (or the home screen it leads to) replaces the
+page that was asked for. The whole walk has a 45-second ceiling.

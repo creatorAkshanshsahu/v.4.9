@@ -205,31 +205,39 @@ internal class FrostResolver(
      * The address of the page a viewer opens on the site, which is what the fallback runs when the app's own
      * request for this title comes back empty or with nothing this player can use.
      */
-    private fun watchUrl(title: FrostTitle, provider: FrostProvider, host: String): String {
-        val path = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
-        return "$host/watch/$path" + if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
-    }
-
-    private companion object {
-        /** The site's own player, most likely first. */
-        val SITE_PLAYER_HOSTS = listOf("https://tgflix.lovable.app", FrostProtocol.SITE).distinct()
-    }
-
     /**
      * Runs the site's own player and takes the stream it plays. The site hops servers silently until one
      * answers, which is exactly the work this app used to leave to the viewer; doing it here means the first
      * attempt plays instead of the second one.
      */
+    /**
+     * Every address where this family of sites plays a title, best first:
+     *
+     * - `tgvid.lovable.app/embed/movie/{id}` - the documented embed player, no profile screen in front of it;
+     * - `tgflix.lovable.app/play/{id}` - the route the viewer uses, behind "Who's Watching?";
+     * - `tgfrost.lovable.app/watch/movie/{id}` - the host the app's own API has always used.
+     *
+     * The second element is the Referer to send; the third is null when the page must be loaded directly so a
+     * profile screen can be passed and the title re-opened.
+     */
+    private fun sitePages(title: FrostTitle, provider: FrostProvider): List<Pair<String, String?>> {
+        val tv = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
+        val server = if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
+        return buildList<Pair<String, String?>> {
+            add("https://tgvid.lovable.app/embed/$tv$server" to "https://tgvid.lovable.app/")
+            add("https://tgflix.lovable.app/play/${title.id}" to null)
+            add("${FrostProtocol.SITE}/watch/$tv$server" to "${FrostProtocol.SITE}/")
+            if (title.isSeries) add("https://tgflix.lovable.app/play/${title.id}?season=${title.season}&episode=${title.episode}" to null)
+        }.distinctBy { it.first }
+    }
+
     private fun sitePlayback(title: FrostTitle, provider: FrostProvider): FrostSource? {
         val context = MediaSniffer.appContext ?: return null
-        // The player the viewer actually uses is tgflix.lovable.app; tgfrost.lovable.app is the same family.
-        // Both are tried, oldest last, and the first manifest that carries video wins.
         var media: String? = null
-        for (host in SITE_PLAYER_HOSTS) {
-            val page = watchUrl(title, provider, host)
-            // Loaded directly, with no wrapper: this app's entry point is a profile screen that has to be
-            // passed before the title can be opened, and that needs real navigation.
-            media = try { MediaSniffer.find(context, page, null) } catch (_: Exception) { null }
+        val deadline = System.currentTimeMillis() + 45_000
+        for ((page, referer) in sitePages(title, provider)) {
+            if (System.currentTimeMillis() > deadline) break
+            media = try { MediaSniffer.find(context, page, referer) } catch (_: Exception) { null }
             if (media != null) break
         }
         val chosen = media ?: return null

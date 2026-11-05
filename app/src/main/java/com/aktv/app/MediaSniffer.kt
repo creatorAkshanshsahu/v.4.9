@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import java.net.URI
 import java.util.concurrent.CountDownLatch
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -159,7 +160,7 @@ internal object MediaSniffer {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) = Unit
 
                     override fun onPageFinished(view: WebView, url: String?) {
-                        nudge(view)
+                        nudge(view, 4)
                     }
                 }
                 if (referer != null) {
@@ -183,11 +184,15 @@ internal object MediaSniffer {
 
         /**
          * A player that waits for a click cannot call a manifest; ask the page to start the way a viewer does.
-         * TGFLIX opens with "Who's Watching?", so a profile is chosen first - exactly the click a viewer makes -
-         * and the title is then opened again, because that screen replaced the page that was asked for.
+         *
+         * TGFLIX opens with "Who's Watching?", so a profile is chosen first - exactly the click a viewer makes
+         * - and the title is then opened again by address, because that screen (or the home screen it leads to)
+         * replaced the page that was asked for. The reopen happens at most once, so it cannot loop.
          */
-        private fun nudge(view: WebView) {
+        private fun nudge(view: WebView, step: Int) {
             val target = org.json.JSONObject.quote(target)
+            val route = org.json.JSONObject.quote(URI(target).path.orEmpty())
+            val late = if (step >= 9) 1 else 0
             val js = """
                 (function(){
                   var gate = false;
@@ -202,10 +207,9 @@ internal object MediaSniffer {
                         var e=cands[i];
                         var s=((e.className||'')+' '+(e.alt||'')+' '+(e.textContent||'')).toString().toLowerCase();
                         if(s.indexOf('avatar')>=0||s.indexOf('profile')>=0||s.indexOf('continue')>=0||s.indexOf('guest')>=0){
-                          e.click(); return;
+                          e.click(); break;
                         }
                       }
-                      var img=document.querySelector('img'); if(img){ img.click(); return; }
                     }catch(e){}
                   }
                   try{
@@ -217,9 +221,14 @@ internal object MediaSniffer {
                     }
                   }catch(e){}
                   try{
-                    if(location.pathname.indexOf('profiles')>=0){
-                      // The profile screen replaced the page we asked for: go back to the title.
-                      setTimeout(function(){ location.href = $target; }, 1500);
+                    if(!window.__akReopen){
+                      var here = location.pathname + location.search;
+                      var lost = here.indexOf($route) < 0;
+                      var noVideo = !document.querySelector('video');
+                      if(gate || ($late===1 && lost && noVideo)){
+                        window.__akReopen = 1;
+                        setTimeout(function(){ location.href = $target; }, 2500);
+                      }
                     }
                   }catch(e){}
                 })();
@@ -234,7 +243,7 @@ internal object MediaSniffer {
             if (hits.isNotEmpty() && System.currentTimeMillis() >= keepUntil) return finish()
             if (step >= MAX_STEPS) return finish()
             // A second nudge later on: some players attach their handler after the first paint.
-            if (step == 4 || step == 9 || step == 15) nudge(view)
+            if (step == 4 || step == 9 || step == 15) nudge(view, step)
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)
         }
 
