@@ -45,8 +45,8 @@ internal class JioM3uResolver(
 
         val entries = loadPlaylist(fresh)
         val entry = entries.firstOrNull { it.id == id } ?: throw IOException("JioTV m3u8 has no matching channel ID")
-        val stream = open(entry, keysFor(entry, fresh))
-        val result = listOf(stream)
+        val streams = open(entry, keysFor(entry, fresh))
+        val result = streams
         val until = elapsed() + 30_000
         if (until > elapsed()) sources[id] = Cached(until, result)
         return result
@@ -64,10 +64,10 @@ internal class JioM3uResolver(
      * The probe follows the redirect here, keeps the signed CDN address, validates that the body really is
      * a manifest, and retries with the playlist's own cookie when the host refuses a plain request.
      */
-    private fun open(entry: JioM3uProtocol.Entry, keys: Map<String, String>): TgStream {
+    private fun open(entry: JioM3uProtocol.Entry, keys: Map<String, String>): List<TgStream> {
         val type = JioM3uProtocol.mediaType(entry.url)
-        var base = JioM3uProtocol.toTgStream(entry, keys)
-        if (type == "mp4") return base
+        val base = JioM3uProtocol.toTgStream(entry, keys)
+        if (type == "mp4") return listOf(base)
         val plain = JioM3uProtocol.requestHeaders(entry)
         val attempts = ArrayList<Map<String, String>>(4).apply {
             // First the request an IPTV player sends, because that is the one this endpoint answers: a
@@ -96,12 +96,35 @@ internal class JioM3uResolver(
             val body = response.body.toString(Charsets.UTF_8)
             if (!JioM3uProtocol.isManifest(type, body)) { refusal = "not a ${type.uppercase()} manifest"; continue }
             val finalUrl = response.finalUrl?.takeIf { it.startsWith("https://", true) } ?: entry.url
-            base = tuned(base, entry, finalUrl, body, keys)
-            return base
+            return candidates(tuned(base, entry, finalUrl, body, keys), entry)
         }
-        // The player still gets the advertised URL: a probe is not allowed to remove a candidate.
-        return base.copy(label = "${base.label} · $refusal")
+        // The player still gets the advertised URL: a probe is not allowed to remove a candidate. The
+        // redirector is first here because it is all that is left, and it re-mints the token itself.
+        return listOf(redirector(base, entry).copy(label = "${base.label} · $refusal"))
     }
+
+    /**
+     * The same channel as several candidates, because the CDN's two credentials disagree by design.
+     *
+     * The playlist's `#EXTHTTP` cookie is a coarse token minted for the whole site; the URL behind the
+     * redirect carries a token minted for that one channel and path. A player that works sends both and
+     * lets the CDN choose; a CDN that rejects the coarse one needs the bare request. Rather than guess
+     * which is true for a channel today, the player is given both, in the order that reaches a picture
+     * fastest, and the normal recovery loop moves to the next one when a stream does not start.
+     */
+    private fun candidates(probed: TgStream, entry: JioM3uProtocol.Entry): List<TgStream> = listOf(
+        probed.copy(label = "${probed.label} · CDN"),
+        probed.copy(label = "${probed.label} · CDN, no cookie",
+            headers = JioM3uProtocol.mediaHeaders(entry, includeCookie = false)),
+        redirector(probed, entry)
+    )
+
+    /** The playlist's own address, opened the way an IPTV player opens it: it redirects and re-signs. */
+    private fun redirector(from: TgStream, entry: JioM3uProtocol.Entry) = from.copy(
+        url = entry.url,
+        headers = JioM3uProtocol.mediaHeaders(entry),
+        label = "${from.label.substringBefore(" · ")} · playlist redirect"
+    )
 
     /** Keep the manifest's own key ids, and stop sending the playlist's headers to a CDN of another origin. */
     private fun tuned(base: TgStream, entry: JioM3uProtocol.Entry, finalUrl: String, manifest: String, keys: Map<String, String>): TgStream {

@@ -172,10 +172,11 @@ internal object JioM3uProtocol {
      * The cookie is sent as a plain `Cookie` header and never as a signed query parameter: the CDN URL
      * already carries the token the redirector minted for it.
      */
-    fun mediaHeaders(entry: Entry): Map<String, String> = linkedMapOf<String, String>().apply {
-        put("User-Agent", entry.userAgent?.takeIf { it.isNotBlank() } ?: UA_OVERRIDE)
-        entry.cookie?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
-    }
+    fun mediaHeaders(entry: Entry, includeCookie: Boolean = true): Map<String, String> =
+        linkedMapOf<String, String>().apply {
+            put("User-Agent", entry.userAgent?.takeIf { it.isNotBlank() } ?: UA_OVERRIDE)
+            if (includeCookie) entry.cookie?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
+        }
 
     /** The playlist's own `#EXTHTTP` cookie, sent only to the playlist host as a last attempt. */
     fun cookieHeaders(entry: Entry): Map<String, String> =

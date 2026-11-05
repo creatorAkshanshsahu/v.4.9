@@ -464,3 +464,34 @@ as a tile the page does not have. A test pins both directions.
 
 From this build, tapping any channel the page lists - from any row - opens
 `suniliv.pages.dev/ptest1?id=<slug>` full screen in the app.
+
+## 14. 4.9.57 — one channel, three ways to open it, instead of guessing which credential the CDN wants
+
+The playlist channels still do not reach a picture: black, or a player that keeps retrying. The last two
+releases each picked one request shape and hoped it was the right one:
+
+- 4.9.53 sent the playlist's user agent only, and let the CDN's own signed query authorize the segments;
+- 4.9.54 also sent the playlist's `#EXTHTTP` cookie, which is what an IPTV player sends.
+
+Both are plausible, and they conflict: the cookie is a **coarse, site-wide token** (`acl=/*`), while the
+URL behind the redirect carries a **token minted for that channel and path**. A CDN that prefers the
+cookie will reject a request whose query token it just minted, and a CDN that needs the cookie will reject
+one that carries only the query. Which of the two happens differs per channel, and no amount of reading
+the playlist from CI settles it — the runner is geo-blocked (section 11).
+
+So the resolver no longer chooses. One channel now yields **three candidates**, and the existing recovery
+loop walks them in order:
+
+| candidate | request |
+| --- | --- |
+| `· CDN` | the signed CDN address with the playlist's user agent and cookie |
+| `· CDN, no cookie` | the same address with the user agent only, authorized by the query token alone |
+| `· playlist redirect` | `jtv1.mpd?id=N` exactly as the playlist writes it, user agent and cookie, redirect followed by the player |
+
+All three are the same source, the same ClearKey configuration and the same "no Origin, no Referer" rule,
+and the source menu lists them by those labels. When a candidate loads its manifest and keys but never
+produces a frame, the health check retires it and moves to the next one automatically, then one fresh
+re-resolve, then the error card — which still prints the exact stage (manifest / init / media / DRM stage)
+so the next report names the failing step instead of "black screen".
+
+If one of the three plays, the next release keeps only the ones that do.

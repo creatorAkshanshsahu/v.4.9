@@ -3,6 +3,7 @@ package com.aktv.app
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,7 +55,7 @@ class JioM3uPlaybackTest {
 
     @Test fun `the redirect target is handed to the player, not the redirecting URL`() {
         val stream = resolver { TgResponse(200, mpd().toByteArray(), "application/dash+xml", finalUrl = cdnUrl) }
-            .resolve("143").single()
+            .resolve("143").first()
         assertEquals(cdnUrl, stream.url)
         // The media host gets exactly what an IPTV player sends for this link: the playlist's user agent
         // and its own cookie. No Origin, no Referer.
@@ -103,12 +104,12 @@ class JioM3uPlaybackTest {
     @Test fun `a refused request is retried with the playlist's own cookie`() {
         val stream = resolver { call ->
             if (call == 0) TgResponse(403, ByteArray(0)) else TgResponse(200, mpd().toByteArray(), finalUrl = cdnUrl)
-        }.resolve("143").single()
+        }.resolve("143").first()
         assertEquals(cdnUrl, stream.url)
     }
 
     @Test fun `when nothing answers the advertised URL is kept and the refusal is visible`() {
-        val stream = resolver { TgResponse(403, ByteArray(0)) }.resolve("143").single()
+        val stream = resolver { TgResponse(403, ByteArray(0)) }.resolve("143").first()
         assertEquals("https://allinonereborn2.online/jiotv-m3u/jtv1.mpd?id=143", stream.url)
         assertTrue(stream.label.contains("HTTP 403"))
         // A probe orders sources; it must never remove one.
@@ -116,7 +117,7 @@ class JioM3uPlaybackTest {
     }
 
     @Test fun `the licence names the key id the manifest uses`() {
-        val stream = resolver { TgResponse(200, mpd().toByteArray(), finalUrl = cdnUrl) }.resolve("143").single()
+        val stream = resolver { TgResponse(200, mpd().toByteArray(), finalUrl = cdnUrl) }.resolve("143").first()
         val pairs = ClearKey.pairs(stream.drm!!)
         assertEquals(setOf("6xkRPBHOXPuAyJaWdloBhw"), pairs.keys)
         assertEquals("snl85eQD7iLY42xtXytmMA", pairs.values.single())
@@ -124,11 +125,34 @@ class JioM3uPlaybackTest {
 
     @Test fun `a manifest key id that disagrees relabels the provider key instead of dropping it`() {
         val stream = resolver { TgResponse(200, mpd("AABBCCDD-EEFF-0011-2233-445566778899").toByteArray(), finalUrl = cdnUrl) }
-            .resolve("143").single()
+            .resolve("143").first()
         val pairs = ClearKey.pairs(stream.drm!!)
         assertEquals(setOf("qrvM3e7_ABEiM0RVZneImQ"), pairs.keys)
         assertEquals("snl85eQD7iLY42xtXytmMA", pairs.values.single())
         assertNotNull(ClearKey.license(stream.drm!!))
+    }
+
+    /** One channel, three ways to open it: the CDN with the coarse cookie, without it, and the redirector. */
+    @Test fun `a channel is offered as the CDN, the bare CDN and the redirector`() {
+        val streams = resolver { TgResponse(200, mpd().toByteArray(), finalUrl = cdnUrl) }.resolve("143")
+        assertEquals(3, streams.size)
+        assertEquals(cdnUrl, streams[0].url)
+        assertEquals("@allinone_reborn", streams[0].headers["User-Agent"])
+        assertNotNull(streams[0].headers["Cookie"])
+        assertEquals(cdnUrl, streams[1].url)
+        assertEquals("@allinone_reborn", streams[1].headers["User-Agent"])
+        assertNull("a coarse site-wide token must also be offered without the cookie", streams[1].headers["Cookie"])
+        assertEquals("https://allinonereborn2.online/jiotv-m3u/jtv1.mpd?id=143", streams[2].url)
+        assertNotNull(streams[2].headers["Cookie"])
+        // Every candidate is the same source, the same DRM and the same no-origin rule.
+        assertTrue(streams.all { it.drm != null && it.omitOrigin && it.requestOrigin == JioM3uResolver.SITE })
+        assertEquals(3, streams.map { it.label }.distinct().size)
+    }
+
+    @Test fun `a refused probe leaves the redirector as the only candidate`() {
+        val streams = resolver { TgResponse(403, ByteArray(0)) }.resolve("143")
+        assertEquals(1, streams.size)
+        assertEquals("https://allinonereborn2.online/jiotv-m3u/jtv1.mpd?id=143", streams.single().url)
     }
 
     @Test fun `an HTML error page is not accepted as a manifest`() {
