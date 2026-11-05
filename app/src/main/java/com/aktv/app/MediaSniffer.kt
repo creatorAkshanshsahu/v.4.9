@@ -181,16 +181,45 @@ internal object MediaSniffer {
             }
         }
 
-        /** A player that waits for a click cannot call a manifest; ask the page to start the way a viewer does. */
+        /**
+         * A player that waits for a click cannot call a manifest; ask the page to start the way a viewer does.
+         * TGFLIX opens with "Who's Watching?", so a profile is chosen first - exactly the click a viewer makes -
+         * and the title is then opened again, because that screen replaced the page that was asked for.
+         */
         private fun nudge(view: WebView) {
+            val target = org.json.JSONObject.quote(target)
             val js = """
                 (function(){
+                  var gate = false;
+                  try{
+                    var t=((document.body&&document.body.innerText)||'').toLowerCase();
+                    gate = t.indexOf("who's watching") >= 0 || t.indexOf('add profile') >= 0;
+                  }catch(e){}
+                  if (gate) {
+                    try{
+                      var cands=document.querySelectorAll('button,a,[role=button],img,div');
+                      for(var i=0;i<cands.length;i++){
+                        var e=cands[i];
+                        var s=((e.className||'')+' '+(e.alt||'')+' '+(e.textContent||'')).toString().toLowerCase();
+                        if(s.indexOf('avatar')>=0||s.indexOf('profile')>=0||s.indexOf('continue')>=0||s.indexOf('guest')>=0){
+                          e.click(); return;
+                        }
+                      }
+                      var img=document.querySelector('img'); if(img){ img.click(); return; }
+                    }catch(e){}
+                  }
                   try{
                     var v=document.querySelector('video'); if(v){ v.muted=true; v.play&&v.play().catch(function(){}); }
                     var nodes=document.querySelectorAll('button,[role=button],a,div[class*=play],div[class*=server]');
                     for(var i=0;i<nodes.length && i<12;i++){
-                      var t=(nodes[i].textContent||'').toLowerCase();
-                      if(/play|server|watch|start/.test(t)){ try{ nodes[i].click(); }catch(e){} break; }
+                      var tt=(nodes[i].textContent||'').toLowerCase();
+                      if(/play|server|watch|start/.test(tt)){ try{ nodes[i].click(); }catch(e){} break; }
+                    }
+                  }catch(e){}
+                  try{
+                    if(location.pathname.indexOf('profiles')>=0){
+                      // The profile screen replaced the page we asked for: go back to the title.
+                      setTimeout(function(){ location.href = $target; }, 1500);
                     }
                   }catch(e){}
                 })();
@@ -205,7 +234,7 @@ internal object MediaSniffer {
             if (hits.isNotEmpty() && System.currentTimeMillis() >= keepUntil) return finish()
             if (step >= MAX_STEPS) return finish()
             // A second nudge later on: some players attach their handler after the first paint.
-            if (step == 6 || step == 14) nudge(view)
+            if (step == 4 || step == 9 || step == 15) nudge(view)
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)
         }
 

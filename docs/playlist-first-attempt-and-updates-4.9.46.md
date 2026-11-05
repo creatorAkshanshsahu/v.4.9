@@ -804,3 +804,19 @@ So the resolver now does what the site does:
 The result is remembered per title and provider for 30 minutes, so the first open does the work and every
 later open starts immediately. The same mechanism is what OG has used since 4.9.67; this release gives the
 two TG providers the same last resort, which is why both now play the stream the website plays.
+
+## 27. 4.9.70 — the site the viewer actually opens
+
+`tgflix.lovable.app` is the player the viewer uses, and it opens with **"Who's Watching?"** - every path,
+including `/watch/movie/{id}`, answers with that profile screen first. So the fallback now:
+
+- asks **`tgflix.lovable.app` first**, then `tgfrost.lovable.app` (the same family, the host the app's own API
+  has always used);
+- loads the page **directly**, with no wrapper, because passing the profile screen needs real navigation;
+  the wrapper that supplies a `Referer` is still used where it helps (OG's embed pages);
+- **chooses the profile** the way a viewer does - the first profile/avatar/continue control, or the first
+  image on the grid - and then re-opens the title, since that screen replaced the page that was asked for;
+- again takes only a manifest that carries video, on the master playlist.
+
+`tgflix.qzz.io`, which the viewer also listed, answers *"This deployment is temporarily paused"* - that host
+has nothing to play and is not used.

@@ -104,13 +104,20 @@
    "from": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
    "to": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb",
    "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line is unchanged."
+  },
+  {
+   "change": "The site-player fallback tries tgflix.lovable.app before tgfrost.lovable.app, loads it directly (no Referer wrapper) so the profile screen can be passed, and names the chosen address explicitly. The endpoint request, its headers and its exception mapping are untouched.",
+   "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+   "from": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
+   "to": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
+   "unchanged": "The endpoint URL, the HTTPS-only media rule, the DASH refusal and the FrostSource the player preflights are the same as the previous amendment."
   }
  ],
  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
  "sha256": {
   "app/src/main/java/com/aktv/app/ClearKeyDashManifestParser.kt": "3b6ce8a9adeed73195bd55898d00806efa87cf58471736d56e8e76e08ed2bc78",
   "app/src/main/java/com/aktv/app/FrostMedia.kt": "0f62c6dc20fe6bfd8e8db03fe70e91857e6a3e100fb66c280a6ae4919e0afcb1",
-  "app/src/main/java/com/aktv/app/FrostMovies.kt": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
+  "app/src/main/java/com/aktv/app/FrostMovies.kt": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
   "app/src/main/java/com/aktv/app/HttpReferenceClock.kt": "b8dc8e872957ed6bc9f10726050dfcb0bdd464ebef0db3bc42769fe911ba7479",
   "app/src/main/java/com/aktv/app/JjtvProtocol.kt": "399495f6588165cb12ab1f2afaeab09cb8d54743dc2865f84704b42dc2e651ef",
   "app/src/main/java/com/aktv/app/JjtvRequestProfiles.kt": "e95e0103df5052e5d3271ee55125f8b633b7e21c6e3c868e4c559aeeb0f4f497",

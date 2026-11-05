@@ -205,9 +205,14 @@ internal class FrostResolver(
      * The address of the page a viewer opens on the site, which is what the fallback runs when the app's own
      * request for this title comes back empty or with nothing this player can use.
      */
-    private fun watchUrl(title: FrostTitle, provider: FrostProvider): String {
+    private fun watchUrl(title: FrostTitle, provider: FrostProvider, host: String): String {
         val path = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
-        return "${FrostProtocol.SITE}/watch/$path" + if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
+        return "$host/watch/$path" + if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
+    }
+
+    private companion object {
+        /** The site's own player, most likely first. */
+        val SITE_PLAYER_HOSTS = listOf("https://tgflix.lovable.app", FrostProtocol.SITE).distinct()
     }
 
     /**
@@ -217,25 +222,33 @@ internal class FrostResolver(
      */
     private fun sitePlayback(title: FrostTitle, provider: FrostProvider): FrostSource? {
         val context = MediaSniffer.appContext ?: return null
-        val page = watchUrl(title, provider)
-        val media = try { MediaSniffer.find(context, page, "${FrostProtocol.SITE}/") } catch (_: Exception) { null }
-            ?: return null
-        val format = when (media.substringBefore('?').substringAfterLast('.', "").lowercase(java.util.Locale.US)) {
+        // The player the viewer actually uses is tgflix.lovable.app; tgfrost.lovable.app is the same family.
+        // Both are tried, oldest last, and the first manifest that carries video wins.
+        var media: String? = null
+        for (host in SITE_PLAYER_HOSTS) {
+            val page = watchUrl(title, provider, host)
+            // Loaded directly, with no wrapper: this app's entry point is a profile screen that has to be
+            // passed before the title can be opened, and that needs real navigation.
+            media = try { MediaSniffer.find(context, page, null) } catch (_: Exception) { null }
+            if (media != null) break
+        }
+        val chosen = media ?: return null
+        val format = when (chosen.substringBefore('?').substringAfterLast('.', "").lowercase(java.util.Locale.US)) {
             "m3u8" -> VodFormat.HLS
             "mp4" -> VodFormat.MP4
             else -> return null
         }
         return FrostSource(
             provider = provider,
-            identity = "site:${provider.id}:${title.id}:${media.hashCode()}",
-            url = media,
+            identity = "site:${provider.id}:${title.id}:${chosen.hashCode()}",
+            url = chosen,
             format = format,
             quality = "",
             language = "",
             hevc = null,
             headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to "${FrostProtocol.SITE}/"),
             subtitles = emptyList(),
-            credentialOrigin = media,
+            credentialOrigin = chosen,
             scraperName = "site player"
         )
     }
