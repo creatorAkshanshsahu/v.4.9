@@ -2721,7 +2721,7 @@ class MainActivity : AppCompatActivity() {
         // A television can sit on this screen for days. A check that only ran at launch would never see a
         // build published in between, so the check is repeated while the app is in front.
         ui.removeCallbacks(updateTicker); ui.postDelayed(updateTicker, UPDATE_TICK_MS)
-        checkForUpdates(interactive = false)
+        checkForUpdates(interactive = false, force = true)
         refreshProgrammeFeed()
         ui.removeCallbacks(autoRefresh); ui.postDelayed(autoRefresh, 5 * 60_000L)
         if (vodTab && ::rowsView.isInitialized && rows.isNotEmpty()) refreshRowsKeepFocus()
@@ -2864,7 +2864,7 @@ class MainActivity : AppCompatActivity() {
      * app on its own, and a tap on "Update" installs it over this one.
      */
     private companion object {
-        const val UPDATE_TICK_MS = 5 * 60_000L
+        const val UPDATE_TICK_MS = 2 * 60_000L
     }
 
     private fun checkForUpdates(interactive: Boolean, force: Boolean = false) {

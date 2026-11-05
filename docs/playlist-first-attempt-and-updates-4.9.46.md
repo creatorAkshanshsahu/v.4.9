@@ -923,3 +923,18 @@ so a box that survives it can be turned back on deliberately.
 A new identity, built around the mark the viewer actually uses: ink-black ground (`#050609`), lacquered crimson
 accents (`#E00E27`), cool neutral greys instead of the previous purple cast, larger corner radii on every tile,
 a quieter rail, and the launcher icon is the AK TV mark itself.
+
+## 33. 4.9.76 — instant
+
+Twenty minutes was still not "now". A build published while the viewer is looking at the app should be offered
+within a minute or two, and nothing about the check is expensive: it is one small file.
+
+- the floor between automatic checks is **90 seconds** (was 20 minutes), and the tick that drives it while the
+  app is in front is **2 minutes** (was 5);
+- coming back to the app **always asks**, with only a 45-second floor, so "publish, switch back, update" works;
+- the request carries a **changing query string** (`?t=<minute>`), because the CDN in front of a release asset
+  can keep serving the previous `update.json` for a few minutes after a publish, which looks exactly like "the
+  update never arrived".
+
+`updates.json` itself is unchanged: same asset, same manifest, same SHA-256 verification before the installer
+is invoked.

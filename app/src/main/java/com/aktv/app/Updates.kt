@@ -34,8 +34,8 @@ internal object UpdateConfig {
      * an hour after the last check reached nobody until the next half-day, which is exactly what happened
      * between 4.9.62 and 4.9.63. BUILD_GRACE_MS is the floor a network callback must observe.
      */
-    const val CHECK_INTERVAL_MS = 20 * 60 * 1000L
-    const val BUILD_GRACE_MS = 120_000L
+    const val CHECK_INTERVAL_MS = 90 * 1000L
+    const val BUILD_GRACE_MS = 45_000L
     const val MAX_APK_BYTES = 300L * 1024 * 1024
 }
 
@@ -119,7 +119,10 @@ internal object Updater {
 
     /** Returns a release only when it is actually newer than this installation. */
     fun check(context: Context): UpdateRelease? {
-        val request = Request.Builder().url(UpdateConfig.MANIFEST_URL)
+        // A publish replaces the release, but the CDN in front of it can still answer with the previous file for
+        // a few minutes. A changing query string makes every check a different resource, so "instant" is instant.
+        val url = UpdateConfig.MANIFEST_URL + "?t=" + (System.currentTimeMillis() / 60_000L)
+        val request = Request.Builder().url(url)
             .header("Accept", "application/json")
             .header("Cache-Control", "no-store")
             .build()
