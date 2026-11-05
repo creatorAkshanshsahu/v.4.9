@@ -439,9 +439,13 @@ class MainActivity : AppCompatActivity() {
         loadHomeTrending()
         // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
+        // Records why a run died: an uncaught exception here, an unclean exit noted on the next start.
+        CrashLog.install(this)
+        CrashLog.beginSession(this)
         // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         watchNetworkForUpdates()
+        ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 6_000)
         findViewById<TextView>(R.id.navVersion).text = appVersion
         intro.start()
     }
@@ -2612,6 +2616,12 @@ class MainActivity : AppCompatActivity() {
         if (searchShown) hideSearch(false)
     }
 
+    override fun onPause() {
+        // Reaching pause means the system did not kill this run; the next start can rely on it.
+        CrashLog.endSession(this)
+        super.onPause()
+    }
+
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null); resolveJob?.cancel(true); previewJob?.cancel(true)
         updateNetworkCallback?.let { callback ->
@@ -2737,7 +2747,10 @@ class MainActivity : AppCompatActivity() {
     private fun checkForUpdates(interactive: Boolean, force: Boolean = false) {
         if (updateChecking || updateDownloading) return
         val last = prefs.getLong("update_checked_at", 0L)
-        if (!interactive && !force && System.currentTimeMillis() - last < UpdateConfig.CHECK_INTERVAL_MS) return
+        val since = System.currentTimeMillis() - last
+        // A network callback may fire for every network on a TV that sits behind a flapping router, so even
+        // a forced check keeps a floor; the launch check and the menu remain the deliberate asks.
+        if (!interactive && (if (force) since < 120_000L else since < UpdateConfig.CHECK_INTERVAL_MS)) return
         updateChecking = true
         io.execute {
             var reachable = true
@@ -2771,6 +2784,30 @@ class MainActivity : AppCompatActivity() {
             cm.registerNetworkCallback(NetworkRequest.Builder().build(), callback)
             updateNetworkCallback = callback
         } catch (_: Exception) { /* older TV firmware may refuse the request; the launch check still runs */ }
+    }
+
+    /**
+     * Offers what the previous run wrote down before it died, once per distinct note, with a Copy button:
+     * a TV has no log the user can reach, so the app has to hand it over itself.
+     */
+    private fun offerExitReport() {
+        val note = CrashLog.report(this) ?: return
+        if (isFinishing || isDestroyed) return
+        val body = TextView(this).apply {
+            setTextColor(Color.WHITE); textSize = 12f; typeface = Typeface.MONOSPACE
+            setPadding(36, 24, 36, 24); text = note
+        }
+        AlertDialog.Builder(this)
+            .setTitle("The previous run stopped by itself")
+            .setView(ScrollView(this).apply { addView(body) })
+            .setPositiveButton("Copy report") { _, _ ->
+                (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("AK TV exit report", note))
+                Toast.makeText(this, "Copied — no stream URLs or keys", Toast.LENGTH_SHORT).show()
+                CrashLog.acknowledge(this, note)
+            }
+            .setNegativeButton("Close") { _, _ -> CrashLog.acknowledge(this, note) }
+            .show()
     }
 
     private fun promptUpdate(release: UpdateRelease) {

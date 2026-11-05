@@ -2,6 +2,7 @@ package com.aktv.app
 
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.*
 import android.os.Bundle
@@ -194,5 +195,27 @@ class BrowserActivity : Activity() {
         return super.dispatchKeyEvent(e)
     }
     override fun onWindowFocusChanged(f: Boolean) { super.onWindowFocusChanged(f); if (f) hideUi() }
-    override fun onDestroy() { super.onDestroy(); session.close() }
+    override fun onDestroy() {
+        session.close()
+        // GeckoView is a whole browser engine, and it is kept warm so the next page opens instantly. On an
+        // Android TV box that is what pushes the 32-bit app into an out-of-memory kill, which is exactly
+        // what "it freezes and closes by itself" looks like. When the box is short of memory the engine
+        // goes with the page instead of staying resident.
+        if (runtime != null && tightMemory()) {
+            try { runtime?.shutdown() } catch (_: Exception) { }
+            runtime = null
+        }
+        super.onDestroy()
+    }
+
+    /** A low-RAM box, or one whose free memory is already thin: no room to keep a browser engine warm. */
+    private fun tightMemory(): Boolean {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return true
+        if (am.isLowRamDevice) return true
+        return try {
+            val info = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(info)
+            info.availMem < 300L * 1024 * 1024
+        } catch (_: Exception) { true }
+    }
 }

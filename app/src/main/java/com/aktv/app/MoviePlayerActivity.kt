@@ -644,15 +644,38 @@ class MoviePlayerActivity : Activity() {
     private fun showSources() {
         val labels = mutableListOf("Reload TG FROST (native)", "Try TG OUT (native)")
         labels.addAll(sources.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
+        // The site's own servers, last in the list and clearly marked as not native: picking one plays the
+        // title on that site's player inside the app, which is where those servers live.
+        val og = OgSources.menu(title.type, title.id, title.season, title.episode)
+        val firstOg = labels.size
+        labels.addAll(og.map { it.first })
         val snapshot = sources
         val request = title
-        showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language")
+        showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language / server")
             .setItems(labels.toTypedArray()) { _, index ->
                 if (title != request) return@setItems
                 desiredPlay = true
-                when (index) { 0 -> begin(FrostProvider.FROST); 1 -> begin(FrostProvider.OUT)
-                    else -> snapshot.getOrNull(index - 2)?.let { begin(it.provider, it) } }
+                when {
+                    index == 0 -> begin(FrostProvider.FROST)
+                    index == 1 -> begin(FrostProvider.OUT)
+                    index >= firstOg -> openOgServer(index - firstOg)
+                    else -> snapshot.getOrNull(index - 2)?.let { begin(it.provider, it) }
+                }
             }.setNegativeButton("Close", null).create())
+    }
+
+    /**
+     * Plays this title on the site's own player, on the server the user picked, inside the app browser.
+     * Nothing is extracted from it and nothing is guessed: the TMDB identity is the one this screen was
+     * opened with, and the server number is the site's own.
+     */
+    private fun openOgServer(server: Int) {
+        startActivity(
+            Intent(this, BrowserActivity::class.java)
+                .putExtra("url", OgSources.playerUrl(title.type, title.id, server, title.season, title.episode))
+                .putExtra("title", "$titleName · ${OgSources.label(server)}".trim())
+                .putExtra("source", "OG")
+        )
     }
     private fun showTracks() {
         val owner = player ?: run { showSources(); return }

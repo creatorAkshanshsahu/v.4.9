@@ -529,3 +529,49 @@ than Live TV returns to Live TV. The app closes only from Live TV's own top row.
 The launch check stays, and a network callback now asks again the moment a network appears, so a TV that
 was switched on before the router picks up a release published in the meantime with no reinstall and no
 manual check.
+
+## 16. 4.9.59 — the app reports why a run died, and movies get the site's own servers
+
+### A run that ends by itself has to say why
+
+"Lag, freeze, then it closes" cannot be fixed from a description, and a TV has no log the user can reach.
+Two kinds of death are now recorded and offered on the next start, with a Copy button:
+
+- **an uncaught exception** - a default exception handler writes the stack, the build, the ABI, the
+  device and both heaps (`Runtime.maxMemory` and the device's own free memory) before the process dies;
+- **an unclean exit** - a session marker is written at start and cleared in `onPause`. If the next start
+  finds it still `running`, the previous process was killed without a crash: that is what an
+  out-of-memory kill, a native crash inside the decoder or an ANR kill looks like from inside the app.
+  The note then carries the moment the dead run started plus the same memory detail, which is what
+  distinguishes a 32-bit heap limit on a 1 GB box from a player fault.
+
+The note is capped, redacted (no URLs, cookies, key ids or keys), shown once per distinct text, and never
+blocks playback - it is a dialog the viewer can copy and close.
+
+The network-triggered update check also gained a two-minute floor: a TV behind a flapping router fires
+that callback repeatedly, and each firing used to start a GitHub request.
+
+### Movies and series: the site's own servers, in our player
+
+`theogpiratebot.online` is a metadata front end: its catalogue is TMDB, and a title's Play button opens
+`theogpiratebot.online/player?id=<tmdb>&type=movie|tv&server=<n>`. Its streams are third party providers
+embedded by that page and selected inside it - they are not addresses this app can own, and copying them
+would break as soon as a provider rotates.
+
+So the movie and series player's source menu now ends with **OG player · Server 1..4**, each opening that
+site's player for the title's TMDB identity (and the episode, for a series) inside the in-app browser. The
+site's own player then plays, exactly as the Sony section does, and choosing a dead server is the site's
+own "switched to the working one" behaviour. `server=0` is the number the site's own Play button uses.
+
+Nothing is invented: four numbers, the site's own parameter names, and a test that pins the address shape
+for a movie, a series with an episode, a series without one, and a server number the site does not publish
+(clamped, never extrapolated).
+
+### The browser engine no longer stays resident on a tight box
+
+`GeckoRuntime` was a process-wide singleton, kept warm so the next page opened instantly. On a 32-bit TV
+box that resident browser engine is the largest single allocation in the process, and it survives long
+after the page is gone - the shape of an out-of-memory kill that arrives minutes later, while the viewer
+is somewhere else. `BrowserActivity` now shuts the engine down when it closes **if the box is short of
+memory** (`isLowRamDevice`, or under 300 MB free); a box with room keeps the warm engine and still opens
+the next page instantly. Losing the warm engine costs a second on the next page, not a crash.
