@@ -96,17 +96,24 @@ internal object OgNative {
         // browser does and watch the requests they make - the site's own player first, then its servers.
         val ctx = appContext
         if (found.isEmpty() && ctx != null) {
-            val player = playerUrl(title)
-            val sniffed = runCatching { MediaSniffer.find(ctx, player, "$SITE/") }.getOrNull()
-            notes += "site player: " + (if (sniffed == null) MediaSniffer.lastSummary else "manifest found")
-            sniffed?.let { url -> sourceOf(url, "player", "OG site player")?.let { found += it } }
+            // The site's player is asked by the same server names its own links use. Loaded directly, so the
+            // page navigates as it does for a viewer and the embed inside it gets the site as its Referer.
+            for (key in serverKeys()) {
+                val media = runCatching { MediaSniffer.find(ctx, playerUrl(title, key), null, 12_000) }.getOrNull()
+                notes += "server $key: " + (if (media == null) MediaSniffer.lastSummary else "manifest found")
+                if (media != null) {
+                    preferredServer = key
+                    sourceOf(media, "player-$key", "OG $key")?.let { found += it }
+                    break
+                }
+            }
             if (found.isEmpty()) {
                 // A viewer will not wait a minute: the whole search gets a deadline, and the servers are
                 // asked in the site's own order until it expires.
                 val deadline = System.currentTimeMillis() + 45_000
                 for (server in SERVERS) {
                     if (System.currentTimeMillis() > deadline) { notes += "search deadline reached"; break }
-                    val hit = runCatching { MediaSniffer.find(ctx, server.embed(title), "$SITE/") }.getOrNull()
+                    val hit = runCatching { MediaSniffer.find(ctx, server.embed(title), "$SITE/", 14_000) }.getOrNull()
                     notes += "${server.label} player: " + (if (hit == null) MediaSniffer.lastSummary else "manifest found")
                     if (hit != null) {
                         sourceOf(hit, server.key, "OG ${server.label}")?.let { found += it }
@@ -160,10 +167,23 @@ internal object OgNative {
         )
     }
 
-    /** The address of the page the site's own player shows for a title. */
-    fun playerUrl(title: FrostTitle): String =
+    /**
+     * The site's own servers are addressed by name, not by number: the viewer's link for a film reads
+     * `player?id=656908&type=movie&server=elfura`. These are the names this app knows; the one that works is
+     * moved to the front for the rest of the session, so the next title starts with it.
+     */
+    private val SITE_SERVERS = listOf("elfura", "vidfast", "vidstuck", "vidlink")
+
+    @Volatile private var preferredServer: String? = null
+
+    /** The address of the page the site's own player shows for a title, on one of its servers. */
+    fun playerUrl(title: FrostTitle, server: String? = null): String =
         "$SITE/player?id=${title.id}&type=${kind(title)}" +
+            (server?.let { "&server=$it" } ?: "") +
             if (title.isSeries) "&season=${title.season}&episode=${title.episode}" else ""
+
+    /** Every name worth asking, the one that worked last time first. */
+    private fun serverKeys(): List<String> = (listOfNotNull(preferredServer) + SITE_SERVERS).distinct()
 
     fun cancel() { client.dispatcher.cancelAll() }
 

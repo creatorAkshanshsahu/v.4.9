@@ -41,13 +41,14 @@ internal object MediaSniffer {
     private const val KEEP_AFTER_FIRST_MS = 6_000L
     private val AUDIO_ONLY = Regex("""(?i)(audio|/a[0-9]+/|_a\.m3u8|aud_)""")
 
-    fun find(context: Context, target: String, referer: String? = null): String? {
+    fun find(context: Context, target: String, referer: String? = null, timeoutMs: Long = STEP_MS * MAX_STEPS): String? {
         if (Looper.myLooper() == Looper.getMainLooper()) return null
         val latch = CountDownLatch(1)
-        val reader = Reader(context.applicationContext, target, referer, latch)
+        val steps = (timeoutMs / STEP_MS).toInt().coerceIn(6, MAX_STEPS)
+        val reader = Reader(context.applicationContext, target, referer, steps, latch)
         Handler(Looper.getMainLooper()).post { reader.start() }
         val ok = try {
-            latch.await(STEP_MS * MAX_STEPS + 8_000, TimeUnit.MILLISECONDS)
+            latch.await(STEP_MS * steps + 8_000, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt(); false
         }
@@ -115,6 +116,7 @@ internal object MediaSniffer {
         context: Context,
         private val target: String,
         private val referer: String?,
+        private val maxSteps: Int,
         private val latch: CountDownLatch
     ) {
         private val app = context
@@ -174,7 +176,7 @@ internal object MediaSniffer {
                 } else {
                     view.loadUrl(target)
                 }
-                Handler(Looper.getMainLooper()).postDelayed({ finish() }, STEP_MS * MAX_STEPS)
+                Handler(Looper.getMainLooper()).postDelayed({ finish() }, STEP_MS * maxSteps)
                 Handler(Looper.getMainLooper()).post { poll(0) }
             } catch (_: Throwable) {
                 web = null
@@ -241,7 +243,7 @@ internal object MediaSniffer {
             if (done) return
             val keepUntil = firstAt + KEEP_AFTER_FIRST_MS
             if (hits.isNotEmpty() && System.currentTimeMillis() >= keepUntil) return finish()
-            if (step >= MAX_STEPS) return finish()
+            if (step >= maxSteps) return finish()
             // A second nudge later on: some players attach their handler after the first paint.
             if (step == 4 || step == 9 || step == 15) nudge(view, step)
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)

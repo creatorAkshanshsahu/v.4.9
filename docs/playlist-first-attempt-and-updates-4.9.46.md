@@ -852,3 +852,25 @@ so a build published at noon was never noticed at six in the evening. Two change
 `https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/update.json` was verified to be the
 release's own manifest (`/releases/latest` resolves to the rolling `latest` tag), so the failure was never the
 address - it was that nobody asked.
+
+## 30. 4.9.73 — the site's servers have names
+
+The viewer's own link for a film is
+
+```
+theogpiratebot.online/player?id=656908&type=movie&server=elfura
+```
+
+`server=elfura`, not a number - and the app was asking the site for `/player?id=…` with **no server at all**,
+then guessing three third-party embed hosts that this site does not necessarily use. That is why a film the
+website plays produced nothing here.
+
+The fallback now asks the **site's own player, by its own server names** (`elfura` first, then the three host
+names the app already knew), loading the page directly so it navigates exactly as it does for a viewer and the
+player inside it receives the site as its `Referer`. The name that yields a manifest is remembered for the
+session and moved to the front, so the next title starts with the server that works. Each probe is bounded to
+12 seconds and the host-page probes to 14, so the whole search still fits inside the same ceiling.
+
+The card and Playback details now name each attempt: `server elfurain: manifest found`,
+`server vidfast: 21 requests, 4 script(s), no manifest`. That is the difference between "the site refused us"
+and "we asked the wrong server".
