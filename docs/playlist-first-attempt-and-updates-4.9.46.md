@@ -495,3 +495,37 @@ re-resolve, then the error card — which still prints the exact stage (manifest
 so the next report names the failing step instead of "black screen".
 
 If one of the three plays, the next release keeps only the ones that do.
+
+## 15. 4.9.58 — the section decides, not the channel's name
+
+4.9.56 made any channel whose *name* matched a Sony tile open the site's player. That was wrong for one
+section and the user said so plainly: **JioTV plays natively, Live TV opens the player**.
+
+The two sections hold the same channels, so the name cannot decide. What differs is the tile:
+
+- the Live TV **Sony section** builds its rows from `SonyPage.channels(...)`, and every one of those tiles
+  carries the page's slug in `page`; playing one opens `suniliv.pages.dev/ptest1?id=<slug>` in the in-app
+  browser, and if native playback of such a tile ever fails, the same page is the fallback;
+- the **JioTV** section holds the playlist's own `Channel` objects, and those have no `page`. They are
+  ordinary channels: they resolve and play on the native player exactly like every other playlist
+  channel — Sony included. `SonyPage.pageFor(name)` is gone, so no name can divert a real channel to the
+  browser.
+
+Favourites, recents and search keep whatever the row they came from carries, which is the playlist
+channel: native.
+
+### Back no longer leaves the app
+
+Pressing Back while a playlist channel was still resolving (or with the surface not yet attached) fell
+through the player branch to the activity and **closed the app**. A `playerSession` flag now marks the
+whole span from "channel picked" to "player closed", and Back closes that session for as long as it is
+open, whatever the surface is doing.
+
+Back also walks up instead of out: a lower row returns to the top of its section, and any section other
+than Live TV returns to Live TV. The app closes only from Live TV's own top row.
+
+### Updates arrive when the network does
+
+The launch check stays, and a network callback now asks again the moment a network appears, so a TV that
+was switched on before the router picks up a release published in the meantime with no reinstall and no
+manual check.

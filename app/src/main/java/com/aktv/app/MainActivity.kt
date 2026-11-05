@@ -44,6 +44,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkRequest
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -139,6 +142,8 @@ class MainActivity : AppCompatActivity() {
     private val television get() = NativePlaybackPolicy.isTelevision(this)
     private var compatiblePlayback = false
     private var playbackActive = false
+    /** A channel is on screen or being resolved, so Back closes the player instead of the app. */
+    private var playerSession = false
     private val startupBudget = PlaybackStartupBudget()
     private var playbackHealth: PlaybackHealth? = null
     private val channelPlaybackResults = LinkedHashMap<String, ChannelPlaybackResult>()
@@ -165,6 +170,7 @@ class MainActivity : AppCompatActivity() {
     private val appVersion by lazy { packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown" }
     // In-app update (GitHub release). One check and one download at a time, never blocking playback.
     private var updateChecking = false
+    private var updateNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var updateDownloading = false
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
@@ -435,6 +441,7 @@ class MainActivity : AppCompatActivity() {
         ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
         // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
+        watchNetworkForUpdates()
         findViewById<TextView>(R.id.navVersion).text = appVersion
         intro.start()
     }
@@ -1370,12 +1377,13 @@ class MainActivity : AppCompatActivity() {
         requestedNativeProvider = null
         val ch = shown[current]
         pageFallbackFor = null
-        // Every Sony channel plays the site's own player: the section's tiles carry their slug, and a Sony
-        // channel reached from the playlist's category rows, favourites, recents or search is matched by
-        // name. Native providers are not tried for any of them.
-        val page = ch.page ?: SonyPage.pageFor(ch.name)
+        // Only a Live TV Sony tile plays the site's own player, because only those tiles carry the slug.
+        // The JioTV section is the playlist: a Sony channel there is an ordinary channel and plays on the
+        // native player like every other channel in that section. A name never diverts a real channel.
+        val page = ch.page
         if (page != null) { rememberChannel(ch); playOnSourcePage(ch, page); return }
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
+        playerSession = true
         home.visibility = View.INVISIBLE
         heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
         ui.removeCallbacks(heroRunnable); ui.removeCallbacks(heroGuideRunnable)
@@ -2367,13 +2375,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun fail(message: String) {
         val failed = shown.getOrNull(current)
-        if (!healthScanActive && failed != null && pageFallbackFor != failed.key &&
-            (failed.page != null || SonyPage.pageFor(failed.name) != null)) {
-            // The playlist refused every source. The channel is still this site's, so its own player page
-            // plays it inside the app: the tile must never end on a black screen or an error card.
+        if (!healthScanActive && failed != null && pageFallbackFor != failed.key && failed.page != null) {
+            // A Live TV Sony tile refused its native sources. It is still this site's channel, so its own
+            // player page plays it inside the app: the tile never ends on a black screen.
             recordChannelPlayback(failed, ChannelPlaybackOutcome.FAILED, "$message · opening the source page",
                 providerName(currentNativeProvider), serverIdx + 1)
-            playOnSourcePage(failed, failed.page ?: SonyPage.pageFor(failed.name))
+            playOnSourcePage(failed, failed.page)
             return
         }
         if (healthScanActive) {
@@ -2405,7 +2412,7 @@ class MainActivity : AppCompatActivity() {
         ++playToken; resolveJob?.cancel(true)
         endNativeSession(); releasePlayer()
         spinner.visibility = View.GONE
-        layer.visibility = View.INVISIBLE
+        layer.visibility = View.GONE
         home.visibility = View.VISIBLE
         ImmersiveUi.show(window)
         startActivity(
@@ -2426,7 +2433,7 @@ class MainActivity : AppCompatActivity() {
     }
     private fun closePlayer() {
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
-        endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null)
+        endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null); playerSession = false
         releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide(); resetProgrammeGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
         layer.animate().cancel(); layer.visibility = View.GONE; home.visibility = View.VISIBLE
@@ -2487,8 +2494,11 @@ class MainActivity : AppCompatActivity() {
             } else if (e.action == KeyEvent.ACTION_UP && !okLong) shortOk()
             return true
         }
+        // Back always closes the player session, even while the first stream is still resolving or the
+        // surface is not attached yet. Otherwise the key fell through to the activity and left the app.
+        if (e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_BACK &&
+            (layer.visibility == View.VISIBLE || playerSession)) { closePlayer(); return true }
         if (layer.visibility == View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) when (e.keyCode) {
-            KeyEvent.KEYCODE_BACK -> { closePlayer(); return true }
             KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
             KeyEvent.KEYCODE_GUIDE -> { showProgrammeGuide(); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
@@ -2497,12 +2507,14 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_INFO -> { showPlaybackDetails(); return true }
             KeyEvent.KEYCODE_DPAD_LEFT -> { switchServer(); return true }
         }
-        // Back from a lower row goes back to the top of the page (the hero row) first; Back again leaves the app.
+        // Back walks up, it does not leave: a lower row returns to the top of its section, and a section
+        // other than Live TV returns to Live TV. The app only closes from Live TV itself.
         if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_BACK) {
             val f = currentFocus
             if (f != null && isInside(f, rowsView)) {
                 val pos = rowsView.findContainingItemView(f)?.let { rowsView.getChildAdapterPosition(it) } ?: -1
                 if (pos > 0) { rowsView.scrollToPosition(0); rowsView.post { focusRowAt(0) }; return true }
+                if (tab != 0) { switchTab(0); return true }
             }
         }
         if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_SEARCH) { openSearch(); return true }
@@ -2602,6 +2614,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         ui.removeCallbacksAndMessages(null); resolveJob?.cancel(true); previewJob?.cancel(true)
+        updateNetworkCallback?.let { callback ->
+            (getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)?.unregisterNetworkCallback(callback)
+        }
+        updateNetworkCallback = null
         sourceMenu?.dismiss(); sourceMenu = null
         diagnosticsDialog?.dismiss(); diagnosticsDialog = null; diagnosticsText = null
         playbackIo.shutdownNow(); io.shutdownNow(); drmProbeIo.shutdownNow()
@@ -2718,10 +2734,10 @@ class MainActivity : AppCompatActivity() {
      * of the file it last installed. A push that publishes a new build therefore reaches an installed
      * app on its own, and a tap on "Update" installs it over this one.
      */
-    private fun checkForUpdates(interactive: Boolean) {
+    private fun checkForUpdates(interactive: Boolean, force: Boolean = false) {
         if (updateChecking || updateDownloading) return
         val last = prefs.getLong("update_checked_at", 0L)
-        if (!interactive && System.currentTimeMillis() - last < UpdateConfig.CHECK_INTERVAL_MS) return
+        if (!interactive && !force && System.currentTimeMillis() - last < UpdateConfig.CHECK_INTERVAL_MS) return
         updateChecking = true
         io.execute {
             var reachable = true
@@ -2736,6 +2752,25 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * A TV is often switched on before the router is back, so an installed app otherwise waits for its next
+     * launch to hear about a release published while it was offline. This asks again the moment a network
+     * appears: a push from GitHub still reaches the TV with no reinstall and no manual check.
+     */
+    private fun watchNetworkForUpdates() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        if (updateNetworkCallback != null) return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread { if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false, force = true) }
+            }
+        }
+        try {
+            cm.registerNetworkCallback(NetworkRequest.Builder().build(), callback)
+            updateNetworkCallback = callback
+        } catch (_: Exception) { /* older TV firmware may refuse the request; the launch check still runs */ }
     }
 
     private fun promptUpdate(release: UpdateRelease) {

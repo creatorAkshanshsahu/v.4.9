@@ -1,7 +1,6 @@
 package com.aktv.app
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -91,26 +90,24 @@ class SonyPageTest {
         assertTrue(tenThreeHd.pageOnly)
     }
 
-    /** A Sony channel reached from any other row opens the same player, matched by its name. */
-    @Test fun `a Sony channel outside the row is matched to its page by name`() {
-        assertEquals(SonyPage.pageUrl("sony-ten-3"), SonyPage.pageFor("Sony Ten 3 Hindi HD"))
-        assertEquals(SonyPage.pageUrl("sony-hd"), SonyPage.pageFor("SET HD"))
-        assertEquals(SonyPage.pageUrl("sab-hd"), SonyPage.pageFor("Sony SAB HD"))
-        assertEquals(SonyPage.pageUrl("sony-marathi"), SonyPage.pageFor("Sony Marathi SD"))
-        assertEquals(SonyPage.pageUrl("bbc-earth"), SonyPage.pageFor("BBC Earth HD"))
-        assertEquals(SonyPage.pageUrl("sab-hd"), SonyPage.pageFor("SAB HD"))
-        assertEquals(SonyPage.pageUrl("sony-max2"), SonyPage.pageFor("Sony MAX2"))
+    /**
+     * The JioTV section is the playlist, so the channels it holds must stay ordinary channels: no page on
+     * the channel itself. Only the Live TV tiles the section builds get a slug, which is why a Sony channel
+     * played from JioTV goes to the native player and the same channel played from Live TV opens the page.
+     */
+    @Test fun `a playlist Sony channel is not diverted to the page by its name`() {
+        val playlist = listOf(channel("892", "Sony Ten 3 Hindi HD"), channel("287", "Sony SAB HD"), channel("325", "Sony MAX2"))
+        assertTrue("the playlist's own channels must not carry a page", playlist.all { it.page == null })
+        val section = SonyPage.channels(playlist)
+        assertEquals(SonyPage.TILES.size, section.count { it.page != null })
+        assertEquals(SonyPage.TILES.size, SonyPage.channels(playlist).size)
     }
 
-    /** A channel that is not one of the page's tiles never gets its slug - not even a Sony one. */
-    @Test fun `brands the page does not list are never given a slug`() {
-        assertNull(SonyPage.pageFor("Sony Yay Tamil"))
-        assertNull(SonyPage.pageFor("SONY YAY Bengali"))
-        assertNull(SonyPage.pageFor("Sony MAX1"))
-        assertNull(SonyPage.pageFor("Sony BBC Earth HD Telugu"))
-        assertNull(SonyPage.pageFor("Sony SAB SD"))
-        assertNull(SonyPage.pageFor("Sony Six"))
-        assertNull(SonyPage.pageFor(""))
+    /** Every tile opens the page, and the slug it opens is the page's own - no invented address. */
+    @Test fun `every tile opens the page own player`() {
+        val section = SonyPage.channels(listOf(channel("892", "Sony Ten 3 Hindi HD")))
+        assertTrue(section.all { it.page != null && it.page!!.startsWith(SonyPage.PAGE) })
+        assertEquals(SonyPage.TILES.size, section.map { it.page }.distinct().size)
     }
 
     @Test fun `the page and its player are the only source names used`() {
