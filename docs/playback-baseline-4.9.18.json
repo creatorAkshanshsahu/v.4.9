@@ -55,6 +55,13 @@
    "from": "8170b49a2c6462050ba7cacea4cd64bea764a8c95af34421ffa4e8d20b88cba7",
    "to": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
    "unchanged": "FROST/OUT endpoint construction, parsing, limits, error kinds, recovery and cancel() are unchanged apart from the added branch."
+  },
+  {
+   "change": "JioM3uResolver construction only: the playlist resolver now serves the site's second list too (catalogueOf), keeps both on disk under a cache directory, and may read a playlist through the browser engine after every scriptless request is refused; tataCatalogue() exposes the second list.",
+   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+   "from": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
+   "to": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
+   "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
   }
  ],
  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -74,7 +81,7 @@
   "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
   "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
   "app/src/main/java/com/aktv/app/TgResolver.kt": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
-  "app/src/main/java/com/aktv/app/TgServers.kt": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05"
+  "app/src/main/java/com/aktv/app/TgServers.kt": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03"
  },
  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }

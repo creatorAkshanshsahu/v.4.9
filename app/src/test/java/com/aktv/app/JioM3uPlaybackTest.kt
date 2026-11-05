@@ -211,4 +211,38 @@ class JioM3uPlaybackTest {
         val cold = JioM3uResolver(http = { _, _ -> TgResponse(415, ByteArray(0)) })
         assertEquals("JioTV m3u8 HTTP 415", runCatching { cold.catalogue() }.exceptionOrNull()?.message)
     }
+
+    /**
+     * The site now answers a scriptless client with `HTTP 415` for the playlist itself, which is what emptied
+     * the section on the TV. The same address read through the browser engine is the last resort, and a second
+     * list from the same site is served by the same resolver and can still be shown on its own.
+     */
+    @Test fun `a scriptless refusal is read through the browser engine instead`() {
+        val asked = mutableListOf<String>()
+        val resolver = JioM3uResolver(
+            http = { _, _ -> TgResponse(415, ByteArray(0)) },
+            browser = { url -> asked.add(url); playlist }
+        )
+        assertEquals(listOf("143"), resolver.catalogue().map { it.id })
+        assertEquals(listOf("https://allinonereborn2.online/jiotv-m3u/jtv33.m3u8"), asked)
+        // Without the browser engine the refusal is still reported by its own status.
+        val cold = JioM3uResolver(http = { _, _ -> TgResponse(415, ByteArray(0)) })
+        assertEquals("JioTV m3u8 HTTP 415", runCatching { cold.catalogue() }.exceptionOrNull()?.message)
+    }
+
+    @Test fun `a second playlist is served by the same resolver and can be shown on its own`() {
+        val tata = "#EXTM3U\n#EXTINF:-1 tvg-id=\"900\" group-title=\"Tata\",Tata One\n" +
+            "https://allinonereborn2.online/jiotv-m3u/jtv1.mpd?id=900\n"
+        val url = "https://allinonereborn2.online/playlist/ttv6t.m3u"
+        val resolver = JioM3uResolver(
+            http = { address, _ ->
+                if (address.contains("ttv6t")) TgResponse(200, tata.toByteArray()) else TgResponse(200, playlist.toByteArray())
+            },
+            extra = listOf(url)
+        )
+        assertEquals(listOf("143", "900"), resolver.catalogue().map { it.id })
+        assertEquals(listOf("900"), resolver.catalogueOf(url).map { it.id })
+        // A channel of the second list resolves by its own id, with its own entry.
+        assertEquals("900", JioM3uProtocol.parse(tata).single().id)
+    }
 }

@@ -27,6 +27,8 @@ internal object JioM3uProtocol {
 
     const val SITE = "https://allinonereborn2.online"
     const val PLAYLIST = "$SITE/jiotv-m3u/jtv33.m3u8"
+    /** The site's other list (its "tata" playlist), served by the same resolver and shown as its own section. */
+    const val TATA_PLAYLIST = "$SITE/playlist/ttv6t.m3u"
     const val UA_OVERRIDE = "@allinone_reborn"
     /** Only the playlist's own host may supply the key document; no other origin is followed. */
     val HOST: String = URI(SITE).host.orEmpty()

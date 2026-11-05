@@ -102,6 +102,8 @@ class MainActivity : AppCompatActivity() {
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
+    /** The site's second list (its "tata" playlist): its own section, played by the same native resolver. */
+    private var tataJio = listOf<Channel>()
     /** Keys of the Sony section's tiles: playlist-only channels, re-pinned wherever they reappear. */
     private var sonyPinned = setOf<String>(); private var sonyTiles = listOf<Channel>()
     /** The channel whose page player was opened by the fallback, so a retry never bounces into it twice. */
@@ -730,6 +732,7 @@ class MainActivity : AppCompatActivity() {
         if (jioCatalogLoaded) return
         jioMsg = "Loading JioTV channels…"; updateStatus()
         io.execute {
+            // The site's two lists are independent: one being refused must not take the other with it.
             try {
                 val entries = TgServers.jioCatalogue()
                 val channels = entries.map { e ->
@@ -742,7 +745,21 @@ class MainActivity : AppCompatActivity() {
                     if (allJio.isEmpty()) { jioMsg = "JioTV channels didn't load (${why(e)}). Check the connection and reopen the app."; updateStatus() }
                 }
             }
+            try {
+                val tata = TgServers.tataCatalogue().map { e ->
+                    Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
+                }
+                if (tata.isNotEmpty()) runOnUiThread { applyTata(tata) }
+            } catch (_: Exception) {
+                // No second list today: the JioTV section is unaffected and the row is simply absent.
+            }
         }
+    }
+
+    private fun applyTata(list: List<Channel>) {
+        if (list == tataJio) return
+        tataJio = list; seedAccents(list)
+        if (tab == 2) { refreshRows(); }
     }
 
     private fun applyJio(list: List<Channel>) {
@@ -758,7 +775,7 @@ class MainActivity : AppCompatActivity() {
      * it keeps its pin: it must replay from the same source it was saved from.
      */
     private fun channelFor(key: String): Channel? {
-        val found = (sonyTiles + pool() + allJio + allV2).firstOrNull { it.key == key } ?: return null
+        val found = (sonyTiles + pool() + allJio + tataJio + allV2).firstOrNull { it.key == key } ?: return null
         return if (found.key in sonyPinned) found.copy(jio = true, pinned = true) else found
     }
 
@@ -821,6 +838,11 @@ class MainActivity : AppCompatActivity() {
             sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
             if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
+            // The site's second list, as its own section, played by the same native resolver as the first.
+            if (tataJio.isNotEmpty()) {
+                add(Row("TATA · Playlist", featuredChannels(tataJio).map { Tile.Ch(it) }))
+                addAll(tataJio.groupBy { it.category }.toSortedMap().map { (name, items) -> Row("TATA · $name", items.map { Tile.Ch(it) }) })
+            }
             add(Row(FAV, favTiles()))
             addAll(recentRow())
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })

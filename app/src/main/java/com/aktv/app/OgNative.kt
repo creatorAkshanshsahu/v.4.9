@@ -51,18 +51,29 @@ internal object OgNative {
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS)
         .followRedirects(true).followSslRedirects(false).build()
 
+    /** What each server said, so a title with no source explains itself instead of just failing. */
+    @Volatile private var outcome = ""
+
+    fun lastOutcome(): String = outcome
+
     /** Every server, in the site's order: the player's own preflight drops the ones that do not answer. */
     fun resolve(title: FrostTitle): List<FrostSource> {
         val found = LinkedHashSet<FrostSource>()
+        val notes = mutableListOf<String>()
         for (server in SERVERS) {
             try {
-                found += sources(title, server)
-            } catch (_: Exception) {
+                val sources = sources(title, server)
+                notes += "${server.label}: " + if (sources.isEmpty()) "no address on its page" else "${sources.size} source(s)"
+                found += sources
+            } catch (error: Exception) {
                 // One server refusing is not a failed title: the next server is asked.
+                val status = (error as? FrostResolveException)?.status
+                notes += "${server.label}: " + (status?.let { "HTTP $it" } ?: "unreachable")
                 continue
             }
             if (found.size >= MAX_CANDIDATES) break
         }
+        outcome = notes.joinToString(" · ").take(220)
         if (found.isEmpty()) throw FrostResolveException(kind = "empty")
         return found.toList()
     }
@@ -106,6 +117,7 @@ internal object OgNative {
             .header("User-Agent", TgHttp.USER_AGENT)
             .header("Accept", "text/html,application/json,*/*")
             .header("Referer", "$SITE/")
+            .header("Origin", SITE)
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw FrostResolveException(response.code)

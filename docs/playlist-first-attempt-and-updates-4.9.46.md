@@ -633,3 +633,32 @@ falls back to when both TG providers have nothing.
 Addresses are read fresh for every title; a stored one would be dead within hours. A server that names no
 address contributes no source rather than a black screen, and when every server is silent the card says so
 with the player's own diagnostics.
+
+## 19. 4.9.62 — the gate in front of the playlist, and the site's second list
+
+`HTTP 415` survived 4.9.60's five request shapes, and the reason is that it is not a header problem: the
+site put a **script gate** in front of its playlists. A scriptless client is refused outright; a browser
+that runs the gate gets the file. Nothing in an HTTP client can pass that, which is why every shape was
+refused on the TV while the site itself plays fine in a browser.
+
+So the last resort is now the same request made by a browser:
+
+- `BrowserFetch` loads the address in a hidden `WebView` on the main thread, waits (500 ms steps, 15 s
+  ceiling) until the document body really contains `#EXTM3U`, and returns the text;
+- `JioM3uResolver` only calls it **after** all five scriptless shapes have been refused, and only accepts
+  the answer when it parses as a playlist. A box with no `WebView` simply keeps the refusal and the
+  section's message stays truthful.
+
+The site's second list, `playlist/ttv6t.m3u`, is now served by the same resolver as an extra playlist:
+its channels resolve natively with the same probe, cookie and ClearKey path, and the JioTV tab shows them
+as their own **TATA** section (a "TATA · Playlist" row plus one row per category the file declares). The
+two lists are independent - one being refused never empties the other - and both are kept on disk so a
+refused refresh can delay a section but never blank it.
+
+### OG says what each of its servers answered
+
+An OG title that ends with "no native sources" now names the reason per server, in the card and in the
+playback details: `Vidstuck: HTTP 403 · Vidfast: no address on its page · Vidlink: unreachable`. That is
+the difference between "OG does not work" and a fixable answer, and it is what the next round is built
+from. The request also carries `Origin` as well as `Referer` now, because some embed hosts check the
+former.

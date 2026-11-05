@@ -20,7 +20,13 @@ object TgServers {
         forgetPreviousLiveSite(ctx)
         resolver.close()
         jjtv = JjtvResolver()
-        jioM3u = JioM3uResolver(cacheFile = java.io.File(ctx.filesDir, "jiotv-playlist.m3u8"))
+        jioM3u = JioM3uResolver(
+            extra = listOf(JioM3uProtocol.TATA_PLAYLIST),
+            cacheDir = java.io.File(ctx.filesDir, "playlists"),
+            // The site's front door refuses a scriptless client (HTTP 415 on every request shape), so the
+            // last resort is the same request read through the browser engine.
+            browser = { url -> BrowserFetch.playlist(ctx, url) }
+        )
         resolver = TgResolver(initialFunction = prefs.getString("native_function", null), saveFunction = {
             prefs.edit().putString("native_function", it).apply()
         })
@@ -45,6 +51,10 @@ object TgServers {
 
     /** Returns all channel entries from the JioTV m3u8 playlist, for building the UI catalogue. */
     internal fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> = jioM3u.catalogue(fresh)
+
+    /** The site's second list, on its own, so its section is built from it alone. */
+    internal fun tataCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> =
+        jioM3u.catalogueOf(JioM3uProtocol.TATA_PLAYLIST, fresh)
 
     fun invalidate(id: String, v2: Boolean = false) = resolver.invalidate(id, v2)
 

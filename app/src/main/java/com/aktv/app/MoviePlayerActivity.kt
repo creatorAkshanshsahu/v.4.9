@@ -383,7 +383,8 @@ class MoviePlayerActivity : Activity() {
                 }, onFailure = { error ->
                     diagnostics.metadataFailed(PlaybackProblems.from(error))
                     val problem = error as? FrostResolveException
-                    lastFailure = problem?.message ?: "Movie source lookup failed."
+                    lastFailure = (problem?.message ?: "Movie source lookup failed.") +
+                        if (nextProvider == FrostProvider.OG) "\nOG servers: ${OgNative.lastOutcome()}" else ""
                     when {
                         problem?.status == 429 -> fail(lastFailure)
                         sourceRecovery.retryMetadata(nextProvider, problem?.status, problem?.kind) -> resolve(nextProvider)
