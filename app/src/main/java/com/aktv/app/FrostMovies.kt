@@ -194,11 +194,86 @@ internal class FrostResolver(
         .readTimeout(25, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
 ) {
+    /**
+     * What the site's own player played for a title, remembered, so a second attempt is instant.
+     */
+    private data class Memo(val until: Long, val sources: List<FrostSource>)
+    private val memo = HashMap<String, Memo>()
+    private fun memoKey(t: FrostTitle, p: FrostProvider) = "${p.id}:${t.type}:${t.id}:${t.season}:${t.episode}"
+
+    /**
+     * The address of the page a viewer opens on the site, which is what the fallback runs when the app's own
+     * request for this title comes back empty or with nothing this player can use.
+     */
+    private fun watchUrl(title: FrostTitle, provider: FrostProvider): String {
+        val path = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
+        return "${FrostProtocol.SITE}/watch/$path" + if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
+    }
+
+    /**
+     * Runs the site's own player and takes the stream it plays. The site hops servers silently until one
+     * answers, which is exactly the work this app used to leave to the viewer; doing it here means the first
+     * attempt plays instead of the second one.
+     */
+    private fun sitePlayback(title: FrostTitle, provider: FrostProvider): FrostSource? {
+        val context = MediaSniffer.appContext ?: return null
+        val page = watchUrl(title, provider)
+        val media = try { MediaSniffer.find(context, page, "${FrostProtocol.SITE}/") } catch (_: Exception) { null }
+            ?: return null
+        val format = when (media.substringBefore('?').substringAfterLast('.', "").lowercase(java.util.Locale.US)) {
+            "m3u8" -> VodFormat.HLS
+            "mp4" -> VodFormat.MP4
+            else -> return null
+        }
+        return FrostSource(
+            provider = provider,
+            identity = "site:${provider.id}:${title.id}:${media.hashCode()}",
+            url = media,
+            format = format,
+            quality = "",
+            language = "",
+            hevc = null,
+            headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to "${FrostProtocol.SITE}/"),
+            subtitles = emptyList(),
+            credentialOrigin = media,
+            scraperName = "site player"
+        )
+    }
+
     /** No bundled sources, browser context, global cookie jar, or cached credentials. */
-    fun resolve(title: FrostTitle, provider: FrostProvider = FrostProvider.FROST): List<FrostSource> {
+    fun resolve(title: FrostTitle, provider: FrostProvider = FrostProvider.FROST, fresh: Boolean = false): List<FrostSource> {
         // OG has no endpoint of this app's own: its sources are the media addresses each of that site's
         // servers names on its page for the title, so they are resolved per server instead.
-        if (provider == FrostProvider.OG) return OgNative.resolve(title)
+        if (provider == FrostProvider.OG) return OgNative.resolve(title, fresh)
+        synchronized(memo) { memo[memoKey(title, provider)] }
+            ?.takeIf { !fresh && it.until > System.currentTimeMillis() }?.let { return it.sources }
+        val direct = try {
+            direct(title, provider)
+        } catch (error: FrostResolveException) {
+            // The site itself would have moved on to its next server; so do we, before telling anyone it failed.
+            sitePlayback(title, provider)?.let { sniffed ->
+                remember(title, provider, listOf(sniffed)); return listOf(sniffed)
+            }
+            throw error
+        }
+        // A DASH manifest from these hosts is Widevine, which this player does not open: a source list made
+        // only of those is, for the viewer, an empty list.
+        val playable = direct.filter { it.format != VodFormat.DASH }
+        if (playable.isNotEmpty()) { remember(title, provider, playable); return playable }
+        sitePlayback(title, provider)?.let { sniffed ->
+            val result = listOf(sniffed) + direct
+            remember(title, provider, result)
+            return result
+        }
+        return direct
+    }
+
+    private fun remember(title: FrostTitle, provider: FrostProvider, sources: List<FrostSource>) {
+        if (sources.isEmpty()) return
+        synchronized(memo) { memo[memoKey(title, provider)] = Memo(System.currentTimeMillis() + 30 * 60_000, sources) }
+    }
+
+    private fun direct(title: FrostTitle, provider: FrostProvider): List<FrostSource> {
         val request = Request.Builder().url(FrostProtocol.endpoint(base, provider, title))
             .header("User-Agent", TgHttp.USER_AGENT).header("Accept", "application/json")
             .header("Cache-Control", "no-store").build()

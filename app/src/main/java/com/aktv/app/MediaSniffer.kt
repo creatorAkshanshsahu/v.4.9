@@ -31,6 +31,9 @@ internal object MediaSniffer {
     private const val MAX_STEPS = 30          // ~21 s
     private val MEDIA = Regex("""^https?://[^\s"'<>]+?\.(m3u8|mp4)(?:\?.*)?$""", RegexOption.IGNORE_CASE)
 
+    /** Set once at start-up: the browser engine needs a context, and the resolvers run off the UI thread. */
+    @Volatile var appContext: Context? = null
+
     /** What the last attempt saw, for the player's own report: "41 requests, 7 script(s), no manifest". */
     @Volatile var lastSummary: String = "not attempted"
 

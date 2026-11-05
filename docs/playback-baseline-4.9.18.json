@@ -90,13 +90,27 @@
    "from": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
    "to": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
    "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), refreshSite(), tataCatalogue() and every TG/JJTV path are unchanged; the resolver itself is untouched by this edit."
+  },
+  {
+   "change": "FrostResolver.resolve() gains a last resort: when the endpoint answers with nothing, or with only DASH manifests this player cannot open, it runs the site's own /watch page in the hidden browser and takes the .m3u8/.mp4 that page plays. Results are remembered per title for 30 minutes. The endpoint request itself (URL, headers, bounded read, exception mapping) is moved verbatim into direct().",
+   "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+   "from": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
+   "to": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
+   "unchanged": "No new host is trusted and nothing is decrypted: the address must still be HTTPS with a real host, DASH is still refused, and the resolved list is the same FrostSource type the player already preflights."
+  },
+  {
+   "change": "One added line in init: MediaSniffer.appContext = ctx.applicationContext, so the VOD resolvers can run a site's own player in the browser engine off the UI thread.",
+   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+   "from": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
+   "to": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb",
+   "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line is unchanged."
   }
  ],
  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
  "sha256": {
   "app/src/main/java/com/aktv/app/ClearKeyDashManifestParser.kt": "3b6ce8a9adeed73195bd55898d00806efa87cf58471736d56e8e76e08ed2bc78",
   "app/src/main/java/com/aktv/app/FrostMedia.kt": "0f62c6dc20fe6bfd8e8db03fe70e91857e6a3e100fb66c280a6ae4919e0afcb1",
-  "app/src/main/java/com/aktv/app/FrostMovies.kt": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
+  "app/src/main/java/com/aktv/app/FrostMovies.kt": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
   "app/src/main/java/com/aktv/app/HttpReferenceClock.kt": "b8dc8e872957ed6bc9f10726050dfcb0bdd464ebef0db3bc42769fe911ba7479",
   "app/src/main/java/com/aktv/app/JjtvProtocol.kt": "399495f6588165cb12ab1f2afaeab09cb8d54743dc2865f84704b42dc2e651ef",
   "app/src/main/java/com/aktv/app/JjtvRequestProfiles.kt": "e95e0103df5052e5d3271ee55125f8b633b7e21c6e3c868e4c559aeeb0f4f497",
@@ -109,7 +123,7 @@
   "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
   "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
   "app/src/main/java/com/aktv/app/TgResolver.kt": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
-  "app/src/main/java/com/aktv/app/TgServers.kt": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036"
+  "app/src/main/java/com/aktv/app/TgServers.kt": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb"
  },
  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }

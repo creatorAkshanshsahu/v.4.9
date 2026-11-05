@@ -783,3 +783,24 @@ Two other things that made it feel broken:
 - **the second try cost a full search again**. `OgNative` remembers what it found for a title for 30 minutes,
   so opening the film again starts from the same stream immediately. The whole search is also capped at 45
   seconds, so a title that cannot be found fails in a bounded time instead of a minute.
+
+## 26. 4.9.69 — play what the site's player plays, on the first attempt
+
+Both TG FROST and TG OUT answer `api/sources?server=tgflix|tgout&tmdb_id=…`, and both keep a page a viewer
+opens: `tgfrost.lovable.app/watch/movie/{id}` (and `/watch/tv/{id}/{season}/{episode}`, `?server=tgout` for
+the second). The site's own player is what silently hops servers until one answers - the behaviour the docs
+describe as "broken servers are skipped automatically" - and until now the app left that work to the viewer,
+which is why the second try worked and the first did not.
+
+So the resolver now does what the site does:
+
+1. ask its own endpoint (fast, as before);
+2. if the answer is empty, or contains **only DASH** (which from these hosts is Widevine and cannot be opened
+   here - the `MovieBoxV2 · 1080p · DASH` case), **run the site's own player page** in the hidden browser and
+   take the `.m3u8`/`.mp4` that player actually plays, chosen by reading the manifests rather than by name;
+3. play that address with this app's native Media3 player, with the site as `Referer`, labelled
+   `TG FROST · site player · HLS`.
+
+The result is remembered per title and provider for 30 minutes, so the first open does the work and every
+later open starts immediately. The same mechanism is what OG has used since 4.9.67; this release gives the
+two TG providers the same last resort, which is why both now play the stream the website plays.
