@@ -60,6 +60,10 @@ internal object OgNative {
 
     fun lastOutcome(): String = outcome
 
+    /** The same lines in full, one per line, for the player's details dialog. */
+    @Volatile private var report = ""
+    fun lastReport(): String = report
+
     /** Every server, in the site's order: the player's own preflight drops the ones that do not answer. */
     fun resolve(title: FrostTitle): List<FrostSource> {
         val found = LinkedHashSet<FrostSource>()
@@ -77,15 +81,29 @@ internal object OgNative {
             }
             if (found.size >= MAX_CANDIDATES) break
         }
-        // No page named an address, because these players build it in script. So run the site's own player
-        // in a browser and read the manifest request it makes - the same stream, played natively here.
-        if (found.isEmpty()) {
+        // No page named an address, because these players build it in script. So run the pages the way a
+        // browser does and watch the requests they make - the site's own player first, then its servers.
+        val ctx = appContext
+        if (found.isEmpty() && ctx != null) {
             val player = playerUrl(title)
-            val sniffed = appContext?.let { ctx -> runCatching { MediaSniffer.find(ctx, player) }.getOrNull() }
-            notes += "site player: " + if (sniffed == null) "no manifest" else "manifest found"
+            val sniffed = runCatching { MediaSniffer.find(ctx, player, "$SITE/") }.getOrNull()
+            notes += "site player: " + (if (sniffed == null) MediaSniffer.lastSummary else "manifest found")
             sniffed?.let { url -> sourceOf(url, "player", "OG site player")?.let { found += it } }
+            if (found.isEmpty()) {
+                for (server in SERVERS) {
+                    val hit = runCatching { MediaSniffer.find(ctx, server.embed(title), "$SITE/") }.getOrNull()
+                    notes += "${server.label} player: " + (if (hit == null) MediaSniffer.lastSummary else "manifest found")
+                    if (hit != null) {
+                        sourceOf(hit, server.key, "OG ${server.label}")?.let { found += it }
+                        break
+                    }
+                }
+            }
+        } else if (found.isEmpty()) {
+            notes += "site player: no browser engine on this device"
         }
-        outcome = notes.joinToString(" · ").take(220)
+        report = notes.joinToString("\n")
+        outcome = notes.joinToString(" · ").take(320)
         if (found.isEmpty()) throw FrostResolveException(kind = "empty")
         return found.toList()
     }

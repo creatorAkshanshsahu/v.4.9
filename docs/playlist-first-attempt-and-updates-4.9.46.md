@@ -748,3 +748,21 @@ Two things had made the JioTV tab slower than 4.9.61, and both were mine:
 
 Selecting the TATA tab is what puts that list on screen; if it has never loaded, it says so and a second
 selection retries it.
+
+## 24. 4.9.67 — watching the requests, not the HTML, and saying the whole of it
+
+The 4.9.64 card was cut off at `· site`, and the sniffer it reported was looking in the wrong place: a page
+cannot see the requests made inside a cross-site iframe, and these players run inside one. So the sniffer no
+longer uses scripts at all - `WebViewClient.shouldInterceptRequest` sees **every** request the page and its
+iframes make, whatever their origin, and returns null so the page keeps working. The page is loaded inside a
+one-page wrapper whose base URL is the site, so the embed sees the site's `Referer`, which several of these
+hosts require. A player that waits for a click is nudged twice (a `play()` and a click on the first
+play/server control), `images` are blocked so a TV link is not spent on artwork, and `.mpd`/ad hosts are
+still never offered.
+
+The order is: the site's own player page first (that is exactly what a viewer opens), then, if it names no
+manifest, the servers' own player pages one at a time.
+
+The report is no longer truncated to two lines. Each line is a fact - `site player: 41 requests, 7 script(s),
+no manifest`, `Vidstuck player: manifest found` - the card carries 320 characters of it, and **Playback
+details** carries all of it, followed by the usual diagnostics, so one screenshot answers the question.

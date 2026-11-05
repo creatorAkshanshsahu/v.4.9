@@ -704,7 +704,9 @@ class MoviePlayerActivity : Activity() {
                 "App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n" +
                 "TMDB ${title.id} · ${title.type} · S${title.season} E${title.episode}\n" +
                 "TV reported codec-limit fallback: $television\n" +
-                "No Gecko, live offsets or Jio authentication is used.\n\n${diagnostics.report()}"
+                "No Gecko, live offsets or Jio authentication is used.\n" +
+                (if (OgNative.lastReport().isNotBlank()) "\nOG servers:\n${OgNative.lastReport()}\n" else "") +
+                "\n${diagnostics.report()}"
         }
         showDialog(AlertDialog.Builder(this).setTitle("Movie playback details")
             .setView(ScrollView(this).apply { addView(text) }).setPositiveButton("Close", null).create())
