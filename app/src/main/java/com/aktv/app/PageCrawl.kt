@@ -86,13 +86,31 @@ internal object PageCrawl {
         return hits.values.sortedWith(compareBy({ if (it.format == VodFormat.HLS) 0 else 1 }, { it.page.length }))
     }
 
-    /** Media addresses a page names, absolute and https, in the order the page names them. */
+    /**
+     * Media addresses a page names, absolute and https, in the order the page names them.
+     *
+     * Three shapes carry one: a bare or protocol-relative address, a relative path in markup or in a
+     * JSON field (`"/hls/master.m3u8"`), and the playback backend's own ticket route
+     * (`/api/v1/stream?t=…`) which serves a playlist without looking like one.
+     */
     fun media(body: String, page: String): List<String> {
         val text = unescape(body)
         val found = LinkedHashSet<String>()
         BARE.findAll(text).forEach { found += it.value }
         KEYED.findAll(text).forEach { match -> found += match.groupValues[1] }
+        RELATIVE_EXT.findAll(text).forEach { match -> found += match.groupValues[1] }
+        TICKET.findAll(text).forEach { found += it.value }
         return found.mapNotNull { absolute(it, page) }.filter { format(it) != null }.distinct().take(MAX_HITS)
+    }
+
+    /**
+     * The playback backend's ticket route. The player's relay is addressed this way
+     * (`/api/v1/stream?t=<signed ticket>`), its answer is an HLS playlist, and the address carries no
+     * extension - so the path is recognised for what it is instead of guessed from a suffix.
+     */
+    fun isTicket(url: String): Boolean {
+        val path = runCatching { URI(url).path.orEmpty().lowercase(Locale.US) }.getOrDefault("")
+        return path.endsWith("/api/v1/stream") || path.endsWith("/api/stream") || path.endsWith("/api/v1/playlist")
     }
 
     /** Pages a page embeds: iframes, and the players that publish themselves as a `<source>`. */
@@ -106,11 +124,14 @@ internal object PageCrawl {
     }
 
     /** HLS and progressive files only: a DASH manifest from these hosts is Widevine, which this player does not open. */
-    fun format(url: String): VodFormat? = when (extension(url)) {
-        "m3u8", "m3u" -> VodFormat.HLS
-        "mp4", "m4v" -> VodFormat.MP4
-        "mpd" -> VodFormat.DASH
-        else -> null
+    fun format(url: String): VodFormat? {
+        if (isTicket(url)) return VodFormat.HLS
+        return when (extension(url)) {
+            "m3u8", "m3u" -> VodFormat.HLS
+            "mp4", "m4v" -> VodFormat.MP4
+            "mpd" -> VodFormat.DASH
+            else -> null
+        }
     }
 
     private fun extension(url: String): String =
@@ -185,4 +206,8 @@ internal object PageCrawl {
     )
     private val IFRAME = Regex("""(?i)<iframe[^>]*?\b(?:data-)?src\s*=\s*["']([^"']{4,2048})["']""")
     private val SOURCE = Regex("""(?i)<source[^>]*?\bsrc\s*=\s*["']([^"']{4,2048})["']""")
+    /** A relative manifest or file path, as markup and JSON publish it. */
+    private val RELATIVE_EXT = Regex("""(?i)(/[^\s"'<>()]{2,600}?\.(?:m3u8|m3u|mp4|m4v|mpd)(?:\?[^\s"'<>()]*)?)""")
+    /** The playback backend's ticket route, which is a playlist without an extension. */
+    private val TICKET = Regex("""(?i)/api/(?:v1/)?(?:stream|playlist)\?[^\s"'<>\\]{0,600}""")
 }

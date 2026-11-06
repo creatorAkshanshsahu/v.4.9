@@ -25,6 +25,20 @@ import okhttp3.Request
 internal object OgNative {
 
     const val SITE = "https://theogpiratebot.online"
+
+    /**
+     * The site's own player as it is served today: one embed per title, on its own deployment.
+     *
+     * `embed/movie/{tmdb}` and `embed/tv/{tmdb}/{season}/{episode}` are the addresses the site's
+     * documentation publishes, and the page answers with the playback backend's ticket route for that
+     * title - the same relay the browser player uses. It is read before the third-party servers because
+     * it is the one the site itself plays first.
+     */
+    const val ELFURA = "https://embed.theogpiratebot.online"
+
+    fun embedUrl(title: FrostTitle): String =
+        if (title.isSeries) "$ELFURA/embed/tv/${title.id}/${title.season}/${title.episode}"
+        else "$ELFURA/embed/movie/${title.id}"
     private const val MAX_BYTES = 4 * 1024 * 1024
     private const val MAX_CANDIDATES = 12
 
@@ -102,7 +116,12 @@ internal object OgNative {
         }
         // No page named an address in its markup, because these players also build one in script. The
         // address is still in what the page serves - in a JSON field, an embedded player, or a manifest -
-        // so the pages are crawled over HTTP: the site's own player first, then its servers, in its order.
+        // so the pages are crawled over HTTP: the site's own embed first, then its servers, in its order.
+        if (found.isEmpty()) {
+            val hits = runCatching { PageCrawl.crawl(embedUrl(title), "$ELFURA/", 9_000) }.getOrDefault(emptyList())
+            notes += "embed player: " + if (hits.isEmpty()) "no media address on its page" else "${hits.size} address(es)"
+            hits.forEach { hit -> sourceOf(hit.url, "elfura", "OG embed", hit.page)?.let { found += it } }
+        }
         if (found.isEmpty()) {
             for (key in serverKeys()) {
                 val hits = runCatching { PageCrawl.crawl(playerUrl(title, key), "$SITE/", 9_000) }

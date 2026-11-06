@@ -1158,3 +1158,51 @@ in a teal accent, a row of genre and cast chips, and a solid toolbar bar.
   gradient over the artwork rather than a bar on top of it;
 - Play is the single white pill (22dp radius, 14sp), with glass for everything else, and the label reads
   `▶ Play` / `▶ Play S2 E5`.
+
+## 48. 5.3.0 — how each player fetches its stream, and what the app does about it
+
+The three addresses were read the way a viewer's browser would find them: the pages, the embed
+documentation, and the public parts of the playback API. Nothing here runs a browser engine - every
+request below is an ordinary HTTPS GET the app can make itself.
+
+### `tgvid.lovable.app/docs` — the TGVID embed
+
+- Movies: `GET /embed/movie/{tmdbId}`; episodes `GET /embed/tv/{tmdbId}/{season}/{episode}`.
+- Query parameters that matter: `server=<id>` (its default server list includes `cinemaos`, and "TG HUB
+  servers are preferred automatically"), `lang=hi|eng|…` ("Hindi-dub servers are listed first"), plus
+  `t=`, `color=`, `autoplayNextEp=`.
+- Playback is **DASH and HLS, played by the page's own JS players** (hls.js with auto-recovery, native
+  HLS on Safari). The streams therefore come from the same family endpoint the app already asks -
+  `tgfrost.lovable.app/api/sources?server=…&type=…&tmdb_id=…` - which is why the app plays these titles
+  natively today: Media3 has both a DASH and an HLS extractor here.
+- What the app added: the embed's own documented address, with `lang=hi`, is now one of the pages it
+  reads first when the endpoint answer is empty.
+
+### `tgflix.lovable.app/play/{id}` — the viewer's site
+
+The route answers with **"Who's Watching?"** before the player (documented since 4.9.70), so it is not a
+page that names a stream for an anonymous request. Its player is the same family player, and its own
+server id (`tgflix`) is what the app asks the endpoint for - unchanged.
+
+### `embed.theogpiratebot.online` — the OG player, and what "signed sessions" means
+
+This is the current OG player, and it is a different architecture from the TG family:
+
+- `GET /api/v1/health` is public: `{"ok":true,"service":"elfura-backend","version":"0.1.0",
+  "sources":[{"id":"source-2"},{"id":"source-3"}]}`. It also reports which sources are up.
+- Playback is a **relay**, not a direct CDN address: the page receives `pltoken` + `nonce`, and every
+  stream is `/api/v1/stream?t=<signed ticket>` - an AES-256-GCM ticket minted per session, so "zero raw
+  upstream URLs" is literally true: the browser never learns the upstream either.
+- `GET /api/v1/stream?t=x` answers `{"ok":false,"error":"invalid or expired stream ticket"}` - the ticket
+  is the whole contract, and it is minted by the page as it loads.
+
+The app reads that page over HTTP (`PageCrawl`). The ticket route carries no file extension, which is
+exactly why the old crawler walked past it: it only accepted `.m3u8`/`.mp4`. It is recognised now -
+
+- `/api/v1/stream` (and `/api/stream`, `/api/v1/playlist`) is a **playlist** by route, not by suffix;
+- relative media paths in markup and JSON (`"/hls/master.m3u8?sig=…"`) are resolved against the page that
+  named them;
+- the page that named it is sent as `Referer`, with its origin as `Origin`.
+
+The same rule incidentally covers any provider that hands its player a relative address, which three of
+the older OG servers do.

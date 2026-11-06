@@ -238,6 +238,9 @@ internal class FrostResolver(
         val tv = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
         val server = if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
         return buildList<Pair<String, String?>> {
+            // The embed's own documentation (`tgvid.lovable.app/docs`) publishes these exact addresses,
+            // and says a Hindi-dub server is listed first when `lang` asks for one.
+            add("https://tgvid.lovable.app/embed/$tv${if (server.isEmpty()) "?lang=hi" else "$server&lang=hi"}" to "https://tgvid.lovable.app/")
             add("https://tgvid.lovable.app/embed/$tv$server" to "https://tgvid.lovable.app/")
             add("https://tgflix.lovable.app/play/${title.id}" to null)
             add("${FrostProtocol.SITE}/watch/$tv$server" to "${FrostProtocol.SITE}/")

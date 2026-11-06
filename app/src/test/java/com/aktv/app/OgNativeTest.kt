@@ -85,6 +85,11 @@ class OgNativeTest {
         assertEquals("https://inner.example.test", only.headers["Origin"])
     }
 
+    @Test fun `the site's own embed is addressed the way its documentation publishes`() {
+        assertEquals("https://embed.theogpiratebot.online/embed/movie/934042", OgNative.embedUrl(movie))
+        assertEquals("https://embed.theogpiratebot.online/embed/tv/1396/2/5", OgNative.embedUrl(episode))
+    }
+
     @Test fun `a server with nothing to play contributes nothing`() {
         val server = OgNative.server("vidfast")!!
         assertTrue(OgNative.sources(movie, server) { null }.isEmpty())

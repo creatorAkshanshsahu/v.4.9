@@ -69,6 +69,23 @@ class PageCrawlTest {
         assertEquals(VodFormat.DASH, PageCrawl.format("https://cdn.example.test/manifest.mpd"))
     }
 
+    @Test fun `a relative manifest path is resolved against the page`() {
+        val page = "https://player.example.test/embed/movie/1"
+        val body = """<script>var cfg={"src":"/hls/master.m3u8?sig=1"}</script>"""
+        assertEquals(listOf("https://player.example.test/hls/master.m3u8?sig=1"), PageCrawl.media(body, page))
+    }
+
+    @Test fun `the playback backend's ticket route is a playlist`() {
+        val page = "https://embed.example.test/embed/movie/1423191"
+        val body = """<script>window.__P={"sources":[{"url":"/api/v1/stream?t=7f2a9c"}]}</script>"""
+        val media = PageCrawl.media(body, page)
+        assertEquals(listOf("https://embed.example.test/api/v1/stream?t=7f2a9c"), media)
+        // It carries no extension, so the route itself is what says "playlist".
+        assertEquals(VodFormat.HLS, PageCrawl.format(media.single()))
+        assertTrue(PageCrawl.isTicket(media.single()))
+        assertEquals(VodFormat.MP4, PageCrawl.format("https://cdn.example.test/x.mp4"))
+    }
+
     @Test fun `a page that does not answer contributes nothing`() {
         PageCrawl.fetcher = { _, _ -> null }
         assertTrue(PageCrawl.crawl("https://player.example.test/e/1", null, budgetMs = 1_000).isEmpty())
