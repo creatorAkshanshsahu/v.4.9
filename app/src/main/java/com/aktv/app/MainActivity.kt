@@ -212,11 +212,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
     private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segJio: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
-    // TV rail: Live, Always on, JioTV, Movies, Series, TATA
-    private val segTata by lazy { findViewById<TextView>(R.id.segTata) }
-    private val segs by lazy { listOf(segLive, segV2, segJio, segSites, segSeries, segTata) }
+    // TV top bar: Live TV, Always on, JioTV, Movies, Series
+    private val segs by lazy { listOf(segLive, segV2, segJio, segSites, segSeries) }
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
-    private val segBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
+    private val segBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
     private val phoneSegBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
@@ -226,7 +225,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
-    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF140812.toInt(), 0xFF1A0D15.toInt(), 0xFF0C0710.toInt())) }
+    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF171310.toInt(), 0xFF1D1712.toInt(), 0xFF0D0C0A.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
@@ -331,9 +330,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.segJio).background = segBgs[2]
         heroOrb.background = orbBg
         infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
+            intArrayOf(0xF0151310.toInt(), 0xE00C0B0A.toInt())).apply {
             cornerRadius = 16 * dp
-            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x59FF3448)
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x59E8A44C)
         }
         infoCard.elevation = 10 * dp
         findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
@@ -522,14 +521,19 @@ class MainActivity : AppCompatActivity() {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
         setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
-        val accent = sectionAccent()
-        val bg = Ui.pill(dp, if (primary) Color.WHITE else 0xB30C0710.toInt(), 12f)
+        // Play is a white pill with dark type; every other hero action is glass with a white ring on focus.
+        val bg = Ui.pill(dp, if (primary) Accent.TEXT else 0x33FFFFFF, 22f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (primary) Color.WHITE else if (focused) Ui.mix(Accent.ABYSS, accent, 0.32f) else 0xB30C0710.toInt())
-            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, accent)
-            setTextColor(if (primary || focused) Accent.ABYSS else Accent.TEXT)
+            if (primary) {
+                bg.setColor(Accent.TEXT)
+            } else {
+                bg.setColor(if (focused) 0x4DFFFFFF else 0x33FFFFFF)
+            }
+            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.TEXT)
+            setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
+            setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
@@ -550,13 +554,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2, 5 -> Accent.SIGNAL; else -> Accent.INDIGO }
 
+    /**
+     * One pill, three states: the active section is a white pill with dark type, focus is a glass fill
+     * with a 2dp white ring, everything else is quiet. Nothing here allocates or animates per frame.
+     */
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
-        val accent = sectionAccent()
-        bg.setColor(when { focused -> Ui.mix(Accent.ABYSS, accent, 0.23f); active -> Ui.mix(Accent.ABYSS, accent, 0.12f); else -> Color.TRANSPARENT })
-        val fg = when { focused -> Accent.TEXT; active -> accent; else -> Accent.DIM }
-        tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
-        bg.setStroke((if (focused) 2 * dp else if (active) 1 * dp else 0f).toInt(), if (focused || active) accent else Color.TRANSPARENT)
+        val ring = (2 * dp).toInt().coerceAtLeast(2)
+        when {
+            focused -> {
+                bg.setColor(0x33FFFFFF)
+                bg.setStroke(ring, 0xF2FFFFFF.toInt())
+                tv.setTextColor(Accent.TEXT)
+            }
+            active -> {
+                bg.setColor(Accent.TEXT)
+                bg.setStroke(0, Color.TRANSPARENT)
+                tv.setTextColor(Accent.ABYSS)
+            }
+            else -> {
+                bg.setColor(Color.TRANSPARENT)
+                bg.setStroke(0, Color.TRANSPARENT)
+                tv.setTextColor(Accent.DIM)
+            }
+        }
+        val scale = if (focused) 1.04f else 1f
+        tv.scaleX = scale; tv.scaleY = scale
     }
+
     private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
 
     private fun styleSegs() {
@@ -568,7 +592,7 @@ class MainActivity : AppCompatActivity() {
         phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
-            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; else -> "TATA"
+            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; else -> "Live TV"
         }
         findViewById<TextView>(R.id.sectionKicker).apply {
             // The Sony section is the newest part of Live TV, so name it in the header.
@@ -841,8 +865,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        // Two playlists at once is a lot to ask of a TV at start-up: it loads when its tab is opened.
-        if (!television && !safeMode) loadTataChannels()
     }
 
     private fun applyTata(list: List<Channel>) {
@@ -1068,11 +1090,6 @@ class MainActivity : AppCompatActivity() {
     private fun switchTab(t: Int) {
         if (t == tab) {
             if ((t == 3 || t == 4) && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
-            // Selecting TATA again is how you retry it once it has said it failed.
-            if (t == 5 && tataJio.isEmpty()) {
-                tataLoaded = false; tataMsg = "Loading TATA channels…"
-                updateStatus(); loadTataChannels()
-            }
             return
         }
         val dir = if (t > tab) 1 else -1
@@ -2269,7 +2286,7 @@ class MainActivity : AppCompatActivity() {
                 this.text = "Copy redacted report"
                 setOnClickListener {
                     (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(android.content.ClipData.newPlainText("AK TV playback details", playbackDetailsText()))
+                        .setPrimaryClip(android.content.ClipData.newPlainText("STREAMR playback details", playbackDetailsText()))
                     Toast.makeText(this@MainActivity, "Report copied — no URLs or keys", Toast.LENGTH_SHORT).show()
                 }
             }, LinearLayout.LayoutParams(-1, -2))
@@ -2500,7 +2517,7 @@ class MainActivity : AppCompatActivity() {
                 (resources.displayMetrics.heightPixels * 0.82f).toInt())
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
                 (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("AK TV channel playback status", text.text))
+                    .setPrimaryClip(android.content.ClipData.newPlainText("STREAMR channel playback status", text.text))
                 Toast.makeText(this, "Report copied — no stream URLs or keys", Toast.LENGTH_SHORT).show()
             }
         }
@@ -2531,7 +2548,7 @@ class MainActivity : AppCompatActivity() {
                 providerName(currentNativeProvider), serverIdx + 1)
         }
         endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); spinner.visibility = View.GONE
-        playMsg("$message\n${diagnostics.summary()}\nAK TV $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
+        playMsg("$message\n${diagnostics.summary()}\nSTREAMR $appVersion · Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\nMENU: choose JJTV / TG · OK: details · Hold OK: retry")
         ui.removeCallbacks(hideInfo); hideInfo.run()
     }
 
@@ -2909,7 +2926,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (release != null) promptUpdate(release)
                 else if (interactive) {
-                    Toast.makeText(this, if (reachable) "AK TV $appVersion is the latest published build." else
+                    Toast.makeText(this, if (reachable) "STREAMR $appVersion is the latest published build." else
                         "Couldn't reach the update service. Check the connection and try again.", Toast.LENGTH_LONG).show()
                 }
             }
@@ -2965,7 +2982,7 @@ class MainActivity : AppCompatActivity() {
                 .setView(ScrollView(this).apply { addView(body) })
                 .setPositiveButton("Copy report") { _, _ ->
                     (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                        .setPrimaryClip(android.content.ClipData.newPlainText("AK TV exit report", note))
+                        .setPrimaryClip(android.content.ClipData.newPlainText("STREAMR exit report", note))
                     Toast.makeText(this, "Copied — no stream URLs or keys", Toast.LENGTH_SHORT).show()
                     CrashLog.acknowledge(this, note)
                 }
@@ -2979,7 +2996,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Update available · ${release.versionName.ifBlank { "code ${release.versionCode}" }}")
             .setMessage(buildString {
-                append("A newer AK TV build is published on GitHub.\n")
+                append("A newer STREAMR build is published on GitHub.\n")
                 append("Installed: $appVersion\n")
                 append("New build: ${release.label}\n")
                 if (release.notes.isNotBlank()) append("\n${release.notes.take(800)}\n")
@@ -2994,7 +3011,7 @@ class MainActivity : AppCompatActivity() {
         if (updateDownloading || isFinishing) return
         updateDownloading = true
         val dialogProgress = android.app.ProgressDialog(this).apply {
-            setTitle("Downloading AK TV update")
+            setTitle("Downloading STREAMR update")
             setMessage(release.versionName.ifBlank { "code ${release.versionCode}" })
             setProgressStyle(android.app.ProgressDialog.STYLE_HORIZONTAL)
             max = 100
@@ -3019,7 +3036,7 @@ class MainActivity : AppCompatActivity() {
                     if (Updater.signatureMismatch(this, file)) {
                         AlertDialog.Builder(this)
                             .setTitle("One-time reinstall needed")
-                            .setMessage("This build was signed with a different key than the copy installed now, so Android cannot install it over the old app. Uninstall AK TV once and install this download; every later update installs itself.")
+                            .setMessage("This build was signed with a different key than the copy installed now, so Android cannot install it over the old app. Uninstall STREAMR once and install this download; every later update installs itself.")
                             .setPositiveButton("Install anyway") { _, _ -> installUpdate(file) }
                             .setNegativeButton("Cancel", null)
                             .show()
@@ -3027,7 +3044,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     if (!Updater.canInstall(this)) {
                         AlertDialog.Builder(this)
-                            .setTitle("Allow AK TV to install updates")
+                            .setTitle("Allow STREAMR to install updates")
                             .setMessage("Android asks for this permission once. Enable it, then choose Update again.")
                             .setPositiveButton("Open settings") { _, _ -> Updater.openInstallSettings(this) }
                             .setNegativeButton("Cancel", null)

@@ -37,44 +37,48 @@ internal object ImmersiveUi {
 }
 
 /**
- * AK TV glossy-crimson palette: ink-black surfaces, deep wine depth, lacquered red accents and
- * bright-crimson cues. Names are stable so layouts, players and tests keep one source of truth.
+ * STREAMR palette: near-black blue ground, warm amber brand signal, one red for LIVE and progress.
+ * Names are stable so layouts, players and tests keep one source of truth.
  */
 object Accent {
-    val ABYSS = 0xFF050609.toInt()
-    val NIGHT = 0xFF0A0C11.toInt()
-    val SURFACE = 0xFF12151C.toInt()
-    val SURFACE_HI = 0xFF1C212B.toInt()
+    val ABYSS = 0xFF0E1014.toInt()
+    val NIGHT = 0xFF0A0B0E.toInt()
+    val SURFACE = 0xFF1B1E24.toInt()
+    val SURFACE_HI = 0xFF262A32.toInt()
     /** Primary glossy crimson used for focus fills, live badges and active controls. */
-    val CRIMSON = 0xFFE00E27.toInt()
-    val CRIMSON_BRIGHT = 0xFFFF2D48.toInt()
-    val CRIMSON_DEEP = 0xFF7C0512.toInt()
-    val WINE = 0xFF2B0A10.toInt()
+    val CRIMSON = 0xFFE5382B.toInt()
+    val CRIMSON_BRIGHT = 0xFFFF5A45.toInt()
+    val CRIMSON_DEEP = 0xFF8A1B10.toInt()
+    val WINE = 0xFF2A1712.toInt()
     /** Near-white with a warm cast; the specular highlight in gloss gradients. */
-    val GLOSS_HI = 0xFFFFF0F2.toInt()
+    val GLOSS_HI = 0xFFFFF3E6.toInt()
     val SIGNAL = CRIMSON_BRIGHT
-    val ION = 0xFFFF5A6E.toInt()
-    val INDIGO = 0xFF7C3AED.toInt()
+    val ION = 0xFFFF8A5C.toInt()
+    val INDIGO = 0xFF59616E.toInt()
     val DEEP = 0xFF1A1F28.toInt()
     val LIVE = CRIMSON_BRIGHT
-    val GOLD = 0xFFF2C879.toInt()
-    val TEXT = 0xFFF7F8FA.toInt()
-    val DIM = 0xFFB7BECB.toInt()
-    val FAINT = 0xFF7B8496.toInt()
+    val GOLD = 0xFFE8A44C.toInt()
+    val TEXT = 0xFFF7F7F9.toInt()
+    val DIM = 0xFFA5A9B2.toInt()
+    val FAINT = 0xFF6F7581.toInt()
+    /** Brand amber: wordmark, eyebrow labels, the active pill's tick and the profile dot. */
+    val AMBER = 0xFFE8A44C.toInt()
+    val AMBER_LIGHT = 0xFFF6C073.toInt()
+    val AMBER_DEEP = 0xFFB8762B.toInt()
 
     /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
-    fun glossStops(): IntArray = intArrayOf(CRIMSON_BRIGHT, CRIMSON, CRIMSON_DEEP)
+    fun glossStops(): IntArray = intArrayOf(AMBER_LIGHT, AMBER, AMBER_DEEP)
 
     /**
      * Makes any logo colour usable as a tint. The sampled hue is pulled most of the way to the brand
      * crimson so channel artwork still varies, but every surface reads as one crimson identity.
      */
     fun normalize(c: Int?): Int {
-        if (c == null) return CRIMSON_BRIGHT
+        if (c == null) return AMBER
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        if (hsl[1] < 0.18f) return CRIMSON_BRIGHT
+        if (hsl[1] < 0.18f) return AMBER
         val hue = projectHue(hsl[0])
-        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.62f), hsl[2].coerceIn(0.46f, 0.60f)))
+        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.48f), hsl[2].coerceIn(0.48f, 0.64f)))
     }
 
     /**
@@ -83,13 +87,13 @@ object Accent {
      */
     fun projectHue(hue: Float): Float {
         val normalized = ((hue % 360f) + 360f) % 360f
+        // The brand arc is amber: 24..46 degrees. Everything folds onto that span, so a wall of
+        // channel tiles reads as one warm identity instead of a rainbow.
         return when {
-            normalized <= 25f -> normalized
-            normalized >= 335f -> normalized
-            // Warm half: fold 25..180 down onto the 25..0 edge.
-            normalized < 180f -> 25f - (normalized - 25f) / 155f * 25f
-            // Cool half: fold 180..335 up onto the 335..360 edge.
-            else -> 335f + (normalized - 180f) / 155f * 25f
+            normalized in 24f..46f -> normalized
+            normalized < 24f -> 24f + (normalized / 24f) * 22f
+            normalized <= 191f -> 46f - ((normalized - 46f) / 145f) * 22f
+            else -> 24f + ((normalized - 191f) / 169f) * 22f
         }
     }
 
@@ -109,12 +113,11 @@ object Accent {
     fun fromName(name: String): Int {
         var h = 7
         for (ch in name.lowercase()) h = (h * 31 + ch.code) and 0x7fffffff
-        // 0..1 spread across crimson -> rose -> warm wine, all within the red family.
+        // 0..1 spread across the amber arc, dark enough to carry white type.
         val spread = (h % 100) / 99f
-        // Confine the palette to the red arc: 340..360 crimson-rose, 0..20 warm red.
-        val hue = if (spread < 0.55f) 340f + spread * 36f else (spread - 0.55f) * 44f
-        val lightness = 0.34f + ((h / 100) % 12) / 100f
-        return ColorUtils.HSLToColor(floatArrayOf((hue + 360f) % 360f, 0.62f, lightness))
+        val hue = 22f + spread * 26f
+        val lightness = 0.30f + ((h / 100) % 12) / 100f
+        return ColorUtils.HSLToColor(floatArrayOf(hue, 0.46f, lightness))
     }
 
     fun from(d: Drawable, cb: (Int) -> Unit) {

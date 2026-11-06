@@ -7,6 +7,6 @@ internal object AppBuildInfo {
     fun label(context: Context): String {
         val info = try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (_: Exception) { null }
         val run = context.getString(R.string.build_run_id).takeIf { it.matches(Regex("[0-9]{1,20}|local")) } ?: "local"
-        return "AK TV ${info?.versionName ?: "unknown"} / code ${info?.longVersionCode ?: 0} / build $run"
+        return "STREAMR ${info?.versionName ?: "unknown"} / code ${info?.longVersionCode ?: 0} / build $run"
     }
 }

@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
-    <application android:label="AK TV" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:banner="@drawable/banner_img"
+    <application android:label="STREAMR" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:banner="@drawable/banner_img"
         android:largeHeap="true" android:hardwareAccelerated="true" android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AKTV">
         <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape"

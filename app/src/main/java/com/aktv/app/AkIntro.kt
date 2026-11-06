@@ -19,17 +19,22 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 
-/** Short, skippable AK TV brand reveal with an original sound mark; no copied music or loading delay. */
+/** Short, skippable STREAMR brand reveal with an original sound mark; no copied music or loading delay. */
 class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     var onReveal: (() -> Unit)? = null
     var onDone: (() -> Unit)? = null
     private val dp get() = resources.displayMetrics.density
     // The mark the viewer sees on the launcher is the mark the app opens with.
-    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.aktv_mark_small) }.getOrNull()
+    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.streamr_mark_small) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
     private val bylinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFC4B4BA.toInt(); textAlign = Paint.Align.CENTER; textSize = 11 * dp
+        color = Accent.FAINT; textAlign = Paint.Align.CENTER; textSize = 11 * dp; letterSpacing = 0.3f
+    }
+    /** The name, drawn with the brand face, so the reveal introduces STREAMR rather than a picture alone. */
+    private val wordmarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Accent.AMBER; textAlign = Paint.Align.CENTER; textSize = 34 * dp; letterSpacing = 0.16f
+        typeface = runCatching { androidx.core.content.res.ResourcesCompat.getFont(context, R.font.sora_bold) }.getOrNull()
     }
     private val destination = RectF()
     private val soundTarget = RectF()
@@ -58,7 +63,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     init { updateAccessibilityLabel() }
 
     private fun updateAccessibilityLabel() {
-        contentDescription = "AK TV intro. Sound ${if (soundEnabled) "on" else "off"}. Tap the lower edge to toggle sound; activate elsewhere to skip."
+        contentDescription = "STREAMR by Akshansh intro. Sound ${if (soundEnabled) "on" else "off"}. Tap the lower edge to toggle sound; activate elsewhere to skip."
     }
 
     fun start() {
@@ -151,7 +156,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     override fun onDraw(canvas: Canvas) {
         val exit = ((progress - 0.90f) / 0.10f).coerceIn(0f, 1f)
         val alpha = (255 * (1f - exit)).toInt()
-        backgroundPaint.color = Color.argb(alpha, 7, 10, 18)
+        backgroundPaint.color = Color.argb(alpha, 14, 16, 20)
         canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
 
         val centerX = width / 2f
@@ -169,9 +174,12 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             it.draw(canvas)
         }
 
+        wordmarkPaint.alpha = (alpha * appear).toInt()
+        wordmarkPaint.textSize = minOf(34 * dp, width * 0.075f)
+        val wordY = minOf(destination.bottom + 52 * dp, height * 0.86f)
+        canvas.drawText("STREAMR", centerX, wordY, wordmarkPaint)
         bylinePaint.alpha = (alpha * appear * 0.86f).toInt()
-        val bylineY = minOf(destination.bottom + 25 * dp, height * 0.84f)
-        canvas.drawText("by Akshansh Sahu", centerX, bylineY, bylinePaint)
+        canvas.drawText("BY AKSHANSH", centerX, minOf(wordY + 24 * dp, height * 0.90f), bylinePaint)
         hintPaint.alpha = (alpha * 0.74f).toInt()
         canvas.drawText("Loading...", centerX, height * 0.93f, hintPaint)
         val half = 100 * dp

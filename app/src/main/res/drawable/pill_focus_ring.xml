@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Focus is a 2dp white ring with a soft glass fill, not a colour change. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="22dp"/>
+    <solid android:color="#33FFFFFF"/>
+    <stroke android:width="2dp" android:color="#F2FFFFFF"/>
+</shape>

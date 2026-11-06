@@ -1,7 +1,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
     <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_gravity="top" android:layout_marginStart="144dp">
+        android:layout_gravity="top">
         <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent"/>
         <View android:id="@+id/heroGlow" android:layout_width="480dp" android:layout_height="480dp"
             android:layout_gravity="top|end" android:layout_marginTop="-150dp" android:layout_marginEnd="100dp"
@@ -32,7 +32,7 @@
             android:lineSpacingExtra="2dp" android:includeFontPadding="false"/>
     </FrameLayout>
     <LinearLayout android:id="@+id/content" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_marginStart="144dp" android:orientation="vertical">
+        android:paddingTop="92dp" android:orientation="vertical" clipChildren="false">
         <LinearLayout android:id="@+id/topBar" android:layout_width="match_parent" android:layout_height="84dp"
             android:paddingStart="28dp" android:paddingEnd="30dp" android:orientation="horizontal" android:gravity="center_vertical"
             android:background="@drawable/home_top_scrim">
@@ -55,8 +55,8 @@
             <LinearLayout android:id="@+id/phoneNav" android:layout_width="wrap_content" android:layout_height="match_parent"
                 android:orientation="horizontal" android:gravity="center_vertical">
                 <ImageView android:id="@+id/phoneBrand" android:layout_width="48dp" android:layout_height="42dp"
-                    android:layout_marginEnd="8dp" android:src="@drawable/aktv_logo_cinematic" android:scaleType="fitCenter"
-                    android:contentDescription="AK TV logo"/>
+                    android:layout_marginEnd="8dp" android:src="@drawable/streamr_mark_small" android:scaleType="fitCenter"
+                    android:contentDescription="STREAMR"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
                 <TextView android:id="@+id/phoneV2" style="@style/Widget.AKTV.PhonePill" android:text="Always on"/>
                 <TextView android:id="@+id/phoneJio" style="@style/Widget.AKTV.PhonePill" android:text="JioTV"/>
@@ -98,47 +98,57 @@
             android:layout_weight="1" android:paddingTop="16dp" android:paddingBottom="30dp" android:clipToPadding="false" android:clipChildren="false"
             android:overScrollMode="never" android:requiresFadingEdge="none" android:fadeScrollbars="false"/>
     </LinearLayout>
-    <LinearLayout android:id="@+id/navRail" android:layout_width="144dp" android:layout_height="match_parent"
-        android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
-        android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
-        <ImageView android:id="@+id/brandMark" android:layout_width="96dp" android:layout_height="92dp" android:src="@drawable/aktv_mark_small"
-            android:scaleType="fitCenter" android:contentDescription="AK TV logo"/>
-        <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
-            android:visibility="gone" android:layout_marginTop="0dp" android:layout_marginBottom="0dp" android:textSize="11sp" android:letterSpacing="0.11"
-            android:textColor="@color/text" android:fontFamily="@font/sora_bold"/>
-        <TextView android:id="@+id/railTagline" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp" android:gravity="center" android:text="BIGGER STORIES\nBRIGHTER YOU"
-            android:textColor="@color/text_faint" android:textSize="6.5sp" android:letterSpacing="0.14"
-            android:lineSpacingExtra="1dp" android:fontFamily="@font/sora_regular" android:includeFontPadding="false"/>
-        <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live" android:drawableTop="@drawable/ic_nav_live"
-            android:nextFocusDown="@id/segV2" android:nextFocusRight="@id/rows"/>
-        <TextView android:id="@+id/segV2" style="@style/Widget.AKTV.RailItem" android:text="Always on" android:drawableTop="@drawable/ic_nav_v2"
-            android:nextFocusUp="@id/segLive" android:nextFocusDown="@id/segJio" android:nextFocusRight="@id/rows"/>
-        <TextView android:id="@+id/segJio" style="@style/Widget.AKTV.RailItem" android:text="JioTV" android:drawableTop="@drawable/ic_nav_jio"
-            android:nextFocusUp="@id/segV2" android:nextFocusDown="@id/segSites" android:nextFocusRight="@id/rows"/>
-        <TextView android:id="@+id/segSites" style="@style/Widget.AKTV.RailItem" android:text="Movies" android:drawableTop="@drawable/ic_nav_movies"
-            android:nextFocusUp="@id/segJio" android:nextFocusDown="@id/segSeries" android:nextFocusRight="@id/rows"/>
-        <TextView android:id="@+id/segSeries" style="@style/Widget.AKTV.RailItem" android:text="Series" android:drawableTop="@drawable/ic_nav_series"
-            android:nextFocusUp="@id/segSites" android:nextFocusDown="@id/segTata" android:nextFocusRight="@id/rows"/>
-        <TextView android:id="@+id/segTata" style="@style/Widget.AKTV.RailItem" android:text="TATA" android:drawableTop="@drawable/ic_nav_tata"
-            android:nextFocusUp="@id/segSeries" android:nextFocusDown="@id/searchBtn" android:nextFocusRight="@id/rows"/>
-        <TextView android:id="@+id/searchBtn" style="@style/Widget.AKTV.RailItem" android:text="Search" android:drawableTop="@drawable/ic_nav_search"
-            android:nextFocusUp="@id/segTata" android:nextFocusRight="@id/rows"/>
-        <Space android:layout_width="1dp" android:layout_height="0dp" android:layout_weight="1"/>
-        <LinearLayout android:id="@+id/navProfile" android:layout_width="match_parent" android:layout_height="58dp"
-            android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="2dp" android:paddingEnd="2dp">
-            <TextView android:id="@+id/profileAvatar" android:layout_width="34dp" android:layout_height="34dp" android:gravity="center"
-                android:background="@drawable/profile_avatar" android:text="A" android:textColor="@color/text"
-                android:textSize="14sp" android:fontFamily="@font/sora_bold"/>
-            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:layout_marginStart="8dp" android:orientation="vertical">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Good evening"
+    <!-- Top glass bar: mark and wordmark on the left, pill tabs in the centre, search and profile right. -->
+    <LinearLayout android:id="@+id/navRail" android:layout_width="match_parent" android:layout_height="92dp"
+        android:layout_gravity="top" android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="48dp" android:paddingEnd="48dp" android:background="@drawable/home_top_scrim">
+        <ImageView android:id="@+id/brandMark" android:layout_width="46dp" android:layout_height="46dp"
+            android:src="@drawable/streamr_mark_small" android:scaleType="fitCenter"
+            android:contentDescription="STREAMR"/>
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_marginStart="12dp" android:orientation="vertical">
+            <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="STREAMR" android:textSize="21sp" android:letterSpacing="0.16"
+                android:includeFontPadding="false" android:textColor="@color/amber"
+                android:fontFamily="@font/sora_bold"/>
+            <TextView android:id="@+id/railTagline" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginTop="3dp" android:text="BY AKSHANSH" android:textColor="@color/text_faint"
+                android:textSize="8sp" android:letterSpacing="0.30" android:includeFontPadding="false"
+                android:fontFamily="@font/sora_semibold"/>
+        </LinearLayout>
+        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
+        <LinearLayout android:id="@+id/navPills" android:layout_width="wrap_content" android:layout_height="52dp"
+            android:orientation="horizontal" android:gravity="center_vertical"
+            android:paddingStart="6dp" android:paddingEnd="6dp" android:background="@drawable/nav_glass">
+            <TextView android:id="@+id/segLive" style="@style/Widget.STREAMR.Pill" android:text="Live TV"
+                android:nextFocusDown="@id/rows" android:nextFocusRight="@id/segV2"/>
+            <TextView android:id="@+id/segV2" style="@style/Widget.STREAMR.Pill" android:text="Always on"
+                android:nextFocusLeft="@id/segLive" android:nextFocusRight="@id/segJio" android:nextFocusDown="@id/rows"/>
+            <TextView android:id="@+id/segJio" style="@style/Widget.STREAMR.Pill" android:text="JioTV"
+                android:nextFocusLeft="@id/segV2" android:nextFocusRight="@id/segSites" android:nextFocusDown="@id/rows"/>
+            <TextView android:id="@+id/segSites" style="@style/Widget.STREAMR.Pill" android:text="Movies"
+                android:nextFocusLeft="@id/segJio" android:nextFocusRight="@id/segSeries" android:nextFocusDown="@id/rows"/>
+            <TextView android:id="@+id/segSeries" style="@style/Widget.STREAMR.Pill" android:text="Series"
+                android:nextFocusLeft="@id/segSites" android:nextFocusRight="@id/searchBtn" android:nextFocusDown="@id/rows"/>
+        </LinearLayout>
+        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
+        <TextView android:id="@+id/searchBtn" style="@style/Widget.STREAMR.Pill" android:text="Search"
+            android:layout_marginEnd="10dp" android:nextFocusLeft="@id/segSeries" android:nextFocusDown="@id/rows"/>
+        <LinearLayout android:id="@+id/navProfile" android:layout_width="wrap_content" android:layout_height="52dp"
+            android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="6dp"
+            android:paddingEnd="16dp" android:background="@drawable/nav_glass">
+            <TextView android:id="@+id/profileAvatar" android:layout_width="36dp" android:layout_height="36dp"
+                android:gravity="center" android:background="@drawable/profile_avatar" android:text="A"
+                android:textColor="@color/abyss" android:textSize="15sp" android:fontFamily="@font/sora_bold"/>
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="10dp" android:orientation="vertical">
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Good evening"
                     android:textColor="@color/text_faint" android:textSize="8sp" android:maxLines="1" android:ellipsize="end"/>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Guest"
-                    android:textColor="@color/text" android:textSize="11sp" android:fontFamily="@font/sora_semibold"/>
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Guest"
+                    android:textColor="@color/text" android:textSize="12sp" android:fontFamily="@font/sora_semibold"/>
             </LinearLayout>
         </LinearLayout>
-        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="4.9.39"
-            android:visibility="gone" android:layout_marginTop="0dp" android:textColor="@color/text_faint" android:textSize="9sp" android:fontFamily="@font/sora_regular"/>
+        <TextView android:id="@+id/navVersion" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:visibility="gone" android:textColor="@color/text_faint" android:textSize="9sp"/>
     </LinearLayout>
 </FrameLayout>
