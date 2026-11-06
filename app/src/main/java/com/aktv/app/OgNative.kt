@@ -83,7 +83,7 @@ internal object OgNative {
         // title id - so TG's own endpoint is asked first. That is headless (no browser engine, so it also
         // works on a television), and it is the stream the site itself would play.
         for (provider in listOf(FrostProvider.FROST, FrostProvider.OUT)) {
-            val viaTg = runCatching { FrostMovies.resolve(title, provider) }.getOrDefault(emptyList())
+            val viaTg = runCatching { TgNative.resolve(title, provider) }.getOrDefault(emptyList())
             notes += "${provider.label} (the site's own player): " + if (viaTg.isEmpty()) "no source" else "${viaTg.size} source(s)"
             viaTg.forEach { found += it }
         }

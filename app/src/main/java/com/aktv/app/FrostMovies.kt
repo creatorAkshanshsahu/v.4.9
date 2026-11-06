@@ -341,6 +341,16 @@ internal class FrostResolver(
     fun cancel() { client.dispatcher.cancelAll(); OgNative.cancel() }
 }
 
+/**
+ * TG's own lookup, reachable without a player screen: the sites whose player *is* TG underneath (the
+ * theogpiratebot pages offer TG FROST and TG OUT for the same title id) ask it here instead of paying for the
+ * same work twice. One resolver, so the five-minute memo is shared with the movie player.
+ */
+internal object TgNative {
+    private val resolver = FrostResolver()
+    fun resolve(title: FrostTitle, provider: FrostProvider): List<FrostSource> = resolver.resolve(title, provider)
+}
+
 /** Independent VOD transport. Never applies Jio token rewriting, live offsets or ClearKey overrides. */
 internal object FrostHttp {
     private val base = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS)
