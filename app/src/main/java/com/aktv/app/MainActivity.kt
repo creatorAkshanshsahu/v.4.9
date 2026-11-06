@@ -147,6 +147,13 @@ class MainActivity : AppCompatActivity() {
     private var okLong = false
     private var renderedFrame = false
     private val television get() = NativePlaybackPolicy.isTelevision(this)
+
+    /**
+     * The previous run ended by itself, so this one starts with the expensive, optional things off: no
+     * entrance animation, no hero previews, no browser engine, no background prefetch. The app has to be
+     * usable after a crash, not repeat it.
+     */
+    private val safeMode by lazy { runCatching { CrashLog.report(this) != null }.getOrDefault(false) }
     private var compatiblePlayback = false
     private var playbackActive = false
     /** A channel is on screen or being resolved, so Back closes the player instead of the app. */
@@ -455,16 +462,18 @@ class MainActivity : AppCompatActivity() {
         Movies.timingListener = { event -> android.util.Log.i("AKTV-VOD", "${event.stage} ${event.elapsedMs}ms cache=${event.cacheHit}") }
         loadHomeTrending()
         // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
-        ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
+        if (!safeMode) ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
         // Records why a run died: an uncaught exception here, an unclean exit noted on the next start.
         CrashLog.install(this)
         CrashLog.beginSession(this)
         // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         watchNetworkForUpdates()
-        SiteBrowserGate.load(this, prefs.getBoolean("site_browser", SiteBrowserGate.defaultFor(this)).takeIf {
-            prefs.contains("site_browser")
-        })
+        runCatching {
+            val allow = prefs.getBoolean("site_browser", SiteBrowserGate.defaultFor(this))
+                .takeIf { prefs.contains("site_browser") }
+            SiteBrowserGate.load(this, if (safeMode) false else allow)
+        }
         ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 6_000)
         // The version in the rail is also a touch route to the update check, for the phone layout.
         findViewById<TextView>(R.id.navVersion).apply {
@@ -475,7 +484,9 @@ class MainActivity : AppCompatActivity() {
                 checkForUpdates(interactive = true)
             }
         }
-        intro.start()
+        // A television gets straight to the app: the entrance is the most expensive animation in it, and a
+        // low-memory box is where an expensive opening turns into a freeze or a close.
+        if (television || lowEnd || safeMode) intro.skip() else intro.start()
     }
 
     // ---------- helpers ----------
@@ -830,7 +841,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        loadTataChannels()
+        // Two playlists at once is a lot to ask of a TV at start-up: it loads when its tab is opened.
+        if (!television && !safeMode) loadTataChannels()
     }
 
     private fun applyTata(list: List<Channel>) {
@@ -3310,7 +3322,7 @@ class MainActivity : AppCompatActivity() {
     private fun schedulePreview(c: Channel?) {
         stopPreview()
         // no live preview on the movie tabs, while the hero is folded away, or by default on weak boxes (it runs a second decoder)
-        if (c != null && channelsTab && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
+        if (c != null && !safeMode && channelsTab && !heroCollapsed && layer.visibility != View.VISIBLE && prefs.getBoolean("previews", !lowEnd && !television)) ui.postDelayed(previewRunnable, 1200)
     }
     private fun stopPreview() {
         ui.removeCallbacks(previewRunnable); previewToken++; previewJob?.cancel(true)

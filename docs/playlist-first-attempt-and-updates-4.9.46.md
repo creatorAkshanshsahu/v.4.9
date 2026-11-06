@@ -975,3 +975,17 @@ address back in the **body**, and no request ever contains it - which is why OG'
 while TG FROST's plain embed did. `MediaSniffer` now also installs a small script hook that keeps the last few
 `fetch`/`XHR` response bodies and reads them for a `.m3u8`/`.mp4`, alongside the network-level interception
 that sees iframes and segments. Whichever way the player learns its stream, one of the two channels sees it.
+
+## 36. 4.9.79 — a television that can open the app
+
+The mark I shipped in 4.9.78 was a 1024x1024 PNG, and the app decoded it **twice** (the entrance and the rail):
+about four megabytes of bitmap each time, on a box where the whole heap can be 256 MB. The in-app copy is now a
+256x256 asset (33 kB); the full-size file is only the launcher icon, where another process decodes it.
+
+Three more things that only matter on a TV:
+
+- **the entrance is skipped** on a television, a low-memory device, or a run that follows a crash;
+- **the second playlist waits for its tab** on a TV, instead of two playlist fetches at once during start-up;
+- **safe mode**: if the previous run ended by itself (`CrashLog` has a note), this run starts with the entrance,
+  the hero previews, the browser engine, the movie prefetch and the second playlist all off. The app has to be
+  usable *after* a crash, not repeat it - and the crash note is still offered so it can be sent.
