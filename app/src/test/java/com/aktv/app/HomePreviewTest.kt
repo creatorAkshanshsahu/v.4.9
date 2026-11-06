@@ -159,7 +159,7 @@ class HomePreviewTest {
                                     R.drawable.home_hero_cinematic, R.drawable.home_nature_art,
                                     R.drawable.home_sports_art, R.drawable.home_family_art)[index % 4])
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
-                                tile.findViewById<TextView>(R.id.posterMeta).text = "Sample artwork"
+                                tile.findViewById<TextView>(R.id.posterMeta).text = if (movies) "MOVIE" else "SERIES"
                             } else {
                                 val channel = if (isSony) sonyShelf.getOrNull(index) else null
                                 val cardColor = colors[index % 5]

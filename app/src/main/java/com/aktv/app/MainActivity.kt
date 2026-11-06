@@ -3581,9 +3581,12 @@ class MainActivity : AppCompatActivity() {
                         v.findViewById<TextView>(R.id.posterName).text = t.m.name
                         img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
                         v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
-                        v.findViewById<TextView>(R.id.posterMeta).text =
-                            (listOf(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
-                                .filterNotNull()).joinToString("  ·  ")
+                        // The tile's amber line is the kind, as on the site; year and rating stay in the
+                        // accessibility label instead of competing with the eyebrow.
+                        v.findViewById<TextView>(R.id.posterMeta).text = if (t.m.isSeries) "SERIES" else "MOVIE"
+                        v.contentDescription =
+                            (listOf(t.m.name, t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
+                                .filterNotNull()).joinToString(" · ")
                         v.findViewById<TextView>(R.id.posterRank).apply {
                             visibility = if (i < 10 && row.title.startsWith("Trending", true)) View.VISIBLE else View.GONE
                             text = (i + 1).toString()

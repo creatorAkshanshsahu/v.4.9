@@ -194,20 +194,17 @@ internal object HomeChrome {
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
         } else {
-            val width = ((if (compact) 100 else 112) * dp).toInt()
+            // 2:3 artwork with the copy inside it: the site's rail cards carry the kind eyebrow and the
+            // title over a bottom scrim, and the tile is the artwork — no plate, no border, no caption row.
+            val width = ((if (compact) 112 else 148) * dp).toInt()
             lp.width = width
-            val contentWidth = (width - (24 * dp).toInt()).coerceAtLeast((72 * dp).toInt())
-            tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = contentWidth
-            tile.findViewById<ImageView>(R.id.poster)?.let { posterView ->
-                val box = posterView.parent as View
-                val posterWidth = contentWidth - (8 * dp).toInt()
-                box.layoutParams.apply { this.width = posterWidth; height = (posterWidth * 1.5f).toInt() }
-            }
+            lp.height = (width * 1.5f).toInt()
+            tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = width
             tile.findViewById<TextView>(R.id.posterRank)?.apply {
                 textSize = if (compact) 43f else 62f
-                layoutParams.height = ((contentWidth - (8 * dp).toInt()) * 1.5f).toInt()
+                layoutParams.height = (width * 1.5f).toInt()
             }
-            tile.findViewById<TextView>(R.id.posterTitle)?.textSize = if (compact) 9f else 11f
+            tile.findViewById<TextView>(R.id.posterTitle)?.textSize = if (compact) 10f else 12f
             tile.findViewById<TextView>(R.id.posterMeta)?.textSize = if (compact) 8f else 9f
         }
     }

@@ -1268,3 +1268,17 @@ tests — so the bar, hero, gutters and rail rhythm move together:
 Deliberate departures, because the app is not the demo: the shelves keep real channels and titles rather
 than the ten sample rows, `JioTV` stays as a fifth tab, and the LIVE/progress accents stay amber — the
 reference uses `--live` red there, but red badges were explicitly ruled out.
+
+## 51. Rail cards carry their own copy — 5.3.3 (code 112)
+
+The reference makes the artwork the card: a 2:3 still, a bottom-up scrim, an amber kind eyebrow in small
+bold caps, the title in Sora bold, nothing else. The app had a plate under the picture with a 1dp border, a
+caption row outside it, and a year/rating line doing duty as the subtitle.
+
+- `item_poster.xml` is now the artwork: rounded 14dp, clipped, one `ImageView`, one scrim panel with
+  `posterMeta` (amber, 9–10sp, tracked) above `posterTitle` (Sora bold, 2 lines). The plate and its border
+  are gone; the focus ring stays white 3dp.
+- The tile is sized by its width — `112dp` compact, `148dp` full, height always 1.5× — so the rail rhythm
+  matches the site's `w-48 aspect-[2/3]`.
+- The eyebrow shows the kind (`MOVIE`/`SERIES`); year and rating moved into the tile's content description
+  rather than shrinking the title to make room for three competing lines.
