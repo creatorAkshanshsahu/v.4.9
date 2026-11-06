@@ -24,23 +24,48 @@ internal object FrostPreflight {
         // Ask the way the player will ask: same client, same per-source headers.
         val call = FrostHttp.client(source, client).newCall(builder.build())
         call.execute().use { response ->
-            when {
-                response.code == 401 || response.code == 403 || response.code == 404 || response.code == 410 -> Verdict.DEAD
-                !response.isSuccessful -> Verdict.UNKNOWN
-                source.format == VodFormat.HLS -> {
-                    val body = response.body?.byteStream()?.let { input ->
-                        val buffer = ByteArray(2_048); val read = input.read(buffer)
-                        if (read > 0) String(buffer, 0, read, Charsets.UTF_8) else ""
-                    }.orEmpty()
-                    // An HLS answer that is not a playlist is a dead end wearing a 200.
-                    if (body.contains("#EXTM3U", true) || body.contains("#EXT-X-", true)) Verdict.ALIVE else Verdict.DEAD
+            // Only a playlist has to be read: a file is proven by its answer, and 8 KB of a film is bandwidth.
+            val body = if (response.isSuccessful && source.format == VodFormat.HLS) response.body?.byteStream()?.let { input ->
+                // One read() is not the whole prefix: a playlist's `#EXTM3U` can arrive in the second one.
+                val buffer = ByteArray(PREFIX_BYTES)
+                var total = 0
+                while (total < buffer.size) {
+                    val count = input.read(buffer, total, buffer.size - total)
+                    if (count <= 0) break
+                    total += count
                 }
-                source.format == VodFormat.MP4 -> Verdict.ALIVE
-                else -> Verdict.UNKNOWN
-            }
+                String(buffer, 0, total, Charsets.UTF_8)
+            }.orEmpty() else ""
+            verdict(response.code, source.format, body, response.header("Content-Type").orEmpty())
         }
     } catch (_: Exception) {
         Verdict.UNKNOWN
+    }
+
+    /** Enough of an answer to recognise a playlist, and no more. */
+    const val PREFIX_BYTES = 8 * 1024
+
+    /**
+     * What one answer proves, given the format that was asked for.
+     *
+     * The case that made this a decision rather than a status check: an HLS address that answers `200`
+     * with a **sprite sheet** - a real `#EXTM3U` whose media lines are `.jpg` thumbnails. The player
+     * starts it, fails on the first "segment", and the viewer loses the provider in under a second. Such
+     * an answer is the one thing a 200 can be here that is definitely not video.
+     */
+    fun verdict(status: Int, format: VodFormat, body: String, contentType: String = ""): Verdict = when {
+        status in listOf(401, 403, 404, 410) -> Verdict.DEAD
+        status !in 200..299 -> Verdict.UNKNOWN
+        format == VodFormat.HLS -> when {
+            VodPreflight.isImagePlaylist(body) -> Verdict.DEAD
+            body.contains("#EXTM3U", true) || body.contains("#EXT-X-", true) -> Verdict.ALIVE
+            // A page where a playlist should be is a dead end wearing a 200.
+            body.trimStart().startsWith("<") || contentType.contains("html", true) -> Verdict.DEAD
+            body.isBlank() -> Verdict.UNKNOWN
+            else -> Verdict.UNKNOWN
+        }
+        format == VodFormat.MP4 -> Verdict.ALIVE
+        else -> Verdict.UNKNOWN
     }
 
     /** Everything but the addresses that answered "this does not exist". */

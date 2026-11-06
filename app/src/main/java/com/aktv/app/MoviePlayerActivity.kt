@@ -107,6 +107,8 @@ class MoviePlayerActivity : Activity() {
     private lateinit var heading: TextView
     private lateinit var episodeLine: TextView
     private lateinit var timeLine: TextView
+    /** One container correction per address: a mislabelled source is retried once, never in a loop. */
+    private val containerRetried = HashSet<String>()
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
     private lateinit var nextButton: TextView
@@ -360,6 +362,7 @@ class MoviePlayerActivity : Activity() {
         captureProgress()
         recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); probed.clear(); diagnostics = PlaybackDiagnostics()
         failed = false; lastFailure = ""; compatible = false; startupAt = SystemClock.elapsedRealtime()
+        containerRetried.clear()
         if (selected == null) resolve(nextProvider)
         else {
             generation++; lookup?.cancel(true); resolver.cancel()
@@ -565,6 +568,9 @@ class MoviePlayerActivity : Activity() {
                     return@post
                 }
                 if (startupAt == 0L) startupAt = SystemClock.elapsedRealtime()
+                // A source that dies on its first bytes was labelled wrong, not dead: ask for the same
+                // address as the other container before spending the viewer's next provider on it.
+                if (problem.http == null && retryOtherContainer(source, problem)) return@post
                 when {
                     problem.family == PlaybackDiagnostics.Family.DECODER && retrySoftware(source) -> Unit
                     sourceRecovery.refreshNotFound(source.provider, problem.http) ->
@@ -574,6 +580,32 @@ class MoviePlayerActivity : Activity() {
                 }
             }
         }
+    }
+
+    /**
+     * The same address, opened as the other container, once.
+     *
+     * TG OUT has served an HLS master labelled `type: "mp4"`; Media3 then feeds a playlist to the MP4
+     * extractor, which rejects it on the first bytes. Without this the app burned the source in under a
+     * second and moved on - the viewer saw a stream found and instantly skipped.
+     */
+    private fun retryOtherContainer(source: FrostSource, problem: PlaybackDiagnostics.Problem): Boolean {
+        if (!foreground || failed) return false
+        val fast = attemptAt > 0 && SystemClock.elapsedRealtime() - attemptAt <= 4_000
+        val parseFailure = (problem.code ?: 0) in 3_001..3_999 ||
+            problem.detail.contains("ParserException", true) ||
+            problem.detail.contains("UnrecognizedInputFormat", true) ||
+            problem.detail.contains("ContainerUnsupported", true)
+        if (!fast || !parseFailure) return false
+        val other = when (source.format) {
+            VodFormat.HLS -> VodFormat.MP4
+            VodFormat.MP4 -> VodFormat.HLS
+            VodFormat.DASH -> return false
+        }
+        if (!containerRetried.add("${source.identity}|${source.format.name}")) return false
+        lastFailure = "Retrying this source as ${other.name} · the stream was labelled ${source.format.name}."
+        ui.post { if (foreground && !failed) startSource(source.withFormat(other), compatible) }
+        return true
     }
 
     private fun retrySoftware(source: FrostSource): Boolean {

@@ -48,6 +48,9 @@ internal class FrostSource(
     val subtitles: List<FrostSubtitle>, val credentialOrigin: String = url, val scraperName: String = ""
 ) {
     val label get() = listOf(provider.label, scraperName, quality, language, format.name).filter { it.isNotBlank() }.joinToString(" · ")
+    /** The same address asked for as the other container, for a label this provider got wrong. */
+    fun withFormat(value: VodFormat) =
+        FrostSource(provider, identity, url, value, quality, language, hevc, headers, subtitles, credentialOrigin, scraperName)
     override fun toString() = "FrostSource(${provider.name}, ${format.name}, $quality)"
 }
 
@@ -92,14 +95,25 @@ internal object FrostProtocol {
     private fun text(value: Any?, max: Int = 60): String = (value as? String).orEmpty()
         .replace(Regex("[\\p{Cntrl}]+"), " ").trim().take(max)
 
-    private fun format(type: String, url: String): VodFormat? = when (type.lowercase(Locale.US)) {
-        "dash", "mpd", "application/dash+xml" -> VodFormat.DASH
-        "hls", "m3u8", "application/x-mpegurl", "application/vnd.apple.mpegurl" -> VodFormat.HLS
-        "mp4", "video/mp4" -> VodFormat.MP4
-        "", "video" -> when (URI(url).path.substringAfterLast('.', "").lowercase(Locale.US)) {
-            "mpd" -> VodFormat.DASH; "m3u8" -> VodFormat.HLS; "mp4" -> VodFormat.MP4; else -> null
+    /**
+     * The container the **address** names decides, because a label is a claim and the path is a fact.
+     *
+     * TG OUT has been seen labelling an HLS master `type: "mp4"`; trusting the label handed Media3 an
+     * MP4 extractor, which rejects a playlist on its first bytes and moves the viewer to the next
+     * provider in under a second - "the stream is found, then skipped instantly".
+     */
+    private fun format(type: String, url: String): VodFormat? {
+        when (runCatching { URI(url).path.orEmpty().substringAfterLast('.', "").lowercase(Locale.US) }.getOrDefault("")) {
+            "mpd" -> return VodFormat.DASH
+            "m3u8", "m3u" -> return VodFormat.HLS
+            "mp4", "m4v" -> return VodFormat.MP4
         }
-        else -> null
+        return when (type.lowercase(Locale.US)) {
+            "dash", "mpd", "application/dash+xml" -> VodFormat.DASH
+            "hls", "m3u8", "application/x-mpegurl", "application/vnd.apple.mpegurl" -> VodFormat.HLS
+            "mp4", "video/mp4", "video" -> VodFormat.MP4
+            else -> null
+        }
     }
 
     private fun headers(value: JSONObject?): Map<String, String> = buildMap {
@@ -234,47 +248,33 @@ internal class FrostResolver(
     }
 
     private fun sitePlayback(title: FrostTitle, provider: FrostProvider): FrostSource? {
-        val context = MediaSniffer.appContext ?: return null
-        var media: String? = null
-        // The page the stream was taken from is the Referer the CDN expects: a movie host that serves the
-        // manifest to one page refuses it when the app asks from anywhere else, and a refused manifest is
-        // a player that buffers forever instead of an error anyone can read.
-        var sourcePage = "${FrostProtocol.SITE}/"
-        val deadline = System.currentTimeMillis() + 45_000
+        // The page a viewer opens is read as text: the address it plays is in what it serves. No browser
+        // engine, and the page that named the address becomes the Referer the CDN expects.
         for ((page, referer) in sitePages(title, provider)) {
-            if (System.currentTimeMillis() > deadline) break
-            sourcePage = referer ?: page
-            media = try { MediaSniffer.find(context, page, referer) } catch (_: Exception) { null }
-            if (media != null) break
+            val hits = try { PageCrawl.crawl(page, referer ?: page, 9_000) } catch (_: Exception) { emptyList() }
+            for (hit in hits) {
+                val source = FrostSource(
+                    provider = provider,
+                    identity = "site:${provider.id}:${title.id}:${hit.url.hashCode()}",
+                    url = hit.url,
+                    format = hit.format,
+                    quality = "",
+                    language = "",
+                    hevc = null,
+                    headers = mapOf(
+                        "User-Agent" to TgHttp.USER_AGENT,
+                        "Referer" to hit.page,
+                        "Origin" to (PageCrawl.origin(hit.page) ?: FrostProtocol.SITE)
+                    ),
+                    subtitles = emptyList(),
+                    credentialOrigin = hit.url,
+                    scraperName = "site player"
+                )
+                // The page named it; that is not the same as the address still answering.
+                if (FrostPreflight.check(source) != FrostPreflight.Verdict.DEAD) return source
+            }
         }
-        val chosen = media ?: return null
-        val format = when (chosen.substringBefore('?').substringAfterLast('.', "").lowercase(java.util.Locale.US)) {
-            "m3u8" -> VodFormat.HLS
-            "mp4" -> VodFormat.MP4
-            else -> return null
-        }
-        val sniffed = FrostSource(
-            provider = provider,
-            identity = "site:${provider.id}:${title.id}:${chosen.hashCode()}",
-            url = chosen,
-            format = format,
-            quality = "",
-            language = "",
-            hevc = null,
-            headers = mapOf(
-                "User-Agent" to TgHttp.USER_AGENT,
-                "Referer" to sourcePage,
-                "Origin" to sourcePage.substringBefore("/", "https://").let { scheme ->
-                    val rest = sourcePage.removePrefix("$scheme://")
-                    "$scheme://${rest.substringBefore("/")}"
-                }
-            ),
-            subtitles = emptyList(),
-            credentialOrigin = chosen,
-            scraperName = "site player"
-        )
-        // The page named it; that is not the same as the address still answering.
-        return sniffed.takeIf { FrostPreflight.check(it) != FrostPreflight.Verdict.DEAD }
+        return null
     }
 
     /** No bundled sources, browser context, global cookie jar, or cached credentials. */
@@ -284,8 +284,10 @@ internal class FrostResolver(
         if (provider == FrostProvider.OG) return OgNative.resolve(title, fresh)
         synchronized(memo) { memo[memoKey(title, provider)] }
             ?.takeIf { !fresh && it.until > System.currentTimeMillis() }?.let { return it.sources }
+        val watchPage = sitePages(title, provider).firstOrNull { it.first.contains("/watch/") }?.first
+            ?: "${FrostProtocol.SITE}/"
         val direct = try {
-            direct(title, provider)
+            withSiteReferer(direct(title, provider), watchPage)
         } catch (error: FrostResolveException) {
             // The site itself would have moved on to its next server; so do we, before telling anyone it failed.
             sitePlayback(title, provider)?.let { sniffed ->
@@ -308,6 +310,27 @@ internal class FrostResolver(
         val usable = FrostPreflight.keep(direct)
         if (usable.isEmpty() && direct.isNotEmpty()) throw FrostResolveException(kind = "stale")
         return usable
+    }
+
+    /**
+     * A page that serves a manifest to a player refuses it to a request that names no page.
+     *
+     * These CDNs check the `Referer`, and the app's own endpoint answer carries none. A browser on
+     * `tgfrost.lovable.app` always sends one, so the app sends the page the viewer would be on. Only
+     * `referer`/`origin` are added: a source's own authorization, cookie and `x-` headers stay exactly as
+     * it published them, and none of them is ever logged.
+     */
+    private fun withSiteReferer(sources: List<FrostSource>, page: String): List<FrostSource> {
+        if (sources.isEmpty()) return sources
+        val origin = PageCrawl.origin(page) ?: FrostProtocol.SITE
+        return sources.map { source ->
+            if (source.headers.keys.any { it.equals("referer", true) }) source
+            else FrostSource(
+                source.provider, source.identity, source.url, source.format, source.quality, source.language,
+                source.hevc, source.headers + mapOf("referer" to page, "origin" to origin), source.subtitles,
+                source.credentialOrigin, source.scraperName
+            )
+        }
     }
 
     private fun remember(title: FrostTitle, provider: FrostProvider, sources: List<FrostSource>) {

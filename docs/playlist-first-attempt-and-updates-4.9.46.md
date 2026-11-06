@@ -1116,3 +1116,32 @@ built to that composition rather than to an interpretation of it.
 - **Player**: the watch screen's chrome - amber eyebrow, Sora title, `elapsed / duration` refreshed from the player tick,
   then Back and one glass pill row (change source, audio & subtitles, retry, playback details). Play in the hero starts a
   film immediately; a series opens its episodes instead of pretending to play a title with no episode selected.
+
+## 46. 5.2.0 — the container is a fact, the label is a claim
+
+Three failures had one cause between them: a source was trusted by what it was called, and a 200 was
+trusted as proof of video.
+
+- **TG OUT "found it and skipped it".** Its HLS master is labelled `type: "mp4"` in the endpoint's own
+  answer. The app believed the label, handed the playlist to Media3's MP4 extractor, which rejected it on
+  the first bytes - and the player moved to the next provider in under a second. `FrostProtocol` now
+  reads the **address** first (`.m3u8`/`.mpd`/`.mp4` decide), and only falls back to the label when the
+  path says nothing. The player also gets one container correction per address: a source that dies on its
+  first bytes inside four seconds is reopened as the other container before it is written off.
+- **A 200 is not video.** TG OUT's first "720p" answer for one title is a seek-bar sprite sheet - a real
+  `#EXTM3U` whose media lines are `.jpg` thumbnails. `FrostPreflight.verdict` now calls that dead, along
+  with an HTML page where a playlist should be, and reads a full 8 KB before deciding instead of a single
+  `read()` that could miss `#EXTM3U` in the second chunk. Anything unproven stays in the list: a CDN that
+  merely dislikes the probe is still playable.
+- **The manifest was asked for by nobody.** These CDNs check `Referer`; the app's own endpoint answer
+  carries none, so the request looked like it came from nowhere. Every source from TG FROST / TG OUT is
+  now stamped with the page a viewer would be on (`/watch/movie/{id}`) as `Referer` and its origin as
+  `Origin`. Nothing secret is added or logged - a source's own authorization, cookie and `x-` headers stay
+  exactly as published, and their cross-origin scoping is unchanged.
+
+**OG without a browser engine.** OG's servers build their player with script, and after the engine was
+removed its page path answered "nothing found", which left OG playing TG's streams under its own name.
+`PageCrawl` reads those pages over HTTP: it follows frames up to three hops, reads JSON fields, `<source>`
+targets and bare addresses (protocol-relative included), keeps the page each address came from as its
+`Referer`, and is bounded in pages, bytes and time. A playlist body is itself a hit. DASH is excluded
+unless asked for, because from these hosts it means Widevine.

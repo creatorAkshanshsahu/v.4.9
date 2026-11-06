@@ -100,37 +100,35 @@ internal object OgNative {
             }
             if (found.size >= MAX_CANDIDATES) break
         }
-        // No page named an address, because these players build it in script. So run the pages the way a
-        // browser does and watch the requests they make - the site's own player first, then its servers.
-        val ctx = appContext
-        if (found.isEmpty() && ctx != null) {
-            // The site's player is asked by the same server names its own links use. Loaded directly, so the
-            // page navigates as it does for a viewer and the embed inside it gets the site as its Referer.
+        // No page named an address in its markup, because these players also build one in script. The
+        // address is still in what the page serves - in a JSON field, an embedded player, or a manifest -
+        // so the pages are crawled over HTTP: the site's own player first, then its servers, in its order.
+        if (found.isEmpty()) {
             for (key in serverKeys()) {
-                val media = runCatching { MediaSniffer.find(ctx, playerUrl(title, key), null, 12_000) }.getOrNull()
-                notes += "server $key: " + (if (media == null) MediaSniffer.lastSummary else "manifest found")
-                if (media != null) {
+                val hits = runCatching { PageCrawl.crawl(playerUrl(title, key), "$SITE/", 9_000) }
+                    .getOrDefault(emptyList())
+                notes += "server $key: " + if (hits.isEmpty()) "no media address on its page" else "${hits.size} address(es)"
+                if (hits.isNotEmpty()) {
                     preferredServer = key
-                    sourceOf(media, "player-$key", "OG $key")?.let { found += it }
+                    hits.forEach { hit -> sourceOf(hit.url, "player-$key", "OG $key", hit.page)?.let { found += it } }
                     break
                 }
             }
-            if (found.isEmpty()) {
-                // A viewer will not wait a minute: the whole search gets a deadline, and the servers are
-                // asked in the site's own order until it expires.
-                val deadline = System.currentTimeMillis() + 45_000
-                for (server in SERVERS) {
-                    if (System.currentTimeMillis() > deadline) { notes += "search deadline reached"; break }
-                    val hit = runCatching { MediaSniffer.find(ctx, server.embed(title), "$SITE/", 14_000) }.getOrNull()
-                    notes += "${server.label} player: " + (if (hit == null) MediaSniffer.lastSummary else "manifest found")
-                    if (hit != null) {
-                        sourceOf(hit, server.key, "OG ${server.label}")?.let { found += it }
-                        break
-                    }
+        }
+        if (found.isEmpty()) {
+            // A viewer will not wait a minute: the whole search gets a deadline, and the servers are
+            // asked in the site's own order until it expires.
+            val deadline = System.currentTimeMillis() + 45_000
+            for (server in SERVERS) {
+                if (System.currentTimeMillis() > deadline) { notes += "search deadline reached"; break }
+                val hits = runCatching { PageCrawl.crawl(server.embed(title), "$SITE/", 12_000) }
+                    .getOrDefault(emptyList())
+                notes += "${server.label} player: " + if (hits.isEmpty()) "no media address on its page" else "${hits.size} address(es)"
+                if (hits.isNotEmpty()) {
+                    hits.forEach { hit -> sourceOf(hit.url, server.key, "OG ${server.label}", hit.page)?.let { found += it } }
+                    break
                 }
             }
-        } else if (found.isEmpty()) {
-            notes += "site player: no browser engine on this device"
         }
         report = notes.joinToString("\n")
         outcome = notes.joinToString(" · ").take(320)
@@ -154,19 +152,33 @@ internal object OgNative {
         fetch: (String) -> String? = ::fetch
     ): List<FrostSource> {
         val page = server.embed(title).takeIf { it.startsWith("https://", true) } ?: return emptyList()
-        val body = fetch(page) ?: return emptyList()
-        val addresses = LinkedHashSet<String>()
-        addresses += candidates(body, page)
-        // A server that wraps another one names it in an iframe; one hop is enough to reach the media page.
-        iframe(body)?.let { nested ->
-            absolute(nested, page)?.let { url -> fetch(url)?.let { inner -> addresses += candidates(inner, url) } }
+        val found = ArrayList<FrostSource>()
+        val seen = HashSet<String>()
+        var queue = ArrayDeque<Pair<String, String?>>()
+        queue.add(page to "$SITE/")
+        // A server that wraps another one names it in a frame; three hops reach the media page and no more.
+        repeat(PageCrawl.MAX_DEPTH) {
+            if (found.isNotEmpty() || queue.isEmpty() || seen.size >= 6) return@repeat
+            val nested = ArrayDeque<Pair<String, String?>>()
+            for ((url, referer) in queue) {
+                if (!seen.add(url)) continue
+                val body = try { fetch(url) } catch (_: Exception) { null } ?: continue
+                for (address in candidates(body, url)) {
+                    sourceOf(address, server.key, "OG ${server.label}", url)?.let { found += it }
+                }
+                if (found.isNotEmpty()) break
+                for (frame in PageCrawl.frames(body, url)) nested.add(frame to url)
+            }
+            queue = nested
         }
-        return addresses.mapNotNull { url -> sourceOf(url, server.key, "OG ${server.label}") }
+        return found.distinctBy { it.url }
     }
 
     /** One media address, as a source the native player can take. */
-    private fun sourceOf(url: String, key: String, label: String): FrostSource? {
+    private fun sourceOf(url: String, key: String, label: String, referer: String? = null): FrostSource? {
         val format = format(url) ?: return null
+        val page = referer?.takeIf { it.startsWith("https://", true) } ?: "$SITE/"
+        val origin = PageCrawl.origin(page) ?: SITE
         return FrostSource(
             provider = FrostProvider.OG,
             identity = "og:$key:${url.hashCode()}",
@@ -175,7 +187,7 @@ internal object OgNative {
             quality = "",
             language = "",
             hevc = null,
-            headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to "$SITE/", "Origin" to SITE),
+            headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to page, "Origin" to origin),
             subtitles = emptyList(),
             credentialOrigin = url,
             scraperName = label
@@ -255,10 +267,10 @@ internal object OgNative {
         iframeTag.find(body)?.groupValues?.getOrNull(1)?.takeIf { it.startsWith("https://", true) }
 
     /** HLS and MP4 only: a DASH manifest from these hosts is Widevine, which this app does not touch. */
-    internal fun format(url: String): VodFormat? = when (url.substringBefore('?').substringAfterLast('.', "").lowercase()) {
-        "m3u8" -> VodFormat.HLS
-        "mp4" -> VodFormat.MP4
-        else -> null
+    internal fun format(url: String): VodFormat? = when (PageCrawl.format(url)) {
+        VodFormat.HLS -> VodFormat.HLS
+        VodFormat.MP4 -> VodFormat.MP4
+        else -> null // A DASH manifest from these hosts means Widevine.
     }
 
     private fun absolute(value: String, page: String): String? = try {
@@ -270,9 +282,9 @@ internal object OgNative {
         null
     }
 
-    private val bareMedia = Regex("""(?i)https?://[^\s"'<>\\]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?""")
+    private val bareMedia = Regex("""(?i)(?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|m3u|mp4|m4v)(?:\?[^\s"'<>\\]*)""")
     private val keyedMedia = Regex(
-        """(?i)"(?:file|playlist|source|src|hls|url)"\s*:\s*"(https?://[^"\s]+)""""
+        """(?i)"(?:file|playlist|source|src|hls|url|link|stream)"\s*:\s*"((?:https?:)?//[^"\s]+)""""
     )
     private val iframeTag = Regex("""(?i)<iframe[^>]+src\s*=\s*["']([^"']+)["']""")
 }

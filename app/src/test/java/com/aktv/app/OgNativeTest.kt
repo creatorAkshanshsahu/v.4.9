@@ -78,9 +78,11 @@ class OgNativeTest {
         assertEquals("https://cdn.example.test/hls/index.m3u8?token=x", only.url)
         assertEquals(VodFormat.HLS, only.format)
         assertTrue(only.label.contains("OG Vidstuck"))
-        // The media host is asked for the stream with a browser identity and the site as the referrer.
+        // The media host is asked for the stream with a browser identity, and with the page that named
+        // the address as the Referer - that page, not the site root, is what the CDN was serving.
         assertEquals(TgHttp.USER_AGENT, only.headers["User-Agent"])
-        assertEquals(OgNative.SITE + "/", only.headers["Referer"])
+        assertEquals("https://inner.example.test/e/1", only.headers["Referer"])
+        assertEquals("https://inner.example.test", only.headers["Origin"])
     }
 
     @Test fun `a server with nothing to play contributes nothing`() {
