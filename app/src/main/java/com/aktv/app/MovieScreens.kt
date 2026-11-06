@@ -40,7 +40,7 @@ class DetailActivity : Activity() {
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
     private val fBody by lazy { ResourcesCompat.getFont(this, R.font.manrope) ?: Typeface.DEFAULT }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
-    private val pageAccent get() = if (title.isSeries) Accent.ION else Accent.SIGNAL
+    private val pageAccent get() = if (title.isSeries) Accent.AMBER_LIGHT else Accent.AMBER
 
     private lateinit var title: Movies.Title
     private var episodes = listOf<Movies.Episode>(); private var seasons = listOf<Int>(); private var season = 1

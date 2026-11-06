@@ -95,6 +95,9 @@ class PlayerPreviewTest {
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoProgress).apply { visibility = View.VISIBLE }
+            // Production tints the live progress line amber; the preview inherited the theme's red.
+            layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress)
+                .progressTintList = android.content.res.ColorStateList.valueOf(0xFFE0A24B.toInt())
             layer.findViewById<TextView>(R.id.infoScheduleNext).apply {
                 text = "NEXT  ·  Post-match coverage"
                 visibility = View.VISIBLE

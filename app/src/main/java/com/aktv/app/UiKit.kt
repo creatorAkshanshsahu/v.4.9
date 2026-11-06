@@ -122,7 +122,7 @@ object Accent {
 
     fun from(d: Drawable, cb: (Int) -> Unit) {
         val bmp = (d as? BitmapDrawable)?.bitmap
-        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(CRIMSON_BRIGHT); return }
+        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(AMBER); return }
         Palette.from(bmp).maximumColorCount(16).generate { p ->
             val sw = p?.vibrantSwatch ?: p?.lightVibrantSwatch ?: p?.darkVibrantSwatch ?: p?.dominantSwatch
             cb(normalize(sw?.rgb))

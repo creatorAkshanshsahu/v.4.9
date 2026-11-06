@@ -156,7 +156,7 @@ class MoviePlayerActivity : Activity() {
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
-            setPlayedColor(Accent.LIVE); setScrubberColor(Accent.TEXT)
+            setPlayedColor(Accent.AMBER); setScrubberColor(Accent.TEXT)
             setBufferedColor(0x4DFFFFFF); setUnplayedColor(0x29FFFFFF)
         }
 
@@ -249,7 +249,7 @@ class MoviePlayerActivity : Activity() {
         })
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         spinner = ProgressBar(this).apply {
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.ION else Accent.SIGNAL)
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.AMBER_LIGHT else Accent.AMBER)
         }
         root.addView(spinner, FrameLayout.LayoutParams(px(48), px(48), Gravity.CENTER))
         setContentView(root)

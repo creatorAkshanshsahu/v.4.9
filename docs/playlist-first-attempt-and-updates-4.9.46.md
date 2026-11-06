@@ -1226,6 +1226,15 @@ drawing an animation, a sound mark, and a delayed fade-in for the shelf undernea
 - **The oversized player logo is gone.** The 104×90 mark in the top-left of the live screen faded in with
   the chrome — seen mid-fade it reads as half a logo. The reference watch screen has no such block; the
   channel's own logo lives in the info card, where it belongs.
+- **The launcher is five bitmaps now, not one stretched one.** A `layer-list` bitmap is drawn at its own
+  pixel size, so `streamr_mark` (461×512) sat inside a 48–192px icon at nearly ten times its size: the
+  launcher showed the middle of the mark, which is the "half logo" that was reported. The `anydpi`
+  fallback is gone, replaced by `mipmap-mdpi…xxxhdpi/ic_launcher.png` with the mark at 74% of the icon,
+  centred on `#08090C`, and the adaptive foreground is inset 6dp inside its safe zone.
+- **Red is out of the chrome.** `Accent.SIGNAL`/`LIVE` were the fallback accent for every channel without
+  a sampled logo, so tab underlines, the hero glow, VOD accents, the live progress line and the programme
+  labels were all red-orange. They now resolve to `AMBER`/`AMBER_LIGHT`; sampled logo hues still vary
+  inside the amber arc. The only remaining red constant is unused by any surface.
 - **`banner_img.png` is STREAMR again.** The shipped asset still said "AK TV / LIVE. FILMS. YOUR WORLD."
   in red; it is now the mark plus an amber Sora wordmark on `#0B0C10`.
 

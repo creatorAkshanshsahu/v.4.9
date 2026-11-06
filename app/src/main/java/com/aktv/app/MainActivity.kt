@@ -385,7 +385,7 @@ class MainActivity : AppCompatActivity() {
         val track = ColorStateList.valueOf(Color.argb(52, 255, 52, 72))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
         // Programme progress reads as a lacquered crimson bar, not the old mint.
-        val played = ColorStateList.valueOf(Accent.CRIMSON_BRIGHT)
+        val played = ColorStateList.valueOf(Accent.AMBER)
         heroProgress.progressTintList = played; infoProgress.progressTintList = played
 
         // search pill in the top bar
@@ -559,7 +559,7 @@ class MainActivity : AppCompatActivity() {
     private val vodTab get() = tab == 3 || tab == 4
     private fun vodRowsFor(t: Int) = if (t == 3 || t == 4) vodRows[t - 3] else emptyList<Row>()
 
-    private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2, 5 -> Accent.SIGNAL; else -> Accent.INDIGO }
+    private fun sectionAccent() = if (tab == 1) Accent.AMBER_LIGHT else Accent.AMBER
 
     /**
      * One pill, three states: the active section is a white pill with dark type, focus is a glass fill
@@ -663,7 +663,7 @@ class MainActivity : AppCompatActivity() {
         while (p != null) { if (p === parent) return true; p = p.parent }
         return false
     }
-    private fun accentOf(key: String) = accents[key] ?: Accent.SIGNAL
+    private fun accentOf(key: String) = accents[key] ?: Accent.AMBER
     private fun extractAccent(key: String, d: android.graphics.drawable.Drawable, cb: (Int) -> Unit) {
         accents[key]?.let { cb(it); return }
         Accent.from(d) { c -> accents[key] = c; cb(c) }
@@ -1217,8 +1217,8 @@ class MainActivity : AppCompatActivity() {
                 heroLogo.alpha = 1f
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.text = if (t.c.v2) "24/7" else "LIVE NOW"
-                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.ION else Accent.LIVE)
-                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
+                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.AMBER_LIGHT else Accent.AMBER)
+                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.AMBER_LIGHT else Accent.AMBER)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
                 heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
@@ -1289,7 +1289,7 @@ class MainActivity : AppCompatActivity() {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
                 heroSubheading.text = "A clearer view of what’s next."
                 heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.streamr_mark)
-                glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
+                glowHero(Accent.AMBER, Accent.AMBER_DEEP); scheduleHeroGuide(null)
             }
         }
     }
@@ -1477,7 +1477,7 @@ class MainActivity : AppCompatActivity() {
         }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val badge = TextView(this).apply {
-            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.ION else Accent.SIGNAL)
+            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.AMBER_LIGHT else Accent.AMBER)
             letterSpacing = 0.08f
         }
         val time = TextView(this).apply {
