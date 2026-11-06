@@ -89,19 +89,19 @@ class HomePreviewTest {
             for (id in listOf(R.id.segLive, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0x33E11D2E else Color.TRANSPARENT, 12f).apply {
+                view.background = Ui.pill(1f, if (selected) Accent.TEXT else Color.TRANSPARENT, 22f).apply {
                     if (selected) setStroke(2, Accent.SIGNAL)
                 }
-                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
+                view.setTextColor(if (selected) Accent.ABYSS else Accent.DIM)
                 view.compoundDrawableTintList = android.content.res.ColorStateList.valueOf(if (selected) Accent.SIGNAL else Accent.DIM)
             }
-            for (id in listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
+            for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0x33E11D2E else Color.TRANSPARENT, 20f).apply {
+                view.background = Ui.pill(1f, if (selected) Accent.TEXT else 0x33FFFFFF, 22f).apply {
                     if (selected) setStroke(2, Accent.SIGNAL)
                 }
-                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
+                view.setTextColor(if (selected) Accent.ABYSS else Accent.DIM)
             }
             // The Live tab's real shape: generic channels, then the one Sony section built by the shipped
             // selector, then trending. The names below are the ones the live feed actually serves.
