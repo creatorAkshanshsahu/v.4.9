@@ -104,7 +104,7 @@ internal object HomeChrome {
             m.phone -> 0.46f
             // A 2:3 poster shelf is the tallest row the app has, but the hero still has to be tall enough
             // to hold its own copy clear of the bar: the rail peeks, the hero never collides.
-            movies -> 0.50f
+            movies -> 0.46f
             m.compact -> 0.58f
             else -> 0.60f
         }).toInt()
@@ -126,7 +126,7 @@ internal object HomeChrome {
                 // max-w-2xl on the site: the copy never runs wider than 672dp.
                 width = minOf(px(672), (screenWidth - px(side) * 2).coerceAtLeast(px(260)))
                 marginStart = px(side)
-                bottomMargin = px(if (m.compact) 28 else 64)
+                bottomMargin = px(if (m.compact) 24 else 48)
             }
         }
         root.findViewById<TextView>(R.id.heroTitle).apply {
