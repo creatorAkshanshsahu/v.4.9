@@ -38,6 +38,7 @@ class DetailActivity : Activity() {
     private val fReg by lazy { ResourcesCompat.getFont(this, R.font.sora_regular) ?: Typeface.DEFAULT }
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
+    private val fBody by lazy { ResourcesCompat.getFont(this, R.font.manrope) ?: Typeface.DEFAULT }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
     private val pageAccent get() = if (title.isSeries) Accent.ION else Accent.SIGNAL
 
@@ -82,33 +83,37 @@ class DetailActivity : Activity() {
     private fun build() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val root = FrameLayout(this); root.setBackgroundColor(Accent.ABYSS)
+        // Gradients fade to the ground colour itself, so a palette change cannot leave an old navy behind.
+        val gr = Color.red(Accent.ABYSS); val gg = Color.green(Accent.ABYSS); val gb = Color.blue(Accent.ABYSS)
         backdrop = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0f }
         root.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
         root.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.argb(250, 5, 6, 13), Color.argb(200, 5, 6, 13), Color.argb(40, 5, 6, 13)))
+                intArrayOf(Color.argb(250, gr, gg, gb), Color.argb(190, gr, gg, gb), Color.argb(30, gr, gg, gb)))
         }, FrameLayout.LayoutParams(-1, -1))
         root.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(Color.argb(255, 5, 6, 13), Color.argb(0, 5, 6, 13)))
+                intArrayOf(Color.argb(255, gr, gg, gb), Color.argb(0, gr, gg, gb)))
         }, FrameLayout.LayoutParams(-1, (300 * dp).toInt(), Gravity.BOTTOM))
 
         val compact = resources.configuration.screenHeightDp < 420
         val inset = (if (compact) 28 else 48) * dp
         val textWidth = (resources.displayMetrics.widthPixels * if (compact) 0.73f else 0.62f).toInt()
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(inset.toInt(), ((if (compact) 96 else 112) * dp).toInt(), inset.toInt(), (32 * dp).toInt()) }
-        body.addView(tv(10f, pageAccent, fSemi).apply { text = if (title.isSeries) "AK SERIES  /  ON DEMAND" else "AK CINEMA  /  ON DEMAND"; letterSpacing = 0.14f },
+        body.addView(tv(if (compact) 9f else 11f, Accent.AMBER, fSemi).apply {
+            text = if (title.isSeries) "SERIES" else "ORIGINAL FILM"; letterSpacing = 0.28f
+        },
             LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (12 * dp).toInt() })
         logo = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_START; adjustViewBounds = true; visibility = View.GONE }
         body.addView(logo, LinearLayout.LayoutParams(minOf(textWidth, (420 * dp).toInt()), ((if (compact) 74 else 110) * dp).toInt()))
         nameTv = tv(if (compact) 30f else 42f, Accent.TEXT, fBold).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END }
         body.addView(nameTv, LinearLayout.LayoutParams(textWidth, -2))
-        facts = tv(if (compact) 12f else 14f, Accent.DIM, fSemi)
-        body.addView(facts, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (14 * dp).toInt() })
+        facts = tv(if (compact) 12f else 13f, Accent.DIM, fBody)
+        body.addView(facts, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (12 * dp).toInt() })
         metadataChips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val chipScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; clipChildren = false; addView(metadataChips) }
-        body.addView(chipScroll, LinearLayout.LayoutParams(-1, (42 * dp).toInt()).apply { topMargin = (8 * dp).toInt() })
-        desc = tv(if (compact) 12f else 14f, Accent.DIM, fReg).apply { maxLines = if (compact) 3 else 4; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.25f) }
+        desc = tv(if (compact) 12f else 14f, Accent.DIM, fBody).apply {
+            maxLines = if (compact) 3 else 4; ellipsize = android.text.TextUtils.TruncateAt.END; setLineSpacing(0f, 1.3f)
+        }
         body.addView(desc, LinearLayout.LayoutParams(textWidth, -2).apply { topMargin = (8 * dp).toInt() })
 
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -134,8 +139,9 @@ class DetailActivity : Activity() {
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(inset.toInt(), (8 * dp).toInt(), inset.toInt(), (8 * dp).toInt())
             clipChildren = false; clipToPadding = false; minimumHeight = (72 * dp).toInt()
-            setBackgroundColor(0xFF080B14.toInt())
-            elevation = (8 * dp)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.argb(190, gr, gg, gb), Color.TRANSPARENT))
+            elevation = 0f
         }
         toolbar.addView(button("‹  Back", false) { finish() })
         toolbar.addView(ImageView(this).apply {
@@ -151,13 +157,13 @@ class DetailActivity : Activity() {
     }
 
     private fun button(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 17f; typeface = fSemi; gravity = Gravity.CENTER; isFocusable = true; isClickable = true
-        setPadding((34 * dp).toInt(), (13 * dp).toInt(), (38 * dp).toInt(), (13 * dp).toInt())
-        val bg = GradientDrawable().apply { cornerRadius = 12 * dp }
+        text = label; textSize = 14f; typeface = fSemi; gravity = Gravity.CENTER; isFocusable = true; isClickable = true
+        setPadding((30 * dp).toInt(), (14 * dp).toInt(), (30 * dp).toInt(), (14 * dp).toInt())
+        val bg = GradientDrawable().apply { cornerRadius = 22 * dp }
         background = bg
         val style = { f: Boolean ->
-            bg.setColor(if (f && !primary) Color.WHITE else if (primary) Color.WHITE else 0x991A2936.toInt())
-            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, pageAccent)
+            bg.setColor(if (primary) Accent.TEXT else if (f) 0x5CFFFFFF else 0x33FFFFFF)
+            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.TEXT)
             setTextColor(if (primary || f) Accent.ABYSS else Accent.TEXT)
             animate().scaleX(if (f) 1.045f else 1f).scaleY(if (f) 1.045f else 1f).translationZ(if (f) 8 * dp else 0f)
                 .setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
@@ -176,22 +182,19 @@ class DetailActivity : Activity() {
             listener(onSuccess = { _, _ -> logo.visibility = View.VISIBLE; nameTv.visibility = View.GONE },
                 onError = { _, _ -> logo.visibility = View.GONE; nameTv.visibility = View.VISIBLE })
         }
+        // `2026 · Sci-Fi · 2h 14m · ★ 6.6` - one muted line, as the site writes it, not a wall of chips.
         val bits = ArrayList<String>()
-        if (title.rating.isNotEmpty()) bits.add("★ ${title.rating}")
         if (title.year.isNotEmpty()) bits.add(title.year)
+        if (title.genres.isNotEmpty()) bits.add(title.genres.take(2).joinToString(", "))
         if (title.runtime.isNotEmpty()) bits.add(title.runtime)
-        bits.add(if (title.isSeries) "Series" else "Movie")
-        if (title.genres.isNotEmpty()) bits.add(title.genres.take(3).joinToString(" · "))
-        facts.text = bits.joinToString("   •   ")
+        if (title.rating.isNotEmpty()) bits.add("★ ${title.rating}")
+        if (bits.isEmpty()) bits.add(if (title.isSeries) "Series" else "Movie")
+        facts.text = bits.joinToString("  ·  ")
         metadataChips.removeAllViews()
-        (title.genres.take(5) + title.cast.take(4)).distinct().forEach { label ->
-            metadataChips.addView(metadataChip(label), LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (7 * dp).toInt() })
-        }
-        metadataChips.visibility = if (metadataChips.childCount == 0) View.GONE else View.VISIBLE
         desc.text = title.description
         playBtn.text = if (title.isSeries) {
-            val (s, e) = lastEpisode(); "▶  Play S$s · E$e"
-        } else "▶  Play"
+            val (s, e) = lastEpisode(); "▶   Play  S$s E$e"
+        } else "▶   Play"
     }
 
     private fun metadataChip(label: String) = TextView(this).apply {

@@ -1145,3 +1145,16 @@ removed its page path answered "nothing found", which left OG playing TG's strea
 targets and bare addresses (protocol-relative included), keeps the page each address came from as its
 `Referer`, and is bounded in pages, bytes and time. A playlist body is itself a hit. DASH is excluded
 unless asked for, because from these hosts it means Widevine.
+
+## 47. 5.2.1 — the detail page joins the site
+
+The one screen still built from the retired identity was the movie/series page: "AK SERIES / ON DEMAND"
+in a teal accent, a row of genre and cast chips, and a solid toolbar bar.
+
+- the eyebrow is the site's - **SERIES** / **ORIGINAL FILM** in amber at 0.28 tracking;
+- the facts are one muted line in Manrope, `2026 · Sci-Fi · 2h 14m · ★ 6.6`, in the site's order, and the
+  chip wall is gone;
+- the scrims fade to the palette's own ground colour instead of a remembered navy, and the toolbar is a
+  gradient over the artwork rather than a bar on top of it;
+- Play is the single white pill (22dp radius, 14sp), with glass for everything else, and the label reads
+  `▶ Play` / `▶ Play S2 E5`.
