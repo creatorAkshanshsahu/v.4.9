@@ -43,10 +43,13 @@ internal object SonyPage {
         Tile("sony-ten-2", "SONY TEN 2", listOf("sony ten 2 sd", "sony ten 2"), "Ten2_HD.png"),
         Tile("sony-ten-3-hd", "SONY TEN 3 HD", listOf("sony ten 3 hd"), "Ten3_HD.png"),
         Tile("sony-ten-3", "SONY TEN 3", listOf("sony ten 3 hindi hd", "sony ten 3"), "Ten3_HD.png"),
-        Tile("sony-ten-4-hd", "SONY TEN 4 HD", listOf("sony ten 4 hd"), "Ten_4_HD_Telugu.png"),
-        Tile("sony-ten-4", "SONY TEN 4", listOf("sony ten 4 sd", "sony ten 4"), "Ten_4_Telugu.png"),
-        Tile("sony-ten-5-hd", "SONY TEN 5 HD", listOf("sony ten 5 hd"), "Six_HD.png"),
-        Tile("sony-ten-5", "SONY TEN 5", listOf("sony ten 5 sd", "sony ten 5"), "Six_HD.png"),
+        // Ten 4 is carried as Ten 4 / Ten 4 HD (and as its Telugu and Tamil feeds), Ten 5 was Sony Six, so the
+        // playlist may still call it by that name. Both spellings are listed, because a tile that binds plays
+        // natively and a tile that does not would fall back to the site's browser player.
+        Tile("sony-ten-4-hd", "SONY TEN 4 HD", listOf("sony ten 4 hd", "ten 4 hd", "sony ten4 hd", "sony ten 4 telugu hd"), "Ten_4_HD_Telugu.png"),
+        Tile("sony-ten-4", "SONY TEN 4", listOf("sony ten 4 sd", "sony ten 4", "ten 4 sd", "sony ten4", "sony ten 4 telugu", "sony ten 4 tamil"), "Ten_4_Telugu.png"),
+        Tile("sony-ten-5-hd", "SONY TEN 5 HD", listOf("sony ten 5 hd", "ten 5 hd", "sony ten5 hd", "sony six hd", "six hd"), "Six_HD.png"),
+        Tile("sony-ten-5", "SONY TEN 5", listOf("sony ten 5 sd", "sony ten 5", "ten 5 sd", "sony ten5", "sony six", "six"), "Six_HD.png"),
         Tile("bbc-earth", "BBC EARTH", listOf("bbc earth"), "Sony_BBC_Earth_HD.png")
     )
 

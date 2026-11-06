@@ -952,3 +952,26 @@ is a script player behind an anti-bot screen ("Brave Shields Detected"), with no
 native manifest (`jtv1.mpd?id=<n>`), their ClearKey document (`jtv-fetch/keyid.php?id=<n>`) and their cookie.
 So every tile that the playlist carries now plays **natively** - the same channel the page plays, on this
 app's player - and only a tile the playlist does not carry at all keeps the page as its last resort.
+
+## 35. 4.9.78 — the new mark, Ten 4 / Ten 5, and the answer a script keeps to itself
+
+### The mark
+
+The launcher icon is no longer the only place the new identity appears: the intro draws it, and the rail's
+brand image is it. One asset (`aktv_mark_v4`) for the icon, the entrance and the app.
+
+### Ten 4 and Ten 5
+
+They were the two tiles that stayed on the browser. The playlist can spell them in more than one way - Ten 4
+also carries a Telugu and a Tamil feed, and **Ten 5 was Sony Six**, which the list may still call it - so both
+tiles now list every spelling the site has used: `sony ten 4 hd`, `ten 4 hd`, `sony ten 4 telugu`,
+`sony six`, `six`, `sony ten 5 hd`, and the slug form. A tile that binds is native; a tile that does not is the
+site's browser player, so the aliases are the whole difference.
+
+### OG: the stream a JSON answer names
+
+The sniffer watched **requests**. A player that asks an API "what is the stream for this title?" gets the
+address back in the **body**, and no request ever contains it - which is why OG's own player resolved nothing
+while TG FROST's plain embed did. `MediaSniffer` now also installs a small script hook that keeps the last few
+`fetch`/`XHR` response bodies and reads them for a `.m3u8`/`.mp4`, alongside the network-level interception
+that sees iframes and segments. Whichever way the player learns its stream, one of the two channels sees it.

@@ -107,6 +107,12 @@ internal object MediaSniffer {
     private val client = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS).build()
 
+    private val MEDIA_IN_TEXT = Regex("""https?://[^\s"'<>\\]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
+
+    /** Media addresses named inside a response body (a player's JSON often names its own manifest). */
+    fun mediaIn(body: String): List<String> =
+        MEDIA_IN_TEXT.findAll(body.replace("\\/", "/")).mapNotNull { mediaOf(it.value) }.take(4).toList()
+
     private fun mediaOf(url: String?): String? {
         if (url == null || url.length > 2048) return null
         val clean = url.replace("\\/", "/")
@@ -148,6 +154,10 @@ internal object MediaSniffer {
                 view.settings.blockNetworkImage = true
                 view.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 view.webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                        install(view)
+                    }
+
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                         // Every request the page makes passes here, including the ones inside a cross-site
                         // iframe, which no script on the page could see.
@@ -163,11 +173,10 @@ internal object MediaSniffer {
                         return null
                     }
 
-                    override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) = Unit
 
                     override fun onPageFinished(view: WebView, url: String?) {
                         // A page callback must never take the app down with it.
-                        try { nudge(view, 4) } catch (_: Throwable) { }
+                        try { install(view); nudge(view, 4) } catch (_: Throwable) { }
                     }
                 }
                 if (referer != null) {
@@ -247,15 +256,48 @@ internal object MediaSniffer {
             try { view.evaluateJavascript(js, null) } catch (_: Throwable) { }
         }
 
+        /** Records the bodies of the page's own fetch/XHR answers; a manifest is often only named inside one. */
+        private fun install(view: WebView) {
+            val js = """
+                (function(){
+                  if (window.__akBodies) return; window.__akBodies = [];
+                  var keep=function(t){ try{ if(t&&t.length<400000){ window.__akBodies.push(t); if(window.__akBodies.length>8) window.__akBodies.shift(); } }catch(e){} };
+                  var of=window.fetch;
+                  if(of) window.fetch=function(){ var p=of.apply(this,arguments);
+                    try{ p.then(function(r){ try{ r.clone().text().then(keep); }catch(e){} }); }catch(e){} return p; };
+                  var oo=XMLHttpRequest.prototype.open;
+                  XMLHttpRequest.prototype.open=function(){ try{ this.addEventListener('load', function(){ try{ keep(this.responseText); }catch(e){} }); }catch(e){}
+                    return oo.apply(this,arguments); };
+                })();
+            """.trimIndent()
+            try { view.evaluateJavascript(js, null) } catch (_: Throwable) { }
+        }
+
         private fun poll(step: Int) {
             val view = web ?: return
             if (done) return
+            if (step % 3 == 0) readBodies(view)
             val keepUntil = firstAt + KEEP_AFTER_FIRST_MS
             if (hits.isNotEmpty() && System.currentTimeMillis() >= keepUntil) return finish()
             if (step >= maxSteps) return finish()
             // A second nudge later on: some players attach their handler after the first paint.
             if (step == 4 || step == 9 || step == 15) try { nudge(view, step) } catch (_: Throwable) { }
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)
+        }
+
+        private fun readBodies(view: WebView) {
+            val js = "JSON.stringify(window.__akBodies||[])"
+            try {
+                view.evaluateJavascript(js) { raw ->
+                    val list = decode(raw) ?: return@evaluateJavascript
+                    for (body in list) {
+                        MediaSniffer.mediaIn(body).forEach { hit ->
+                            if (hits.isEmpty()) firstAt = System.currentTimeMillis()
+                            hits += hit
+                        }
+                    }
+                }
+            } catch (_: Throwable) { }
         }
 
         private fun finish() {

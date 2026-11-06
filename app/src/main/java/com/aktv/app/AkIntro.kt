@@ -24,7 +24,8 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     var onReveal: (() -> Unit)? = null
     var onDone: (() -> Unit)? = null
     private val dp get() = resources.displayMetrics.density
-    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.aktv_logo_cinematic) }.getOrNull()
+    // The mark the viewer sees on the launcher is the mark the app opens with.
+    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.aktv_mark_v4) }.getOrNull()
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
     private val bylinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
