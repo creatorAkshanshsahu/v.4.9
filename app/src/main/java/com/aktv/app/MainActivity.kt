@@ -527,7 +527,7 @@ class MainActivity : AppCompatActivity() {
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
-        setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
+        setPadding((20 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt(), (20 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt())
         // Play is a white pill with dark type; every other hero action is glass with a white ring on focus.
         val bg = Ui.pill(dp, if (primary) Accent.TEXT else 0x33FFFFFF, 22f)
         background = bg
@@ -1195,11 +1195,9 @@ class MainActivity : AppCompatActivity() {
     }
     private fun fillHero(t: Tile?) {
         heroChips.removeAllViews()
-        heroBadge.setPadding((9 * dp).toInt(), (3 * dp).toInt(), (9 * dp).toInt(), (3 * dp).toInt())
-        heroBadge.setTextColor(Accent.TEXT)
-        heroBadge.background = Ui.pill(dp, 0x2424D3D0, 16f).apply {
-            setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
-        }
+        heroBadge.setPadding(0, 0, 0, 0)
+        heroBadge.setTextColor(Accent.DIM)
+        heroBadge.background = null
         showCinematicFallback(t)
         heroTagline.visibility = if (channelsTab && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
         heroSubheading.text = if (channelsTab) "A clearer view of what’s next." else "Find your next story."
@@ -1207,7 +1205,7 @@ class MainActivity : AppCompatActivity() {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
                 heroDot.visibility = View.VISIBLE
-                (heroDot as? TextView)?.text = if (t.c.v2) "●  ALWAYS ON" else "●  LIVE NOW"
+                (heroDot as? TextView)?.text = if (t.c.v2) "ALWAYS ON" else "LIVE"
                 heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.ION else Accent.LIVE)
                 (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
@@ -1239,18 +1237,24 @@ class MainActivity : AppCompatActivity() {
                 val accent = sectionAccent()
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.apply {
-                    text = if (t.m.isSeries) "SERIES SPOTLIGHT" else "FEATURED MOVIE"
-                    setTextColor(accent); backgroundTintList = ColorStateList.valueOf(accent)
+                    text = if (t.m.isSeries) "SERIES" else "ORIGINAL FILM"
+                    setTextColor(Accent.AMBER); backgroundTintList = ColorStateList.valueOf(Accent.AMBER)
                 }
                 heroTitle.text = t.m.name
                 showHeroArtwork(t.m)
-                heroSubheading.text = if (t.m.isSeries) "Stories that keep going." else "Your next movie night starts here."
-                heroBadge.text = if (t.m.isSeries) "SERIES  /  ON DEMAND" else "MOVIE  /  ON DEMAND"
-                heroChips.addView(chip("▶   More info", true).apply { setOnClickListener {
+                heroSubheading.text = ""
+                // The site shows one muted line of facts under the title, not a row of chips.
+                heroBadge.text = listOfNotNull(
+                    t.m.year.takeIf { it.isNotEmpty() },
+                    t.m.genres.firstOrNull()?.takeIf { it.isNotBlank() },
+                    t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" }
+                ).joinToString(" · ")
+                heroChips.addView(chip("▶   Play", true).apply { setOnClickListener {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)
                 } })
-                listOfNotNull(t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
-                    .plus(t.m.genres.take(2)).forEach { heroChips.addView(heroMetaChip(it)) }
+                heroChips.addView(chip("More Info").apply { setOnClickListener {
+                    stopPreview(); DetailActivity.open(this@MainActivity, t.m)
+                } })
                 heroMono.visibility = View.GONE; heroLogo.setImageDrawable(null); heroLogo.visibility = View.GONE
                 if (t.m.logo.isNotBlank()) {
                     heroLogo.visibility = View.VISIBLE; heroLogo.alpha = 0f

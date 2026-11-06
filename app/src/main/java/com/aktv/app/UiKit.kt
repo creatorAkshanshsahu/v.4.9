@@ -41,12 +41,12 @@ internal object ImmersiveUi {
  * Names are stable so layouts, players and tests keep one source of truth.
  */
 object Accent {
-    val ABYSS = 0xFF0E1014.toInt()
-    val NIGHT = 0xFF0A0B0E.toInt()
-    val SURFACE = 0xFF1B1E24.toInt()
-    val SURFACE_HI = 0xFF262A32.toInt()
+    val ABYSS = 0xFF0B0C10.toInt()
+    val NIGHT = 0xFF08090C.toInt()
+    val SURFACE = 0xFF15181E.toInt()
+    val SURFACE_HI = 0xFF1E222A.toInt()
     /** Primary glossy crimson used for focus fills, live badges and active controls. */
-    val CRIMSON = 0xFFE5382B.toInt()
+    val CRIMSON = 0xFFE5372D.toInt()
     val CRIMSON_BRIGHT = 0xFFFF5A45.toInt()
     val CRIMSON_DEEP = 0xFF8A1B10.toInt()
     val WINE = 0xFF2A1712.toInt()
@@ -56,15 +56,15 @@ object Accent {
     val ION = 0xFFFF8A5C.toInt()
     val INDIGO = 0xFF59616E.toInt()
     val DEEP = 0xFF1A1F28.toInt()
-    val LIVE = CRIMSON_BRIGHT
-    val GOLD = 0xFFE8A44C.toInt()
+    val LIVE = CRIMSON
+    val GOLD = 0xFFE0A24B.toInt()
     val TEXT = 0xFFF7F7F9.toInt()
-    val DIM = 0xFFA5A9B2.toInt()
-    val FAINT = 0xFF6F7581.toInt()
+    val DIM = 0xFFA6ABB4.toInt()
+    val FAINT = 0xFF71767F.toInt()
     /** Brand amber: wordmark, eyebrow labels, the active pill's tick and the profile dot. */
-    val AMBER = 0xFFE8A44C.toInt()
-    val AMBER_LIGHT = 0xFFF6C073.toInt()
-    val AMBER_DEEP = 0xFFB8762B.toInt()
+    val AMBER = 0xFFE0A24B.toInt()
+    val AMBER_LIGHT = 0xFFF2BE6E.toInt()
+    val AMBER_DEEP = 0xFFB0762F.toInt()
 
     /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
     fun glossStops(): IntArray = intArrayOf(AMBER_LIGHT, AMBER, AMBER_DEEP)

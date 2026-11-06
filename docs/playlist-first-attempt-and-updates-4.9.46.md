@@ -1092,3 +1092,19 @@ and closes on the TV, it runs on the phone" report. So it is removed, not defaul
 Removing the trailer panel also removed the four functions that followed it in the same file (`lastEpisode`,
 `bindSeasons`, `playCurrent`, the episode adapter), so 5.0.5 did not compile and was never published. The file
 is restored and the panel alone is gone; the tests that build a movie screen are what caught it.
+
+## 45. 5.1.0 — matched to the Streamr site
+
+The site (screen-safari-studio.lovable.app) renders the same screens the design spec described, so the app is now
+built to that composition rather than to an interpretation of it.
+
+- **Type**: Sora for headings, **Manrope** for body - the site's two faces. Manrope is added as one variable file
+  with 400/600/700 named weights, and the theme's default family is Manrope.
+- **Colour**: ground `#0B0C10`, cards `#15181E`, amber `#E0A24B`, the single red `#E5372D`, muted `#A6ABB4`.
+- **Bar**: the wordmark alone in amber (the mark image is gone from the bar), a 42dp glass pill group in the centre,
+  and round search and amber profile buttons at the right edge, exactly as the site's header.
+- **Hero**: an inset, 24dp-rounded artwork card under the bar (20dp side insets), text anchored bottom-left inside
+  it - amber eyebrow ("LIVE", "ORIGINAL FILM", "SERIES"), one big title, a single muted fact line
+  (`2026 · Sci-Fi · ★ 6.6`), three lines of synopsis, then **Play** (white pill, dark type) and **More Info** (glass).
+- **Rows**: 18sp semibold titles, 200x113 landscape cards and 122-wide posters, 26dp row padding - the site's rhythm
+  scaled for a ten-foot screen.

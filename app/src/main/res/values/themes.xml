@@ -1,7 +1,7 @@
 <resources>
     <style name="Theme.AKTV" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/abyss</item>
-        <item name="android:fontFamily">@font/sora_regular</item>
+        <item name="android:fontFamily">@font/manrope</item>
         <item name="colorAccent">@color/amber</item>
         <item name="android:statusBarColor">@color/abyss</item>
         <item name="android:navigationBarColor">@color/abyss</item>
@@ -17,12 +17,12 @@
     </style>
     <!-- STREAMR pill tab: transparent at rest, white pill for the active section, white ring on focus. -->
     <style name="Widget.STREAMR.Pill" parent="@android:style/Widget.TextView">
-        <item name="android:layout_width">wrap_content</item><item name="android:layout_height">44dp</item>
+        <item name="android:layout_width">wrap_content</item><item name="android:layout_height">36dp</item>
         <item name="android:layout_marginStart">2dp</item><item name="android:layout_marginEnd">2dp</item>
         <item name="android:gravity">center</item>
         <item name="android:focusable">true</item><item name="android:clickable">true</item>
-        <item name="android:paddingStart">22dp</item><item name="android:paddingEnd">22dp</item>
-        <item name="android:textSize">13sp</item><item name="android:fontFamily">@font/sora_semibold</item>
+        <item name="android:paddingStart">16dp</item><item name="android:paddingEnd">16dp</item>
+        <item name="android:textSize">12sp</item><item name="android:fontFamily">@font/sora_semibold</item>
         <item name="android:textColor">@color/text_dim</item><item name="android:maxLines">1</item>
         <item name="android:includeFontPadding">false</item>
     </style>
