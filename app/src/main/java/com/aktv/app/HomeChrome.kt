@@ -197,7 +197,7 @@ internal object HomeChrome {
         } else {
             // 2:3 artwork with the copy inside it: the site's rail cards carry the kind eyebrow and the
             // title over a bottom scrim, and the tile is the artwork — no plate, no border, no caption row.
-            val width = ((if (compact) 108 else 128) * dp).toInt()
+            val width = ((if (compact) 104 else 116) * dp).toInt()
             lp.width = width
             lp.height = (width * 1.5f).toInt()
             tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = width

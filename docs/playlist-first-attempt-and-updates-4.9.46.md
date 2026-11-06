@@ -1329,3 +1329,16 @@ sheet, episode picker, playback details, retry, auto-next, the Media3 seek bar a
 on bare artwork. It is `angle="270"` now — top (start, transparent) to bottom (end, `#F20A0B0E`) — so the
 kind eyebrow and the title always have the site's `scrim/90` floor under them, on both poster and channel
 cards.
+
+## 55. Sizing the rails to a screen that cannot scroll — 5.4.0 (code 119)
+
+The site's hero is `70vh` and its rails scroll away below the fold; a television has one fixed frame. Three
+iterations of the preview render settled the compromise:
+
+- **Hero 46% of the screen for movies**, 60% elsewhere, copy floor 48dp. At 50% the poster row lost its
+  caption line to the bottom edge; at 44% the hero's own eyebrow ran into the bar. 46% with a 48dp floor is
+  the ratio where the copy clears the 88dp bar *and* a whole poster lands.
+- **Posters 116dp wide (174dp tall)** on a TV, 104dp compact. That is 2:3 at a width the rail can actually
+  show in full; 128dp looked better in isolation and lost the last line of every card.
+- The guard is now geometric: it asserts the hero's copy top clears the bar's height, instead of a magic
+  shelf height that stopped meaning anything once the tiles changed size.
