@@ -47,7 +47,7 @@ class HomeChromeTest {
         assertTrue("native gradient field extends beyond the reserved hero shelf",
             media.height > root.findViewById<View>(R.id.heroArea).height)
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navProfile).visibility)
-        for (id in listOf(R.id.segLive, R.id.segV2, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
             assertEquals("$id must lead down into the rows", R.id.rows, view.nextFocusDownId)

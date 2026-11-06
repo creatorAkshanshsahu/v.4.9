@@ -86,7 +86,7 @@ class HomePreviewTest {
                     }
                 }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 8 })
             }
-            for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+            for (id in listOf(R.id.segLive, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
                 view.background = Ui.pill(1f, if (selected) 0x33E11D2E else Color.TRANSPARENT, 12f).apply {

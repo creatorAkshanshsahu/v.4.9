@@ -1016,3 +1016,14 @@ The app is STREAMR now, by Akshansh, and it does not share a screen with the old
   glass fill with a 3dp white ring, and the hero's primary action is a white pill with dark type.
 - **Sizing**: 300x169 landscape cards, 176-wide posters, 22sp row titles, 46sp hero titles, 12dp corners.
 - **TATA is removed**: its tab, its start-up load and its retry path.
+
+## 39. 5.0.1 — Always on goes, and the chrome follows the home screen
+
+- **"Always on" is removed**: the tab is gone from the top bar and from the phone pill row. The internal tab
+  ids did not move (0 Live, 1 retired, 2 JioTV, 3 Movies, 4 Series); a `tabIds` map translates a pill position
+  into a section id, so nothing else in the screen code had to change.
+- **Players**: action chips are glass with a white ring instead of crimson gradients, the seek bar is the one
+  red in the chrome, the mark in the player is the STREAMR mark, and the scrims sit on the new ground.
+- **Posters and trending cards**: 12dp corners with a hairline edge, the bottom scrim uses the new ground, and
+  focus is the same 3dp white ring as the rest of the app.
+- Every remaining reference to the old wordmark asset now uses the new mark.

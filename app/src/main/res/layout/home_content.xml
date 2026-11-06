@@ -58,7 +58,6 @@
                     android:layout_marginEnd="8dp" android:src="@drawable/streamr_mark_small" android:scaleType="fitCenter"
                     android:contentDescription="STREAMR"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
-                <TextView android:id="@+id/phoneV2" style="@style/Widget.AKTV.PhonePill" android:text="Always on"/>
                 <TextView android:id="@+id/phoneJio" style="@style/Widget.AKTV.PhonePill" android:text="JioTV"/>
                 <TextView android:id="@+id/phoneMovies" style="@style/Widget.AKTV.PhonePill" android:text="Movies"/>
                 <TextView android:id="@+id/phoneSeries" style="@style/Widget.AKTV.PhonePill" android:text="Series"/>
@@ -121,11 +120,9 @@
             android:orientation="horizontal" android:gravity="center_vertical"
             android:paddingStart="6dp" android:paddingEnd="6dp" android:background="@drawable/nav_glass">
             <TextView android:id="@+id/segLive" style="@style/Widget.STREAMR.Pill" android:text="Live TV"
-                android:nextFocusDown="@id/rows" android:nextFocusRight="@id/segV2"/>
-            <TextView android:id="@+id/segV2" style="@style/Widget.STREAMR.Pill" android:text="Always on"
-                android:nextFocusLeft="@id/segLive" android:nextFocusRight="@id/segJio" android:nextFocusDown="@id/rows"/>
+                android:nextFocusDown="@id/rows" android:nextFocusRight="@id/segJio"/>
             <TextView android:id="@+id/segJio" style="@style/Widget.STREAMR.Pill" android:text="JioTV"
-                android:nextFocusLeft="@id/segV2" android:nextFocusRight="@id/segSites" android:nextFocusDown="@id/rows"/>
+                android:nextFocusLeft="@id/segLive" android:nextFocusRight="@id/segSites" android:nextFocusDown="@id/rows"/>
             <TextView android:id="@+id/segSites" style="@style/Widget.STREAMR.Pill" android:text="Movies"
                 android:nextFocusLeft="@id/segJio" android:nextFocusRight="@id/segSeries" android:nextFocusDown="@id/rows"/>
             <TextView android:id="@+id/segSeries" style="@style/Widget.STREAMR.Pill" android:text="Series"

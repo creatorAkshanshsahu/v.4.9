@@ -55,7 +55,7 @@ internal object HomeChrome {
         }
         root.findViewById<View>(R.id.navProfile).visibility = if (m.phone || short) View.GONE else View.VISIBLE
         root.findViewById<TextView>(R.id.navVersion).visibility = View.GONE
-        for (id in listOf(R.id.segLive, R.id.segV2, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             root.findViewById<TextView>(id).apply {
                 layoutParams.height = px(if (short) 38 else 44)
                 setPadding(px(if (m.compact) 14 else 22), 0, px(if (m.compact) 14 else 22), 0)

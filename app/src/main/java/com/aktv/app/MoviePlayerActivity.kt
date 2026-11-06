@@ -153,23 +153,23 @@ class MoviePlayerActivity : Activity() {
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
-            setPlayedColor(Accent.CRIMSON_BRIGHT); setScrubberColor(Accent.GLOSS_HI)
-            setBufferedColor(0x887E4050.toInt()); setUnplayedColor(0x557E4050)
+            setPlayedColor(Accent.LIVE); setScrubberColor(Accent.TEXT)
+            setBufferedColor(0x4DFFFFFF); setUnplayedColor(0x29FFFFFF)
         }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF00A0512.toInt(), 0xB80C0710.toInt(), 0x38140712, Color.TRANSPARENT))
+                intArrayOf(0xF20E1014.toInt(), 0xB30E1014.toInt(), 0x330E1014, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(0xF50A0512.toInt(), 0xC50C0710.toInt(), 0x32140712, Color.TRANSPARENT))
+                intArrayOf(0xF70E1014.toInt(), 0xC70E1014.toInt(), 0x330E1014, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
         val brand = ImageView(this).apply {
-            setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "STREAMR"; alpha = 0.94f
+            setImageResource(R.drawable.streamr_mark_small); scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = "STREAMR"; alpha = 0.96f
         }
         overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {
             leftMargin = px(42); topMargin = px(30)
@@ -188,7 +188,7 @@ class MoviePlayerActivity : Activity() {
             setPadding(0, 0, 0, px(8))
         }
         info.addView(TextView(this).apply {
-            text = if (title.isSeries) "AK SERIES  /  NOW PLAYING" else "AK CINEMA  /  NOW PLAYING"
+            text = if (title.isSeries) "SERIES  /  NOW PLAYING" else "MOVIE  /  NOW PLAYING"
             textSize = 10f; letterSpacing = 0.17f
             setTextColor(if (title.isSeries) Accent.ION else Accent.SIGNAL)
             setTypeface(null, Typeface.BOLD)
@@ -276,15 +276,11 @@ class MoviePlayerActivity : Activity() {
             isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
             fun style(focused: Boolean) {
-                // Focused: lacquered crimson gradient. Resting: translucent wine with a thin rim.
-                background = if (focused) GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(Accent.CRIMSON_BRIGHT, Accent.CRIMSON, Accent.CRIMSON_DEEP)).apply {
-                    cornerRadius = px(16).toFloat()
-                    setStroke(px(2), 0xAAFFEBEE.toInt())
-                } else GradientDrawable().apply {
-                    cornerRadius = px(16).toFloat()
-                    setColor(0xE00C0710.toInt())
-                    setStroke(px(1), 0x59FF3448)
+                // Glass with a white ring on focus; the only colour in the chrome is the red seek bar.
+                background = GradientDrawable().apply {
+                    cornerRadius = px(22).toFloat()
+                    setColor(if (focused) 0x4DFFFFFF else 0x33FFFFFF)
+                    setStroke(if (focused) px(2) else 0, if (focused) 0xF2FFFFFF.toInt() else Color.TRANSPARENT)
                 }
                 setTextColor(Accent.TEXT)
                 elevation = if (focused) px(9).toFloat() else 0f

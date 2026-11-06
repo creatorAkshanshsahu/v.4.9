@@ -211,9 +211,12 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
-    private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segJio: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
+    private lateinit var segLive: TextView; private lateinit var segJio: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
     // TV top bar: Live TV, Always on, JioTV, Movies, Series
-    private val segs by lazy { listOf(segLive, segV2, segJio, segSites, segSeries) }
+    /** Visible sections in top-bar order. Internal tab ids are unchanged, so the screen code below is untouched. */
+    private val tabIds = intArrayOf(0, 2, 3, 4)
+    private fun posOf(tabId: Int) = tabIds.indexOf(tabId).takeIf { it >= 0 } ?: 0
+    private val segs by lazy { listOf(segLive, segJio, segSites, segSeries) }
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
     private val segBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
     private val phoneSegBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
@@ -267,9 +270,9 @@ class MainActivity : AppCompatActivity() {
         loadChannelPlaybackResults()
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
-        segLive = findViewById(R.id.segLive); segV2 = findViewById(R.id.segV2); segJio = findViewById(R.id.segJio); segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
+        segLive = findViewById(R.id.segLive); segJio = findViewById(R.id.segJio); segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
         searchBtn = findViewById(R.id.searchBtn)
-        phoneSegs = listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneJio, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
+        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
         heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
@@ -387,7 +390,7 @@ class MainActivity : AppCompatActivity() {
         searchBtn.setOnClickListener { openSearch() }
         phoneSegs.forEachIndexed { i, tv ->
             tv.background = phoneSegBgs[i]
-            tv.setOnClickListener { switchTab(i) }
+            tv.setOnClickListener { switchTab(tabIds[i]) }
             tv.setOnFocusChangeListener { _, _ -> styleSegs() }
         }
         phoneSearchBtn.background = phoneSegBgs[5]
@@ -427,7 +430,7 @@ class MainActivity : AppCompatActivity() {
                 // tabs open only on OK now: moving across the bar no longer switches tab, so walking right from
                 // Movies past Series to the search button still searches Movies (each section keeps its own search)
                 val fromSeg = segs.any { it === old } || old === searchBtn
-                if (!fromSeg && ni != tab) segs[tab].post { if (segs[ni].isFocused) segs[tab].requestFocus() }   // focus fell onto the bar by accident
+                if (!fromSeg && tabIds[ni] != tab) segs[posOf(tab)].post { if (segs[ni].isFocused) segs[posOf(tab)].requestFocus() }   // focus fell onto the bar by accident
             }
         }
         channelSearch.addTextChangedListener(object : TextWatcher {
@@ -444,7 +447,7 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) = Unit
         })
         segs.forEachIndexed { i, tv ->
-            tv.setOnClickListener { switchTab(i) }
+            tv.setOnClickListener { switchTab(tabIds[i]) }
             tv.setOnFocusChangeListener { _, _ -> styleSegs() }
         }
         styleSegs(); fillHero(null); loadChannels()
@@ -454,8 +457,8 @@ class MainActivity : AppCompatActivity() {
         intro.onReveal = { home.alpha = 1f }
         intro.onDone = {
             home.alpha = 1f; intro.visibility = View.GONE
-            if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(tab)?.requestFocus()
-            else segs[tab].requestFocus()
+            if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
+            else segs[posOf(tab)].requestFocus()
         }
         Movies.diskDir = File(filesDir, "tmdb").apply { mkdirs() }
         Movies.timingListener = { event -> android.util.Log.i("AKTV-VOD", "${event.stage} ${event.elapsedMs}ms cache=${event.cacheHit}") }
@@ -535,7 +538,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
             setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
         }
-        nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
+        nextFocusDownId = R.id.rows; nextFocusLeftId = segs[posOf(tab)].id
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
     }
 
@@ -586,9 +589,9 @@ class MainActivity : AppCompatActivity() {
     private fun styleSegs() {
         searchBtn.text = "Search"
         searchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
-        segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tab == i) }
+        segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tabIds[i] == tab) }
         navStyle(searchBtn, searchBg, searchBtn.isFocused, false)
-        phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tab == i) }
+        phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tabIds[i] == tab) }
         phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
@@ -1260,7 +1263,7 @@ class MainActivity : AppCompatActivity() {
             else -> {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
                 heroSubheading.text = "A clearer view of what’s next."
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.aktv_logo_cinematic)
+                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.streamr_mark)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
         }
@@ -2703,10 +2706,10 @@ class MainActivity : AppCompatActivity() {
                 val rowList = rowView?.findViewById<RecyclerView>(R.id.rowList)
                 val card = rowList?.findContainingItemView(focus)
                 if (e.keyCode == KeyEvent.KEYCODE_DPAD_LEFT && card != null && rowList.getChildAdapterPosition(card) == 0) {
-                    segs[tab].requestFocus(); return true
+                    segs[posOf(tab)].requestFocus(); return true
                 }
                 if (e.keyCode == KeyEvent.KEYCODE_DPAD_UP && rowIndex == 0) {
-                    if (!heroCollapsed && heroChips.childCount > 0) heroChips.getChildAt(0).requestFocus() else segs[tab].requestFocus()
+                    if (!heroCollapsed && heroChips.childCount > 0) heroChips.getChildAt(0).requestFocus() else segs[posOf(tab)].requestFocus()
                     return true
                 }
             }
