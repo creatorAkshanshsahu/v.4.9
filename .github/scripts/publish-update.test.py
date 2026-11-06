@@ -34,7 +34,7 @@ def test_manifest_points_at_the_rolling_release_assets():
             assert item["url"] == f"https://github.com/owner/repo/releases/latest/download/{filename}"
             assert len(item["sha256"]) == 64
             assert item["size"] == len(b"apk-" + abi.encode())
-        assert "AK TV 4.9.46" in module.notes_markdown(manifest)
+        assert "STREAMR 4.9.46" in module.notes_markdown(manifest)
 
 
 def test_missing_apk_fails_instead_of_publishing_a_partial_manifest():

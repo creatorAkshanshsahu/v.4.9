@@ -147,4 +147,4 @@ jobs:
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
             out/AK-TV-arm32.apk out/AK-TV-arm64.apk out/update.json out/SHA256SUMS \
-            --title "AK TV latest build" --notes-file out/update-notes.md
+            --title "STREAMR latest build" --notes-file out/update-notes.md

@@ -1,4 +1,4 @@
-"""Build the in-app update manifest published with every AK TV build.
+"""Build the in-app update manifest published with every STREAMR build.
 
 The app reads `update.json` from the rolling `latest` GitHub release and installs a newer build over
 itself. This script only writes version metadata and SHA-256 checksums of the APKs that CI already
@@ -44,14 +44,14 @@ def build_manifest(version_code, version_name, run, repo, commit, apk_paths, now
         "build": str(run),
         "commit": (commit or "")[:40],
         "published": (now or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "notes": f"AK TV {version_name} (code {version_code}) · CI build {run}",
+        "notes": f"STREAMR {version_name} (code {version_code}) · CI build {run}",
         "apks": apks,
     }
 
 
 def notes_markdown(manifest):
     lines = [
-        f"# AK TV {manifest['versionName']}",
+        f"# STREAMR {manifest['versionName']}",
         "",
         f"Version code **{manifest['versionCode']}**, CI build {manifest['build']}.",
         "",
@@ -78,7 +78,7 @@ def main(argv):
                               {abi: out / filename for abi, filename in ASSETS})
     (out / "update.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     (out / "update-notes.md").write_text(notes_markdown(manifest))
-    print(f"update.json: AK TV {name} (code {code}) · arm32/arm64 assets published")
+    print(f"update.json: STREAMR {name} (code {code}) · arm32/arm64 assets published")
 
 
 if __name__ == "__main__":

@@ -1002,3 +1002,17 @@ built over a box that is still starting up (rows, playlist fetch, entrance) is e
 
 Playback details also now states the browser-engine state (`site browser engine: off on this TV…`) and whether
 this run is in safe mode, so one copied report answers the next question without another round trip.
+
+## 38. 5.0.0 — STREAMR
+
+The app is STREAMR now, by Akshansh, and it does not share a screen with the old one.
+
+- **Name and mark**: launcher icon, entrance reveal (mark, then the wordmark, then "BY AKSHANSH"), the app
+  label, and every report, toast and clipboard label. The mark is the supplied amber play glyph.
+- **Palette**: near-black blue ground, amber brand signal, a single red reserved for LIVE and progress.
+  Generated channel tints now live in the amber arc (24..46 degrees), so a wall of tiles reads as one brand.
+- **Chrome**: the side rail is gone. A top glass bar holds the mark and wordmark, a pill tab group, Search and
+  the profile; the hero is full-bleed beneath it. The active tab is a white pill with dark type, focus is a
+  glass fill with a 3dp white ring, and the hero's primary action is a white pill with dark type.
+- **Sizing**: 300x169 landscape cards, 176-wide posters, 22sp row titles, 46sp hero titles, 12dp corners.
+- **TATA is removed**: its tab, its start-up load and its retry path.
