@@ -989,3 +989,16 @@ Three more things that only matter on a TV:
 - **safe mode**: if the previous run ended by itself (`CrashLog` has a note), this run starts with the entrance,
   the hero previews, the browser engine, the movie prefetch and the second playlist all off. The app has to be
   usable *after* a crash, not repeat it - and the crash note is still offered so it can be sent.
+
+## 37. 4.9.80 — the report card was the freeze
+
+The dialog that offered the previous run's crash note was itself the thing that stopped a TV: a modal window
+built over a box that is still starting up (rows, playlist fetch, entrance) is enough to take it out. So:
+
+- on a **television** (and in safe mode) there is no dialog at all: one line of toast says the previous run
+  stopped, and the **full note is carried inside Playback details**, which already has a Copy button;
+- a phone still gets the dialog, fifteen seconds in instead of six, with the note capped and the whole thing
+  wrapped so a failure to show it cannot close the app.
+
+Playback details also now states the browser-engine state (`site browser engine: off on this TV…`) and whether
+this run is in safe mode, so one copied report answers the next question without another round trip.

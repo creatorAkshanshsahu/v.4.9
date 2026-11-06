@@ -474,7 +474,7 @@ class MainActivity : AppCompatActivity() {
                 .takeIf { prefs.contains("site_browser") }
             SiteBrowserGate.load(this, if (safeMode) false else allow)
         }
-        ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 6_000)
+        ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 15_000)
         // The version in the rail is also a touch route to the update check, for the phone layout.
         findViewById<TextView>(R.id.navVersion).apply {
             text = appVersion
@@ -2236,6 +2236,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playbackDetailsText(): String = buildString {
+        // The previous run's note travels with this report, so a TV can hand it over without a dialog.
+        exitNote?.let { append("PREVIOUS RUN STOPPED BY ITSELF\n$it\n\n") }
+        append("Site browser engine: ${SiteBrowserGate.summary()}\n")
+        if (safeMode) append("Safe mode: on for this run (entrance, previews, prefetch and browser engine off)\n")
         append("${AppBuildInfo.label(this@MainActivity)}\nPlayback baseline: 4.9.18 native requests\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n")
         append("${Build.MANUFACTURER.take(40)} ${Build.MODEL.take(48)} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown ABI"}\n")
         append("App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n")
@@ -2935,24 +2939,39 @@ class MainActivity : AppCompatActivity() {
      * Offers what the previous run wrote down before it died, once per distinct note, with a Copy button:
      * a TV has no log the user can reach, so the app has to hand it over itself.
      */
+    /** The previous run's note, kept for this run so it can be read without a dialog. */
+    private var exitNote: String? = null
+
+    /**
+     * A modal over a television that is still starting up was itself the freeze, so a TV is told in one line
+     * and the full note is kept for Playback details, where it can be copied like any other report. A phone
+     * still gets the dialog, after the app has settled.
+     */
     private fun offerExitReport() {
-        val note = CrashLog.report(this) ?: return
+        val note = runCatching { CrashLog.report(this) }.getOrNull() ?: return
         if (isFinishing || isDestroyed) return
+        exitNote = note.take(6_000)
+        if (television || safeMode) {
+            Toast.makeText(this, "The previous run stopped by itself. Playback details → Copy report has it.", Toast.LENGTH_LONG).show()
+            return
+        }
         val body = TextView(this).apply {
             setTextColor(Color.WHITE); textSize = 12f; typeface = Typeface.MONOSPACE
-            setPadding(36, 24, 36, 24); text = note
+            setPadding(36, 24, 36, 24); text = exitNote
         }
-        AlertDialog.Builder(this)
-            .setTitle("The previous run stopped by itself")
-            .setView(ScrollView(this).apply { addView(body) })
-            .setPositiveButton("Copy report") { _, _ ->
-                (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("AK TV exit report", note))
-                Toast.makeText(this, "Copied — no stream URLs or keys", Toast.LENGTH_SHORT).show()
-                CrashLog.acknowledge(this, note)
-            }
-            .setNegativeButton("Close") { _, _ -> CrashLog.acknowledge(this, note) }
-            .show()
+        runCatching {
+            AlertDialog.Builder(this)
+                .setTitle("The previous run stopped by itself")
+                .setView(ScrollView(this).apply { addView(body) })
+                .setPositiveButton("Copy report") { _, _ ->
+                    (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("AK TV exit report", note))
+                    Toast.makeText(this, "Copied — no stream URLs or keys", Toast.LENGTH_SHORT).show()
+                    CrashLog.acknowledge(this, note)
+                }
+                .setNegativeButton("Close") { _, _ -> CrashLog.acknowledge(this, note) }
+                .show()
+        }.onFailure { CrashLog.acknowledge(this, note) }
     }
 
     private fun promptUpdate(release: UpdateRelease) {
