@@ -46,6 +46,15 @@ internal object HomeChrome {
             textSize = if (m.compact) 16f else 22f
             setTextColor(Accent.AMBER)
             letterSpacing = -0.02f
+            // The wordmark in the user's logo is a gradient (amber into gold), not a flat colour. Paint the
+            // glyphs with the same two stops once the text is measured, and leave the flat amber as fallback.
+            post {
+                val paint = paint
+                val width = paint.measureText(text.toString())
+                if (width > 0f) paint.shader = android.graphics.LinearGradient(
+                    0f, 0f, width, 0f, intArrayOf(0xFFF2912B.toInt(), 0xFFF7C64A.toInt()), null,
+                    android.graphics.Shader.TileMode.CLAMP)
+            }
         }
         // Mark plus wordmark, as in the site header — the mark is no longer hidden.
         root.findViewById<View>(R.id.brandMark).apply {

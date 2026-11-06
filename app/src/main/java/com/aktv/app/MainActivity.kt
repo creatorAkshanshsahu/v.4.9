@@ -1294,7 +1294,7 @@ class MainActivity : AppCompatActivity() {
                 glowHero(accent, if (t.m.isSeries) 0xFF493A8A.toInt() else 0xFF815331.toInt())
             }
             else -> {
-                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
+                heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "STREAMR"
                 heroSubheading.text = "A clearer view of what’s next."
                 heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.streamr_mark)
                 glowHero(Accent.AMBER, Accent.AMBER_DEEP); scheduleHeroGuide(null)

@@ -87,7 +87,7 @@ object ExternalEpg {
             requestMethod = "GET"
             setRequestProperty("Accept", "application/gzip, application/octet-stream;q=0.9, */*;q=0.5")
             setRequestProperty("Accept-Encoding", "identity")
-            setRequestProperty("User-Agent", "AK-TV-EPG/1.0 (Android)")
+            setRequestProperty("User-Agent", "STREAMR-EPG/1.0 (Android)")
         }
         val temporary = File(destination.parentFile, destination.name + ".download")
         try {

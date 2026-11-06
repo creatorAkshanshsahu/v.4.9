@@ -65,7 +65,7 @@ class HomePreviewTest {
                 setTextColor(Accent.AMBER)
             }
             root.findViewById<ImageView>(R.id.heroLogo).apply {
-                setImageResource(R.drawable.aktv_mark_cinematic)
+                setImageResource(R.drawable.streamr_mark)
                 visibility = if (movies) View.GONE else View.VISIBLE
             }
             root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE

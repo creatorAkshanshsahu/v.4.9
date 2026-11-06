@@ -1374,3 +1374,21 @@ So the release **API** is now the primary source and the download path is the fa
 
 This build has to be installed once by hand — the 5.2.1 install on the device cannot be told anything by
 code that is not on it yet. From 5.4.1 onward the dialog appears on its own.
+
+## 57. The supplied logo, and nothing with AK on it — 5.4.2 (code 121)
+
+The two images supplied (a square mark and a mark-plus-wordmark lockup) are now the app's identity, and the
+retired "AK" branding is gone from the binary.
+
+- **Launcher:** every `mipmap-*dpi` bitmap and the adaptive foreground are regenerated from the supplied
+  1024px mark — glyph at 62% of the adaptive canvas (74% of the legacy bitmap), centred on `#08090C`, with
+  the foreground still inset 6dp inside the mask's safe zone.
+- **Banner:** `banner_img.png` (the Android TV launcher banner, `android:banner`) is the supplied lockup,
+  scaled to 320×180 on the same near-black ground.
+- **In-app mark:** `streamr_mark.png`, `streamr_mark_small.png` and `streamr_mark_fg.png` are the supplied
+  glyph, so the top bar, the player headers and the info card all show it.
+- **Wordmark:** the header wordmark is painted with the lockup's two gradient stops (amber → gold) instead
+  of one flat colour.
+- **AK is out of the UI:** the hero's placeholder title said "AK News", the hero logo caption said "AK NEWS",
+  the EPG request carried an `AK-TV-EPG/1.0` user agent, and three unused `aktv_*_cinematic` / `ic_brand`
+  crimson vectors were still in `res/drawable`. All changed or deleted; `res` now contains no AK branding.
