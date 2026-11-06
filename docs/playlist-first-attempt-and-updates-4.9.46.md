@@ -1111,6 +1111,8 @@ built to that composition rather than to an interpretation of it.
   than clipped (0.50 of the screen for live, 0.42 for the film shelves).
 - **Cards**: 12dp rounded artwork with a bottom scrim, the title on the card's baseline at 13sp, the LIVE flag and the
   programme one line above it - no more text fighting the card's edge.
+- **Artifacts**: the release assets are named `STREAMR-arm32.apk` / `STREAMR-arm64.apk`, and the updater's
+  temporary file follows, so nothing the user downloads still says AK TV.
 - **Player**: the watch screen's chrome - amber eyebrow, Sora title, `elapsed / duration` refreshed from the player tick,
   then Back and one glass pill row (change source, audio & subtitles, retry, playback details). Play in the hero starts a
   film immediately; a series opens its episodes instead of pretending to play a title with no episode selected.

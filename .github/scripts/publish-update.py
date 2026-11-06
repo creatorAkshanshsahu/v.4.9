@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-ASSETS = (("arm32", "AK-TV-arm32.apk"), ("arm64", "AK-TV-arm64.apk"))
+ASSETS = (("arm32", "STREAMR-arm32.apk"), ("arm64", "STREAMR-arm64.apk"))
 
 
 def parse_version(gradle_text):

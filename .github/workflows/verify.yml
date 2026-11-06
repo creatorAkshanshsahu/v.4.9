@@ -52,8 +52,8 @@ jobs:
         if: success()
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
-          cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+          cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
+          cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
       - name: Validate and checksum the APKs
         if: success()
         run: |
@@ -69,7 +69,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-${{ steps.build.outputs.version }}
+          name: STREAMR-${{ steps.build.outputs.version }}
           path: |
             out/*.apk
             out/SHA256SUMS
@@ -90,13 +90,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: AK-TV-*
+          pattern: STREAMR-*
           path: out
           merge-multiple: true
       - name: Build the in-app update manifest
         run: |
-          test -s out/AK-TV-arm32.apk
-          test -s out/AK-TV-arm64.apk
+          test -s out/STREAMR-arm32.apk
+          test -s out/STREAMR-arm64.apk
           python3 .github/scripts/publish-update.test.py
           python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
       - name: Publish the rolling latest release
@@ -105,6 +105,6 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
-            out/AK-TV-arm32.apk out/AK-TV-arm64.apk out/update.json out/SHA256SUMS \
+            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \
             --target "$GITHUB_SHA" \
             --title "STREAMR latest build" --notes-file out/update-notes.md

@@ -19,8 +19,8 @@ def apk(path: Path, abi: str) -> None:
 
 with tempfile.TemporaryDirectory(prefix="aktv-apk-check-") as temp:
     out = Path(temp)
-    apk(out / "AK-TV-arm32.apk", "armeabi-v7a")
-    apk(out / "AK-TV-arm64.apk", "arm64-v8a")
+    apk(out / "STREAMR-arm32.apk", "armeabi-v7a")
+    apk(out / "STREAMR-arm64.apk", "arm64-v8a")
     result = subprocess.run([sys.executable, str(SCRIPT), str(out)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (out / "SHA256SUMS").is_file()
@@ -28,15 +28,15 @@ with tempfile.TemporaryDirectory(prefix="aktv-apk-check-") as temp:
 
     wrong = Path(temp) / "wrong"
     wrong.mkdir()
-    apk(wrong / "AK-TV-arm32.apk", "arm64-v8a")
-    apk(wrong / "AK-TV-arm64.apk", "arm64-v8a")
+    apk(wrong / "STREAMR-arm32.apk", "arm64-v8a")
+    apk(wrong / "STREAMR-arm64.apk", "arm64-v8a")
     result = subprocess.run([sys.executable, str(SCRIPT), str(wrong)], capture_output=True, text=True)
     assert result.returncode != 0 and "Unexpected native ABI" in result.stderr
 
     corrupt = Path(temp) / "corrupt"
     corrupt.mkdir()
-    (corrupt / "AK-TV-arm32.apk").write_bytes(b"not an apk zip")
-    apk(corrupt / "AK-TV-arm64.apk", "arm64-v8a")
+    (corrupt / "STREAMR-arm32.apk").write_bytes(b"not an apk zip")
+    apk(corrupt / "STREAMR-arm64.apk", "arm64-v8a")
     result = subprocess.run([sys.executable, str(SCRIPT), str(corrupt)], capture_output=True, text=True)
     assert result.returncode != 0 and "Invalid or unexpectedly small APK" in result.stderr
 

@@ -17,8 +17,8 @@ class UpdateManifestTest {
           "build": "1234",
           "notes": "Playlist section + faster first attempt",
           "apks": {
-            "arm32": {"url": "https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/AK-TV-arm32.apk", "sha256": "$sha64", "size": 100},
-            "arm64": {"url": "https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/AK-TV-arm64.apk", "sha256": "${"b".repeat(64)}", "size": 200}
+            "arm32": {"url": "https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/STREAMR-arm32.apk", "sha256": "$sha64", "size": 100},
+            "arm64": {"url": "https://github.com/creatorAkshanshsahu/v.4.9/releases/latest/download/STREAMR-arm64.apk", "sha256": "${"b".repeat(64)}", "size": 200}
           }
         }
     """.trimIndent()
@@ -27,10 +27,10 @@ class UpdateManifestTest {
         val arm64 = UpdateManifest.parse(manifest, "arm64")!!
         assertEquals(63L, arm64.versionCode)
         assertEquals("4.9.46", arm64.versionName)
-        assertTrue(arm64.apkUrl.endsWith("AK-TV-arm64.apk"))
+        assertTrue(arm64.apkUrl.endsWith("STREAMR-arm64.apk"))
         assertEquals(200L, arm64.size)
         val arm32 = UpdateManifest.parse(manifest, "arm32")!!
-        assertTrue(arm32.apkUrl.endsWith("AK-TV-arm32.apk"))
+        assertTrue(arm32.apkUrl.endsWith("STREAMR-arm32.apk"))
         assertEquals("4.9.46 (code 63)", arm32.label)
     }
 

@@ -78,7 +78,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-native-ui-previews
+          name: STREAMR-native-ui-previews
           path: app/build/reports/ui-preview/*.webp
           if-no-files-found: error
           retention-days: 14
@@ -99,24 +99,24 @@ jobs:
       - name: Rename APKs
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
-          cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+          cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
+          cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
       - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
           python3 .github/scripts/verify-apk-archives.py out
       - uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-apks
+          name: STREAMR-apks
           path: |
             out/*.apk
             out/SHA256SUMS
             out/apk-validation.json
       - uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-arm32-install
+          name: STREAMR-arm32-install
           path: |
-            out/AK-TV-arm32.apk
+            out/STREAMR-arm32.apk
             out/SHA256SUMS
             out/apk-validation.json
 
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: AK-TV-apks
+          name: STREAMR-apks
           path: out
       - name: Build the in-app update manifest
         run: |
@@ -146,5 +146,5 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
-            out/AK-TV-arm32.apk out/AK-TV-arm64.apk out/update.json out/SHA256SUMS \
+            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \
             --title "STREAMR latest build" --notes-file out/update-notes.md

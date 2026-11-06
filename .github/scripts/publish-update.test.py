@@ -40,11 +40,11 @@ def test_manifest_points_at_the_rolling_release_assets():
 def test_missing_apk_fails_instead_of_publishing_a_partial_manifest():
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp)
-        (out / "AK-TV-arm64.apk").write_bytes(b"apk")
+        (out / "STREAMR-arm64.apk").write_bytes(b"apk")
         try:
-            module.build_manifest(63, "4.9.46", "1", "owner/repo", "", {"arm64": out / "AK-TV-arm64.apk"})
+            module.build_manifest(63, "4.9.46", "1", "owner/repo", "", {"arm64": out / "STREAMR-arm64.apk"})
         except SystemExit as error:
-            assert "AK-TV-arm32.apk" in str(error)
+            assert "STREAMR-arm32.apk" in str(error)
         else:
             raise AssertionError("a missing APK must fail the publish step")
 

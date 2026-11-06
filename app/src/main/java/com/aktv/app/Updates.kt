@@ -143,8 +143,8 @@ internal object Updater {
 
     fun download(context: Context, release: UpdateRelease, onProgress: (Int) -> Unit, cancelled: () -> Boolean): File {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        dir.listFiles()?.forEach { old -> if (old.name != "AK-TV-${release.versionCode}.apk") old.delete() }
-        val target = File(dir, "AK-TV-${release.versionCode}.apk")
+        dir.listFiles()?.forEach { old -> if (old.name != "STREAMR-${release.versionCode}.apk") old.delete() }
+        val target = File(dir, "STREAMR-${release.versionCode}.apk")
         val request = Request.Builder().url(release.apkUrl).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("Update download failed (HTTP ${response.code})")
