@@ -189,9 +189,10 @@ internal object HomeChrome {
             lp.width = ((if (compact) 176 else 200) * dp).toInt()
             lp.height = ((if (compact) 99 else 113) * dp).toInt()
         } else if (!poster) {
-            lp.width = ((if (compact) 148 else 180) * dp).toInt()
-            lp.height = ((if (compact) 82 else 101) * dp).toInt()
-            tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
+            // 16:9 artwork with the copy on a scrim, matching the poster rails beside it.
+            lp.width = ((if (compact) 168 else 216) * dp).toInt()
+            lp.height = ((if (compact) 95 else 122) * dp).toInt()
+            tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 46 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
         } else {
             // 2:3 artwork with the copy inside it: the site's rail cards carry the kind eyebrow and the

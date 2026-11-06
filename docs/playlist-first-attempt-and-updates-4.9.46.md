@@ -1310,3 +1310,15 @@ dark type, the way `Play` is on the hero.
 
 Kept deliberately, because they are app behaviour the demo never had: the source picker, audio/subtitle
 sheet, episode picker, playback details, retry, auto-next, the Media3 seek bar and the health scan.
+
+## 53. One card language, one brand — 5.3.5 (code 114)
+
+- **Channel tiles** joined the poster tiles: a 16:9 artwork card with the same 14dp round, the same
+  bottom scrim, an amber `LIVE` tint, the channel in Sora bold and its now-playing line underneath. The
+  plate, the 1dp border and the floating caption row are gone, so the live shelf and the film shelf read
+  as one rail system. Taller too — 216×122 full, 168×95 compact, against 180×101 before.
+- **The `LIVE` chip in the player is solid amber with dark type.** A 12% amber tint vanished over a bright
+  pitch. This is still deliberately not the reference's red.
+- **Stale brand cleaned out of the player:** the programme guide had been headed `AK TV / LIVE` since long
+  before the rename; it says `STREAMR / LIVE` now, and the channel-search field uses the glass pill instead
+  of borrowing the badge drawable.

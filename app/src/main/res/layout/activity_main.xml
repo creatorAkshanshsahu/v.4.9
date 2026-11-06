@@ -52,8 +52,8 @@
                 android:clickable="true" android:contentDescription="Back"
                 android:drawableStart="@drawable/ic_back" android:paddingStart="0dp"/>
             <TextView android:id="@+id/playerLive" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="14dp" android:text="LIVE" android:background="@drawable/live_pill"
-                android:textColor="@color/amber" android:textSize="10sp" android:fontFamily="@font/sora_bold"
+                android:layout_marginStart="14dp" android:text="LIVE" android:background="@drawable/live_chip"
+                android:textColor="@color/abyss" android:textSize="10sp" android:fontFamily="@font/sora_bold"
                 android:letterSpacing="0.1" android:paddingStart="8dp" android:paddingEnd="8dp"
                 android:paddingTop="3dp" android:paddingBottom="3dp" android:includeFontPadding="false"/>
             <TextView android:id="@+id/playerTopTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
@@ -129,7 +129,7 @@
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical"
                 android:orientation="horizontal">
                 <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV  /  LIVE"
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="STREAMR  /  LIVE"
                         android:textColor="@color/ion" android:textSize="10sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.12"/>
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp"
                         android:text="Programme guide" android:textColor="@color/text" android:textSize="24sp" android:fontFamily="@font/sora_bold"/>
@@ -181,7 +181,7 @@
                     android:paddingStart="14dp" android:paddingEnd="14dp" android:singleLine="true"
                     android:hint="Search channels…" android:textColor="@color/text" android:textColorHint="@color/text_faint"
                     android:textSize="13sp" android:fontFamily="@font/sora_regular" android:imeOptions="actionSearch"
-                    android:background="@drawable/live_pill" android:focusable="true" android:focusableInTouchMode="true"/>
+                    android:background="@drawable/nav_glass" android:focusable="true" android:focusableInTouchMode="true"/>
                 <androidx.recyclerview.widget.RecyclerView android:id="@+id/chList" android:layout_width="match_parent"
                     android:layout_height="0dp" android:layout_weight="1" android:clipToPadding="false"
                     android:paddingBottom="24dp" android:overScrollMode="never" android:requiresFadingEdge="none"/>
