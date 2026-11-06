@@ -1,6 +1,8 @@
 package com.aktv.app
 
 import android.animation.ValueAnimator
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
@@ -114,6 +116,9 @@ class MainActivity : AppCompatActivity() {
     }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
     private val dp by lazy { resources.displayMetrics.density }
+    /** True while the startup-failure screen owns the window: nothing else may touch a view it did not build. */
+    private var crashScreen = false
+    private val CRASH_MARK = "Crash ·"
     private val ui = Handler(Looper.getMainLooper())
     private val fRegular by lazy { ResourcesCompat.getFont(this, R.font.sora_regular) ?: Typeface.DEFAULT }
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
@@ -206,7 +211,9 @@ class MainActivity : AppCompatActivity() {
     private val updateTicker = object : Runnable {
         override fun run() {
             if (isFinishing || isDestroyed) return
-            checkForUpdates(interactive = false)
+            // This fires a few seconds after launch: a throw here closed the app at start.
+            runCatching { checkForUpdates(interactive = false) }
+                .onFailure { CrashLog.record(this@MainActivity, it, "update ticker") }
             ui.postDelayed(this, UPDATE_TICK_MS)
         }
     }
@@ -277,11 +284,39 @@ class MainActivity : AppCompatActivity() {
     private var searchShown = false; private val searchBuf = StringBuilder(); private var results = listOf<Channel>()
 
     override fun onCreate(b: Bundle?) {
-        super.onCreate(b)
-        // First, before anything that can fail: a run that dies while starting must still leave a note, or the
-        // next launch has nothing to tell the viewer or this app's own diagnostics.
-        CrashLog.install(this)
-        CrashLog.beginSession(this)
+        // Installed before anything else, the framework's own setup included: a run that dies while starting
+        // must leave a note, or the next launch has nothing to tell the viewer.
+        runCatching { CrashLog.install(this) }
+        try {
+            super.onCreate(b)
+        } catch (t: Throwable) {
+            // A broken theme or window is still a start crash; it must be readable, not a closed app.
+            runCatching { CrashLog.record(this, t) }
+            runCatching { showCrashScreen(noteFor("super.onCreate", t)) }
+            return
+        }
+        // A crash loop must not be silent. A stack left by the last run goes on screen *before* any work that
+        // could die again — a television has no log, and "it closes by itself" is not a diagnosis.
+        val previousCrash = runCatching { CrashLog.report(this) }.getOrNull()
+        val dyingAtLaunch = runCatching { CrashLog.launchStreak(this) >= 3 }.getOrDefault(false)
+        if (previousCrash != null && (previousCrash.contains(CRASH_MARK) || dyingAtLaunch)) {
+            runCatching { showCrashScreen(previousCrash) }.onFailure { finish() }
+            return
+        }
+        runCatching { CrashLog.beginSession(this) }
+        try {
+            startUp()
+        } catch (t: Throwable) {
+            // Anything thrown while building the shelf becomes a readable screen instead of a closed app.
+            runCatching { CrashLog.record(this, t) }
+            runCatching { showCrashScreen(noteFor("onCreate", t)) }.onFailure { finish() }
+        }
+    }
+
+    private fun noteFor(where: String, error: Throwable) =
+        "Crash · $where · ${Thread.currentThread().name}\n" + android.util.Log.getStackTraceString(error)
+
+    private fun startUp() {
         // A resolver that cannot be built is a channel list that stays empty, not an app that closes.
         runCatching { TgServers.init(applicationContext) }
         // Old releases remembered web/backup engines and guessed HTTP profiles. Do not carry those forward.
@@ -497,7 +532,10 @@ class MainActivity : AppCompatActivity() {
         Movies.timingListener = { event -> android.util.Log.i("AKTV-VOD", "${event.stage} ${event.elapsedMs}ms cache=${event.cacheHit}") }
         loadHomeTrending()
         // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
-        if (!safeMode) ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
+        if (!safeMode) ui.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            runCatching { Movies.prefetchOnLaunch() }.onFailure { CrashLog.record(this, it, "prefetch") }
+        }, 8_000)
         // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         watchNetworkForUpdates()
@@ -506,7 +544,10 @@ class MainActivity : AppCompatActivity() {
                 .takeIf { prefs.contains("site_browser") }
             SiteBrowserGate.load(this, if (safeMode) false else allow)
         }
-        ui.postDelayed({ if (!isFinishing && !isDestroyed) offerExitReport() }, 15_000)
+        ui.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            runCatching { offerExitReport() }.onFailure { CrashLog.record(this, it, "exit report") }
+        }, 15_000)
         // The version in the rail is also a touch route to the update check, for the phone layout.
         findViewById<TextView>(R.id.navVersion).apply {
             text = appVersion
@@ -519,6 +560,92 @@ class MainActivity : AppCompatActivity() {
         // The entrance view stays in the hierarchy but is never started: nothing animates, nothing is drawn.
         intro.skip()
     }
+
+    // ---------- crash screen ----------
+
+    /**
+     * The reason the last run died, on the screen, with the text already on the clipboard.
+     *
+     * A television has no log to inspect, and a crash loop closes the app before any dialog can be read. This
+     * is deliberately built by hand out of plain views: it must survive whatever took the shelf down.
+     */
+    private fun showCrashScreen(note: String) {
+        crashScreen = true
+        runCatching { ImmersiveUi.show(window) }
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Accent.ABYSS)
+            setPadding(px(56), px(40), px(56), px(36))
+        }
+        column.addView(TextView(this).apply {
+            text = "STREAMR stopped on the last start"
+            setTextColor(Accent.TEXT); textSize = 26f; typeface = fBold
+        })
+        column.addView(TextView(this).apply {
+            text = "Photograph this screen and send it over — the full report is below, and it is also on the " +
+                "clipboard. Continue opens the app anyway; if it stops again, this screen returns with the new report."
+            setTextColor(Accent.DIM); textSize = 14f; setPadding(0, px(8), 0, px(10))
+        })
+        // The line a photograph can actually capture: the exception and its message, at reading size.
+        causeLine(note)?.let { cause ->
+            column.addView(TextView(this).apply {
+                text = cause
+                setTextColor(Accent.AMBER); textSize = 17f; typeface = fSemi
+                setPadding(0, 0, 0, px(10))
+            })
+        }
+        val body = TextView(this).apply {
+            text = note.take(12_000)
+            setTextColor(0xFFD6DCE5.toInt()); textSize = 12f
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        column.addView(ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; setPadding(0, px(16), 0, 0)
+        }
+        val continueButton = TextView(this).apply {
+            text = "Continue to STREAMR"; textSize = 15f; typeface = fBold; isFocusable = true; isClickable = true
+            gravity = Gravity.CENTER; setTextColor(Accent.ABYSS); setPadding(px(26), px(13), px(26), px(13))
+            background = Ui.pill(dp, Accent.TEXT, 12f)
+            setOnClickListener {
+                runCatching { CrashLog.acknowledge(this@MainActivity, note) }
+                startActivity(Intent(this@MainActivity, MainActivity::class.java))
+                finish()
+            }
+        }
+        val copyButton = TextView(this).apply {
+            text = "Copy report"; textSize = 15f; typeface = fSemi; isFocusable = true; isClickable = true
+            gravity = Gravity.CENTER; setTextColor(Accent.TEXT); setPadding(px(26), px(13), px(26), px(13))
+            background = Ui.pill(dp, 0x33FFFFFF, 12f)
+            setOnClickListener { copyReport(note) }
+        }
+        row.addView(continueButton, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(12) })
+        row.addView(copyButton, LinearLayout.LayoutParams(-2, -2))
+        column.addView(row)
+        setContentView(column)
+        copyReport(note)
+        continueButton.requestFocus()
+    }
+
+    /** The first line of a stack that names what went wrong, or null when the note has no stack. */
+    private fun causeLine(note: String): String? = note.lineSequence()
+        .map { it.trim() }
+        .firstOrNull { line ->
+            line.length in 4..200 && !line.startsWith("at ") &&
+                (line.contains("Exception") || line.contains("Error") || line.contains("Throwable"))
+        }
+
+    private fun copyReport(note: String) {
+        runCatching {
+            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                .setPrimaryClip(ClipData.newPlainText("STREAMR last exit", note.take(12_000)))
+        }
+        Toast.makeText(this, "Report copied — paste it into the chat", Toast.LENGTH_LONG).show()
+    }
+
+    private fun px(value: Int) = (value * dp).toInt()
 
     // ---------- helpers ----------
     private fun key(sb: SpannableStringBuilder, k: String, label: String) {
@@ -2658,6 +2785,9 @@ class MainActivity : AppCompatActivity() {
         listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).any { it.isFocused && it.isShown }
 
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        // The failure screen is built by hand; the shelf's key handling must not run against views that were
+        // never created. Back or D-pad still reaches the buttons inside it.
+        if (crashScreen) return super.dispatchKeyEvent(e)
         if (intro.visibility == View.VISIBLE) { if (e.action == KeyEvent.ACTION_DOWN) intro.skip(); return true }
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
         // The rail's version chip is hidden on a television, which left the update check with no manual
@@ -2792,9 +2922,11 @@ class MainActivity : AppCompatActivity() {
     /** While the app is open, quietly refreshes channel lists and checks the guide feed on its own cadence. */
     private val autoRefresh = object : Runnable {
         override fun run() {
-            if (layer.visibility != View.VISIBLE && !searchShown && System.currentTimeMillis() - lastRefresh > 4 * 60_000L) loadChannels()
-            TgServers.refreshSite()
-            refreshProgrammeFeed()
+            runCatching {
+                if (layer.visibility != View.VISIBLE && !searchShown && System.currentTimeMillis() - lastRefresh > 4 * 60_000L) loadChannels()
+                TgServers.refreshSite()
+                refreshProgrammeFeed()
+            }.onFailure { CrashLog.record(this@MainActivity, it, "auto refresh") }
             ui.postDelayed(this, 5 * 60_000L)
         }
     }
@@ -2807,6 +2939,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (crashScreen) return
+        // Everything the start does - the update check, the guide feed, a channel refresh - is optional.
+        // A throw in any of it must cost that feature, never the process.
+        runCatching { startRun() }.onFailure { CrashLog.record(this, it, "onStart") }
+    }
+
+    private fun startRun() {
         // A television can sit on this screen for days. A check that only ran at launch would never see a
         // build published in between, so the check is repeated while the app is in front.
         ui.removeCallbacks(updateTicker); ui.postDelayed(updateTicker, UPDATE_TICK_MS)
@@ -2817,6 +2956,7 @@ class MainActivity : AppCompatActivity() {
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
+        if (crashScreen) { super.onStop(); return }
         abortChannelHealthScanForLifecycle()
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; ImmersiveUi.show(window); layer.keepScreenOn = false; resetGuide(); resetProgrammeGuide()
@@ -2957,6 +3097,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkForUpdates(interactive: Boolean, force: Boolean = false) {
+        // The update check runs on the main thread at launch and every minute after. Whatever it meets -
+        // a missing permission, a truncated response, a bad JSON field - the shelf must still be there.
+        try {
+            checkForUpdatesNow(interactive, force)
+        } catch (t: Throwable) {
+            updateChecking = false
+            CrashLog.record(this, t, "update check")
+        }
+    }
+
+    private fun checkForUpdatesNow(interactive: Boolean, force: Boolean = false) {
         if (updateChecking || updateDownloading) return
         val code = Updater.installedCode(this)
         val last = prefs.getLong("update_checked_at", 0L)

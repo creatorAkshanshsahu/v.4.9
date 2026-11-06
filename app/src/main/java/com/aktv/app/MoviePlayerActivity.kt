@@ -119,13 +119,14 @@ class MoviePlayerActivity : Activity() {
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
+        CrashLog.install(this)
         try {
             title = FrostTitle(intent.getIntExtra("tmdb", 0), intent.getStringExtra("type").orEmpty(),
                 saved?.getInt("season") ?: intent.getIntExtra("season", 0),
                 saved?.getInt("episode") ?: intent.getIntExtra("episode", 0))
-        } catch (_: IllegalArgumentException) {
+        } catch (bad: IllegalArgumentException) {
             Toast.makeText(this, "This movie or episode has no valid TMDB identity.", Toast.LENGTH_LONG).show()
-            finish(); return
+            CrashLog.record(this, bad); finish(); return
         }
         titleName = intent.getStringExtra("name").orEmpty().take(180)
         provider = FrostProvider.values().firstOrNull { it.id == prefs.getString("vod_provider_${title.progressKey}", null) }
@@ -134,8 +135,15 @@ class MoviePlayerActivity : Activity() {
         desiredPlay = saved?.getBoolean("play", true) ?: true
         restoreProgress()
         saved?.getLong("position")?.let { lastPosition = it.coerceAtLeast(0) }
-        buildUi()
-        initialized = true
+        try {
+            buildUi()
+            initialized = true
+        } catch (error: Throwable) {
+            // A player that cannot build its own surface closes politely and leaves the reason behind.
+            CrashLog.record(this, error)
+            Toast.makeText(this, "The player could not open this title.", Toast.LENGTH_LONG).show()
+            finish()
+        }
     }
 
     private fun buildUi() {

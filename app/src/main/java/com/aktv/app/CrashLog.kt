@@ -32,6 +32,8 @@ internal object CrashLog {
     private const val SHOWN = "exit_note_shown"
     private const val PREFS = "aktv"
     private const val MAX_NOTE = 12_000
+    private const val CRASH = "Crash ·"
+    private const val STREAK = "launch_streak"
 
     @Volatile private var installed = false
 
@@ -58,15 +60,42 @@ internal object CrashLog {
         val previous = try { if (session.exists()) session.readText() else "" } catch (_: Exception) { "" }
         if (previous.startsWith("running")) {
             // No onPause last time: the system killed the process. Keep the previous marker, because it
-            // carries the moment it started, and add the reason this can be concluded.
-            write(app, "Previous run ended without a clean stop\n$previous${describe(app)}")
+            // carries the moment it started, and add the reason this can be concluded — unless the note
+            // already holds a stack trace, which explains far more than "no clean stop" and must not be
+            // overwritten on the very launch that is about to show it.
+            val existing = try { File(app.filesDir, NOTE).readText() } catch (_: Exception) { "" }
+            if (!existing.contains(CRASH)) write(app, "Previous run ended without a clean stop\n$previous${describe(app)}")
         }
         writeFile(session, "running · ${stamp()}\n${describe(app)}")
+        // A start that never reaches `onPause` leaves this count standing. Three in a row is a crash loop
+        // whatever killed the process - including native and out-of-memory deaths no handler can see.
+        runCatching {
+            val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            prefs.edit().putInt(STREAK, prefs.getInt(STREAK, 0) + 1).apply()
+        }
     }
+
+    /** How many starts in a row ended before the app reached the background, this one included. */
+    fun launchStreak(context: Context): Int =
+        runCatching {
+            context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(STREAK, 0)
+        }.getOrDefault(0)
 
     /** Call from `onPause`: a run that reaches here was not killed by the system. */
     fun endSession(context: Context) {
-        writeFile(File(context.applicationContext.filesDir, SESSION), "stopped · ${stamp()}\n")
+        val app = context.applicationContext
+        writeFile(File(app.filesDir, SESSION), "stopped · ${stamp()}\n")
+        runCatching { app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(STREAK, 0).apply() }
+    }
+
+    /** Writes a crash the app caught itself, e.g. a `Throwable` from `onCreate` that it could survive. */
+    fun record(context: Context, error: Throwable, where: String = "") {
+        try {
+            val label = if (where.isBlank()) Thread.currentThread().name else "${Thread.currentThread().name} · $where"
+            write(context.applicationContext, "Crash · $label\n" + describe(context.applicationContext) + stack(error))
+        } catch (_: Throwable) {
+            // Diagnostics must never take the app down with them.
+        }
     }
 
     /** The note to offer the user, or null when there is nothing new to show. */

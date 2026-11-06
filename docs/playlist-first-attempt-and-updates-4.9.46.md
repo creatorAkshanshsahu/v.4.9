@@ -1425,3 +1425,43 @@ runs 40 more seconds of queued callbacks — the exact shape of the crash.
 
 If the box still closes by itself, the app now has somewhere to say why: 15 seconds in it offers the previous
 run's note (crash stack, or "ended without a clean stop") with a Copy button.
+
+## 59. A start that cannot be shown must still be readable — 5.4.4 (code 123)
+
+5.4.3 fixed one real cause of the start crash and the box still closed by itself, so this build stops
+depending on any single cause being the right one: the launch is made survivable, and any failure that
+does get through is written down **and put on the screen**, because a television has no log to read.
+
+**The launch cannot die on the way to the shelf.**
+
+- `MainActivity.onCreate` is a wrapper now: `CrashLog.install` runs first, `super.onCreate` is inside the
+  guard as well (a broken theme is a start crash too), a stack left by the previous run is shown *before*
+  any work that could fail again, and the body that inflates `activity_main` and resolves its views lives
+  in `startUp`, inside `try/catch (Throwable)`.
+- `onStart` — the update check, the guide feed, the 5-minute auto refresh — moved into `startRun()` behind
+  `runCatching`, and the 5.4.3 `RejectedExecutionException` fix stays.
+- `checkForUpdates` keeps its throttle and network policy unchanged, but the work happens in
+  `checkForUpdatesNow`, so a throw inside the launch check costs the check, not the process.
+- The update ticker and the auto-refresh runnable record their own failures.
+- `MoviePlayerActivity` records a bad identity or a `buildUi` failure and closes politely instead of
+  taking the process with it.
+
+**Any failure that does get through is shown.**
+
+- `CrashLog.record(context, error, where)` writes `Crash · <thread> · <where>`, the build/device/heap block
+  and the stack.
+- `CrashLog.beginSession` no longer overwrites a stack with "Previous run ended without a clean stop" — the
+  note that explains a crash is what the next launch is about to display.
+- **A new startup screen**: when the previous note holds a crash, `onCreate` builds a hand-made screen
+  (plain `LinearLayout`, no layout resource, nothing that could fail the same way) showing the exception and
+  its message at reading size, the whole report below it, and *Continue to STREAMR* / *Copy report*. The
+  report is copied on arrival, so a photograph of the screen is enough.
+- **A silent crash loop is caught too.** `beginSession` counts starts that never reach `onPause`; three in a
+  row turn the same screen on with whatever note exists. This is what covers the deaths no Java handler can
+  see — a native crash in the player, an out-of-memory kill, an ANR kill.
+- While that screen owns the window the shelf's key handling, `onStart` and `onStop` are skipped, so nothing
+  touches a view that was never created.
+
+Two more tests boot the activity on the television qualifier: one leaves a stack in `last-exit.txt` and
+checks that the failure screen shows it instead of the shelf, one sets a launch streak of four and checks
+that a silent loop is surfaced the same way.
