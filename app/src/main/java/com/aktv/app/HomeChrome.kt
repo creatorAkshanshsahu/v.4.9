@@ -74,7 +74,7 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.searchBtn).apply {
             layoutParams.width = px(38); layoutParams.height = px(38)
             text = ""
-            val icon = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.ic_search, root.context)
+            val icon = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.ic_search, root.context.theme)
             val size = px(17)
             icon?.setBounds(0, 0, size, size)
             setCompoundDrawables(icon, null, null, null)
@@ -82,7 +82,7 @@ internal object HomeChrome {
             gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
             setPadding(px(11), 0, 0, 0)
             setTextColor(Accent.TEXT)
-            background = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.circle_glass, root.context)
+            background = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.circle_glass, root.context.theme)
         }
         root.findViewById<View>(R.id.phoneNavScroll).visibility = if (m.phone) View.VISIBLE else View.GONE
 
@@ -96,15 +96,16 @@ internal object HomeChrome {
         val heroHeight = (screenHeight * when {
             m.phone && m.compact -> 0.34f
             m.phone -> 0.46f
+            movies -> 0.46f
             m.compact -> 0.52f
-            else -> 0.60f
+            else -> 0.58f
         }).toInt()
         root.findViewById<View>(R.id.heroMedia).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
                 height = heroHeight + px(nav) - px(6)
                 topMargin = px(nav) - px(6); marginStart = inset; marginEnd = inset
             }
-            background = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.hero_card, root.context)
+            background = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.hero_card, root.context.theme)
             clipToOutline = true
             outlineProvider = object : android.view.ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: android.graphics.Outline) {

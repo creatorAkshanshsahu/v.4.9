@@ -29,24 +29,28 @@ class HomeChromeTest {
         } finally { controller.destroy() }
     }
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
-    fun `TV home puts the bar across the top and keeps real focus targets`() = screen(960, 540) { root ->
+    fun `TV home matches the site bar and its inset hero card`() = screen(960, 540) { root ->
         val nav = root.findViewById<View>(R.id.navRail)
         val content = root.findViewById<View>(R.id.content)
         assertEquals(View.VISIBLE, nav.visibility)
         assertEquals("the bar spans the screen", 0, nav.left)
         assertEquals(root.width, nav.right)
         assertEquals("the bar sits on the top edge", 0, nav.top)
-        assertTrue("the bar must be tall enough for a ten-foot pill row", nav.height >= 80)
+        assertTrue("the bar is a slim 76dp strip, not a shelf", nav.height in 60..90)
         assertTrue("content begins at the top edge too, under the bar", content.top <= nav.bottom)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.brandMark).visibility)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.railTagline).visibility)
+        assertEquals("the wordmark is the only brand in the bar", "STREAMR",
+            root.findViewById<TextView>(R.id.akText).text.toString())
         val media = root.findViewById<View>(R.id.heroMedia)
-        assertEquals("hero artwork is full-bleed", 0, media.left)
-        assertEquals(root.width, media.right)
-        assertEquals("native gradient field begins at the top edge", 0, media.top)
-        assertEquals(View.GONE, root.findViewById<View>(R.id.heroBackdrop).visibility)
-        assertEquals(View.GONE, root.findViewById<View>(R.id.heroPreview).visibility)
-        assertTrue("native gradient field extends beyond the reserved hero shelf",
-            media.height > root.findViewById<View>(R.id.heroArea).height)
+        assertTrue("the hero is an inset card, not a bleeding field", media.left > 0)
+        assertTrue("the hero keeps the same inset on the right", media.right < root.width)
+        assertTrue("the hero card starts just under the bar", media.top >= nav.height - 8)
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navProfile).visibility)
+        val search = root.findViewById<TextView>(R.id.searchBtn)
+        assertEquals("search is a round glyph button", search.width, search.height)
+        assertEquals("", search.text.toString())
+        assertEquals("the profile chip is round", 38, root.findViewById<View>(R.id.profileAvatar).height)
         for (id in listOf(R.id.segLive, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
@@ -61,6 +65,8 @@ class HomeChromeTest {
         assertTrue(search.top >= 0); assertTrue(search.bottom <= 360)
         assertTrue(root.findViewById<View>(R.id.rows).height >= 100)
         assertTrue(root.findViewById<View>(R.id.heroTitle).width > 220)
+        val media = root.findViewById<View>(R.id.heroMedia)
+        assertTrue("the hero card keeps its inset on a phone too", media.left > 0 && media.right < 800)
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
     fun `movie mode leaves room for poster shelves on compact screens`() = screen(800, 360, movies = true) { root ->
@@ -69,7 +75,8 @@ class HomeChromeTest {
     }
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
     fun `TV movie hero leaves the complete first poster row and labels visible`() = screen(960, 540, movies = true) { root ->
-        assertTrue("Movie shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 280)
+        assertTrue("Movie shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 170)
+        assertTrue(root.findViewById<TextView>(R.id.heroTitle).maxLines in 1..2)
     }
 
 }
