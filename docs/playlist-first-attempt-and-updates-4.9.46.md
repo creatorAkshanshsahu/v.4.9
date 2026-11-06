@@ -1027,3 +1027,9 @@ The app is STREAMR now, by Akshansh, and it does not share a screen with the old
 - **Posters and trending cards**: 12dp corners with a hairline edge, the bottom scrim uses the new ground, and
   focus is the same 3dp white ring as the rest of the app.
 - Every remaining reference to the old wordmark asset now uses the new mark.
+
+## 40. 5.0.2 — the last of the old surfaces
+
+The shared list/row background (`Ui.focusBg`) still activated to a slate blue from the old identity; it now
+activates to amber glass, so every list that uses it - search keys, the channel guide, episode lists - matches
+the bar. The search layer already sits on the new ground and inherits the new type.

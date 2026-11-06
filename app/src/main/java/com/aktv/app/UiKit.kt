@@ -142,7 +142,7 @@ object Ui {
      * List-row background driven by the view's own state: white when focused, soft grey when activated
      * (the row that is "playing" / "open"), [rest] otherwise. The framework switches it; no code runs per focus change.
      */
-    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0xFF213542.toInt()) =
+    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0x33E8A44C) =
         StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), pill(dp, Accent.TEXT, radiusDp))
             addState(intArrayOf(android.R.attr.state_activated), pill(dp, active, radiusDp))
