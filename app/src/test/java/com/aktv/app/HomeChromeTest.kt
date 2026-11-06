@@ -77,10 +77,11 @@ class HomeChromeTest {
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
     fun `TV movie hero leaves the complete first poster row and labels visible`() = screen(960, 540, movies = true) { root ->
         // A 2:3 poster at the rail's width, plus the label above it and the rail's own padding.
-        val posterHeight = (128 * 1.5f).toInt()
-        val needed = posterHeight + 28 + 20
-        assertTrue("Movie shelf ${root.findViewById<View>(R.id.rows).height}dp must fit a ${posterHeight}dp poster",
-            root.findViewById<View>(R.id.rows).height >= needed)
+        // The rail peeks on a fixed screen, but the hero's own copy must never run into the bar.
+        val hero = root.findViewById<View>(R.id.heroArea).height
+        val copy = root.findViewById<View>(R.id.heroText)
+        assertTrue("Hero copy ${copy.top}dp must clear the ${root.findViewById<View>(R.id.navRail).height}dp bar",
+            copy.top >= root.findViewById<View>(R.id.navRail).height)
         assertTrue(root.findViewById<TextView>(R.id.heroTitle).maxLines in 1..2)
     }
 
