@@ -106,6 +106,7 @@ class MoviePlayerActivity : Activity() {
     private lateinit var overlay: FrameLayout
     private lateinit var heading: TextView
     private lateinit var episodeLine: TextView
+    private lateinit var timeLine: TextView
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
     private lateinit var nextButton: TextView
@@ -188,16 +189,25 @@ class MoviePlayerActivity : Activity() {
             setPadding(0, 0, 0, px(8))
         }
         info.addView(TextView(this).apply {
-            text = if (title.isSeries) "SERIES  /  NOW PLAYING" else "MOVIE  /  NOW PLAYING"
-            textSize = 10f; letterSpacing = 0.17f
-            setTextColor(if (title.isSeries) Accent.ION else Accent.SIGNAL)
-            setTypeface(null, Typeface.BOLD)
+            // The site's watch screen labels the title in amber and says nothing else above it.
+            text = if (title.isSeries) "SERIES" else "ORIGINAL FILM"
+            textSize = 10f; letterSpacing = 0.28f
+            setTextColor(Accent.AMBER)
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
         }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(9) })
         heading = TextView(this).apply {
-            textSize = 34f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
+            textSize = 34f; setTextColor(Accent.TEXT); maxLines = 2
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_bold)
             setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
         }
         info.addView(heading, LinearLayout.LayoutParams(-1, -2))
+        // Elapsed over duration, the one piece of state the site keeps on the watch screen.
+        timeLine = TextView(this).apply {
+            textSize = 12f; letterSpacing = 0.06f; setTextColor(Accent.DIM); maxLines = 1
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.manrope)
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(timeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(8) })
         episodeLine = TextView(this).apply {
             textSize = 13f; letterSpacing = 0.02f; setTextColor(0xFFD6DCE5.toInt()); maxLines = 1
             setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
@@ -218,9 +228,9 @@ class MoviePlayerActivity : Activity() {
         })
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(button("Exit") { finish() })
+        row.addView(button("Back") { finish() })
         sourcesButton = button("Change source") { showSources() }.also(row::addView)
-        row.addView(button("Audio & subtitles") { showTracks() })
+        row.addView(button("Audio & Subtitles") { showTracks() })
         episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
         nextButton = button("Next episode") { nextEpisode() }.also(row::addView)
         autoNextButton = button("") {
@@ -298,6 +308,24 @@ class MoviePlayerActivity : Activity() {
         }
         actionButtons += action
         return action
+    }
+
+    private fun watchTime(positionMs: Long, durationMs: Long): String {
+        fun clock(ms: Long): String {
+            val total = (ms.coerceAtLeast(0) / 1000)
+            val h = total / 3600; val m = (total % 3600) / 60; val sec = total % 60
+            return if (h > 0) String.format("%d:%02d:%02d", h, m, sec) else String.format("%02d:%02d", m, sec)
+        }
+        return "${clock(positionMs)}  /  ${clock(durationMs)}"
+    }
+
+    private fun updateWatchTime() {
+        if (!::timeLine.isInitialized) return
+        val owner = player
+        val duration = owner?.duration?.takeIf { it > 0 } ?: 0L
+        val position = owner?.currentPosition?.coerceAtLeast(0) ?: 0L
+        timeLine.text = if (duration > 0) watchTime(position, duration) else watchTime(position, lastDuration)
+        timeLine.visibility = if (failed || title.isSeries) View.GONE else View.VISIBLE
     }
 
     private fun updateTitle() {
@@ -589,6 +617,7 @@ class MoviePlayerActivity : Activity() {
                     }
                 }
             }
+            updateWatchTime()
             if (now - savedAt >= 5000) { captureProgress(); savedAt = now }
             ui.postDelayed(this, 1000)
         }
