@@ -527,7 +527,7 @@ class MainActivity : AppCompatActivity() {
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
-        setPadding((20 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt(), (20 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt())
+        setPadding((22 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt(), (22 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt())
         // Play is a white pill with dark type; every other hero action is glass with a white ring on focus.
         val bg = Ui.pill(dp, if (primary) Accent.TEXT else 0x33FFFFFF, 22f)
         background = bg
@@ -540,10 +540,9 @@ class MainActivity : AppCompatActivity() {
             }
             bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.TEXT)
             setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
-            setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[posOf(tab)].id
-        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
+        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (12 * dp).toInt() }
     }
 
     private fun layoutHero() {
@@ -588,13 +587,23 @@ class MainActivity : AppCompatActivity() {
         tv.scaleX = scale; tv.scaleY = scale
     }
 
-    private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
+    private val searchBg by lazy { Ui.pill(dp, 0x1FFFFFFF, 19f) }
+
+    /** Round glyph buttons keep their glass disc; only the ring and the lift answer focus. */
+    private fun roundStyle(tv: TextView, bg: GradientDrawable) {
+        val ring = (2 * dp).toInt().coerceAtLeast(2)
+        val on = tv.isFocused
+        bg.setColor(if (on) 0x40FFFFFF else 0x1FFFFFFF)
+        bg.setStroke(if (on) ring else 0, 0xF2FFFFFF.toInt())
+        tv.setTextColor(Accent.TEXT)
+        tv.scaleX = if (on) 1.04f else 1f
+        tv.scaleY = tv.scaleX
+    }
 
     private fun styleSegs() {
-        searchBtn.text = "Search"
         searchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tabIds[i] == tab) }
-        navStyle(searchBtn, searchBg, searchBtn.isFocused, false)
+        roundStyle(searchBtn, searchBg)
         phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tabIds[i] == tab) }
         phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)

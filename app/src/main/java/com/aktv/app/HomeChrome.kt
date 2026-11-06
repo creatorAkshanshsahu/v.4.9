@@ -96,9 +96,9 @@ internal object HomeChrome {
         val heroHeight = (screenHeight * when {
             m.phone && m.compact -> 0.34f
             m.phone -> 0.46f
-            movies -> 0.46f
+            movies -> 0.42f
             m.compact -> 0.52f
-            else -> 0.58f
+            else -> 0.50f
         }).toInt()
         root.findViewById<View>(R.id.heroMedia).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
@@ -160,7 +160,7 @@ internal object HomeChrome {
                 topMargin = px(nav) + px(24); marginEnd = inset + px(40)
             }
         }
-        root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 14), 0, px(24))
+        root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 12), 0, px(if (m.compact) 8 else 10))
         (root.findViewById<View>(R.id.status).layoutParams as LinearLayout.LayoutParams).marginStart = px(side)
         root.requestLayout()
         return m
@@ -188,7 +188,7 @@ internal object HomeChrome {
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
         } else {
-            val width = ((if (compact) 106 else 122) * dp).toInt()
+            val width = ((if (compact) 100 else 112) * dp).toInt()
             lp.width = width
             val contentWidth = (width - (24 * dp).toInt()).coerceAtLeast((72 * dp).toInt())
             tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = contentWidth
