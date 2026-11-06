@@ -76,7 +76,11 @@ class HomeChromeTest {
     }
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
     fun `TV movie hero leaves the complete first poster row and labels visible`() = screen(960, 540, movies = true) { root ->
-        assertTrue("Movie shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 170)
+        // A 2:3 poster at the rail's width, plus the label above it and the rail's own padding.
+        val posterHeight = (128 * 1.5f).toInt()
+        val needed = posterHeight + 28 + 20
+        assertTrue("Movie shelf ${root.findViewById<View>(R.id.rows).height}dp must fit a ${posterHeight}dp poster",
+            root.findViewById<View>(R.id.rows).height >= needed)
         assertTrue(root.findViewById<TextView>(R.id.heroTitle).maxLines in 1..2)
     }
 

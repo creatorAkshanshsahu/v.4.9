@@ -102,9 +102,9 @@ internal object HomeChrome {
         val heroHeight = (screenHeight * when {
             m.phone && m.compact -> 0.34f
             m.phone -> 0.46f
-            // A 2:3 poster shelf is the tallest row the app has; the movie hero yields 4% so the
-            // whole first row still lands on a 540dp screen.
-            movies -> 0.56f
+            // A 2:3 poster shelf is the tallest row the app has. The site's 70vh is a scrolling page;
+            // on a fixed 540dp screen the hero has to yield so a whole poster row still lands.
+            movies -> 0.44f
             m.compact -> 0.58f
             else -> 0.60f
         }).toInt()
@@ -197,7 +197,7 @@ internal object HomeChrome {
         } else {
             // 2:3 artwork with the copy inside it: the site's rail cards carry the kind eyebrow and the
             // title over a bottom scrim, and the tile is the artwork — no plate, no border, no caption row.
-            val width = ((if (compact) 112 else 148) * dp).toInt()
+            val width = ((if (compact) 108 else 128) * dp).toInt()
             lp.width = width
             lp.height = (width * 1.5f).toInt()
             tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = width
