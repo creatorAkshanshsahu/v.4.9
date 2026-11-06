@@ -117,16 +117,18 @@ internal object PageCrawl {
         url.substringBefore('#').substringBefore('?').substringAfterLast('/', "")
             .substringAfterLast('.', "").lowercase(Locale.US)
 
-    private fun absolute(value: String, page: String): String? = try {
+    private fun absolute(value: String, page: String): String? {
         val raw = value.trim().trim('"', '\'', ',', ';', ')')
         if (raw.isEmpty() || raw.length > 3_000) return null
         if (raw.startsWith("data:", true) || raw.startsWith("blob:", true) || raw.startsWith("javascript:", true)) return null
-        val uri = URI(page).resolve(raw.replace(" ", "%20"))
-        uri.toASCIIString().takeIf {
-            uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null
+        return try {
+            val uri = URI(page).resolve(raw.replace(" ", "%20"))
+            uri.toASCIIString().takeIf {
+                uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null
+            }
+        } catch (_: Exception) {
+            null
         }
-    } catch (_: Exception) {
-        null
     }
 
     /** A page is read as a browser sends it: the address that embedded it is the Referer. */
