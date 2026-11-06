@@ -72,7 +72,6 @@ class PlayerPreviewTest {
             }, 0, FrameLayout.LayoutParams(-1, -1))
             layer.findViewById<PlayerView>(R.id.playerView).visibility = View.INVISIBLE
             layer.findViewById<View>(R.id.playerScrim).alpha = 0.72f
-            layer.findViewById<View>(R.id.playerBrand).alpha = 1f
             layer.findViewById<View>(R.id.playerClock).alpha = 1f
             val dock = layer.findViewById<View>(R.id.playerInfoDock)
             (dock.layoutParams as FrameLayout.LayoutParams).apply {
@@ -82,12 +81,11 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
-            // Same wine gradient the player uses in production (0xF0120810 / 0xE00C0710).
-            // The earlier 0xE5080B11 / 0xD90D121A decoded to RGB (8,11,17)/(13,18,26) - dark
-            // cyan, not wine - which is where the live-player preview's teal came from.
+            // The same amber glass the player paints in production (0xF0151310 / 0xE00C0B0A, amber
+            // hairline). The old wine/red pair here is what made the preview look like a different app.
             card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
-                cornerRadius = 16f; setStroke(1, 0x59FF3448)
+                intArrayOf(0xF0151310.toInt(), 0xE00C0B0A.toInt())).apply {
+                cornerRadius = 16f; setStroke(1, 0x59E8A44C)
             }
             layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.streamr_mark)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
