@@ -29,21 +29,28 @@ class HomeChromeTest {
         } finally { controller.destroy() }
     }
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
-    fun `TV home has separated navigation content and real focus targets`() = screen(960, 540) { root ->
-        val rail = root.findViewById<View>(R.id.navRail)
+    fun `TV home puts the bar across the top and keeps real focus targets`() = screen(960, 540) { root ->
+        val nav = root.findViewById<View>(R.id.navRail)
         val content = root.findViewById<View>(R.id.content)
-        assertTrue(content.left >= rail.right)
+        assertEquals(View.VISIBLE, nav.visibility)
+        assertEquals("the bar spans the screen", 0, nav.left)
+        assertEquals(root.width, nav.right)
+        assertEquals("the bar sits on the top edge", 0, nav.top)
+        assertTrue("the bar must be tall enough for a ten-foot pill row", nav.height >= 80)
+        assertTrue("content begins at the top edge too, under the bar", content.top <= nav.bottom)
         val media = root.findViewById<View>(R.id.heroMedia)
-        assertTrue(media.left >= rail.right); assertTrue(media.right <= root.width)
+        assertEquals("hero artwork is full-bleed", 0, media.left)
+        assertEquals(root.width, media.right)
         assertEquals("native gradient field begins at the top edge", 0, media.top)
         assertEquals(View.GONE, root.findViewById<View>(R.id.heroBackdrop).visibility)
         assertEquals(View.GONE, root.findViewById<View>(R.id.heroPreview).visibility)
-        assertTrue("native gradient field extends beyond the reserved hero shelf", media.height > root.findViewById<View>(R.id.heroArea).height)
+        assertTrue("native gradient field extends beyond the reserved hero shelf",
+            media.height > root.findViewById<View>(R.id.heroArea).height)
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navProfile).visibility)
-        for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+        for (id in listOf(R.id.segLive, R.id.segV2, R.id.segJio, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
-            assertEquals(R.id.rows, view.nextFocusRightId)
+            assertEquals("$id must lead down into the rows", R.id.rows, view.nextFocusDownId)
         }
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")

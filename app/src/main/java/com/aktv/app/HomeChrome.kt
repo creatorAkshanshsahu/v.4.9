@@ -66,7 +66,8 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.phoneNavScroll).visibility = if (m.phone) View.VISIBLE else View.GONE
 
         (root.findViewById<View>(R.id.content).layoutParams as FrameLayout.LayoutParams).marginStart = 0
-        root.findViewById<View>(R.id.content).setPadding(0, px(nav), 0, 0)
+        // The bar floats over the hero (transparent gradient), so the artwork starts at the top edge.
+        root.findViewById<View>(R.id.content).setPadding(0, 0, 0, 0)
         // The tab bar is the section title on a television; the phone keeps the line above the hero.
         root.findViewById<View>(R.id.topBar).apply {
             visibility = if (m.phone) View.VISIBLE else View.GONE
