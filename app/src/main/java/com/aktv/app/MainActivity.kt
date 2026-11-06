@@ -232,6 +232,7 @@ class MainActivity : AppCompatActivity() {
     private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF171310.toInt(), 0xFF1D1712.toInt(), 0xFF0D0C0A.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View
+    private lateinit var playerTopBar: View; private lateinit var playerTopTitle: TextView
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
     private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
     private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
@@ -288,6 +289,11 @@ class MainActivity : AppCompatActivity() {
         heroDesc = findViewById(R.id.heroDesc); heroNext = findViewById(R.id.heroNext)
         infoCard = findViewById(R.id.infoCard); infoLogo = findViewById(R.id.infoLogo); infoName = findViewById(R.id.infoName)
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
+        playerTopBar = findViewById(R.id.playerTopBar); playerTopTitle = findViewById(R.id.playerTopTitle)
+        findViewById<View>(R.id.playerBack).apply {
+            setOnClickListener { closePlayer() }
+            setOnFocusChangeListener { v, focused -> v.animate().scaleX(if (focused) 1.08f else 1f).scaleY(if (focused) 1.08f else 1f).setDuration(160).start() }
+        }
         infoMono = findViewById(R.id.infoMono); infoNow = findViewById(R.id.infoNow); infoProgress = findViewById(R.id.infoProgress)
         infoDesc = findViewById(R.id.infoDesc); infoScheduleNext = findViewById(R.id.infoScheduleNext)
         infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus); infoActions = findViewById(R.id.infoActions)
@@ -1382,6 +1388,7 @@ class MainActivity : AppCompatActivity() {
         infoCard.animate().alpha(0f).translationY(14 * dp).setDuration(450).withEndAction { infoActions.visibility = View.GONE }.start()
         playerScrim.animate().alpha(0f).setDuration(450).start()
         playerClock.animate().alpha(0f).setDuration(450).start()
+        playerTopBar.animate().alpha(0f).setDuration(450).start()
     }
     private fun showInfo() {
         ui.removeCallbacks(hideInfo)
@@ -1389,12 +1396,15 @@ class MainActivity : AppCompatActivity() {
         infoCard.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
         playerScrim.animate().alpha(1f).setDuration(260).start()
         playerClock.animate().alpha(1f).setDuration(260).start()
+        playerTopBar.animate().alpha(1f).setDuration(260).start()
         ui.removeCallbacks(guideProgressTick); ui.postDelayed(guideProgressTick, 60_000)
         if (!healthScanActive) ui.postDelayed(hideInfo, 5000)
     }
     private fun bindInfo(ch: Channel) {
         infoName.text = ch.name
         infoCat.text = "${if (ch.v2) "V2 · 24/7" else ch.category}   ${current + 1} of ${shown.size}"
+        // The site's top bar names the channel the same way its guide numbers it.
+        playerTopTitle.text = "${current + 1} · ${ch.name}"
         bindLogo(infoLogo, infoMono, ch)
         val ac = accentOf(ch.key)
         spinner.indeterminateTintList = ColorStateList.valueOf(ac)
@@ -1417,12 +1427,16 @@ class MainActivity : AppCompatActivity() {
             infoNow.visibility = View.VISIBLE; infoProgress.visibility = View.GONE; infoDesc.visibility = View.GONE
             infoScheduleNext.visibility = View.GONE
         } else {
-            infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
+            // The eyebrow already says NOW PLAYING, so the line is just the programme and its slot.
+            val slot = Epg.range(n)
+            infoNow.text = if (slot.isBlank()) n.title else "${n.title}   $slot"
+            infoNow.visibility = View.VISIBLE
             infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
             infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
             val next = g?.next
             infoScheduleNext.visibility = if (next == null) View.GONE else View.VISIBLE
-            if (next != null) infoScheduleNext.text = progLine("NEXT", next)
+            // "Up next: …", the way the site's live footer phrases it.
+            if (next != null) infoScheduleNext.text = "Up next:  ${next.title}"
         }
         if (programmeGuideShown && programmeGuideCurrentChannel == shown.getOrNull(current)?.key) {
             shown.getOrNull(current)?.let { renderProgrammeGuide(g, it, loading = false) }

@@ -170,13 +170,28 @@ class MoviePlayerActivity : Activity() {
                 intArrayOf(0xF70E1014.toInt(), 0xC70E1014.toInt(), 0x330E1014, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
-        val brand = ImageView(this).apply {
-            setImageResource(R.drawable.streamr_mark_small); scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "STREAMR"; alpha = 0.96f
+        // Top bar: a glass back circle, the title, and the S/E line underneath — the site's watch header.
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
-        overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {
-            leftMargin = px(42); topMargin = px(30)
-        })
+        val back = TextView(this).apply {
+            background = androidx.core.content.res.ResourcesCompat.getDrawable(resources, R.drawable.circle_glass, theme)
+            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_back, 0, 0, 0)
+            contentDescription = "Back"; isFocusable = true; isClickable = true; gravity = Gravity.CENTER
+            setOnClickListener { finish() }
+            setOnFocusChangeListener { v, focused ->
+                v.animate().scaleX(if (focused) 1.1f else 1f).scaleY(if (focused) 1.1f else 1f)
+                    .setDuration(150).start()
+                if (focused) { setOverlayVisible(true); if (!failed) view.showController() }
+            }
+        }
+        actionButtons += back
+        topBar.addView(back, LinearLayout.LayoutParams(px(46), px(46)))
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(14), 0, 0, 0)
+        }
+        topBar.addView(titles, LinearLayout.LayoutParams(-2, -2))
         val clock = android.widget.TextClock(this).apply {
             format12Hour = "h:mm"; format24Hour = "HH:mm"
             textSize = 16f; setTextColor(Accent.TEXT)
@@ -186,35 +201,35 @@ class MoviePlayerActivity : Activity() {
             rightMargin = px(40); topMargin = px(34)
         })
 
+        heading = TextView(this).apply {
+            textSize = 24f; setTextColor(Accent.TEXT); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = px(680)
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_bold)
+            includeFontPadding = false
+            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
+        }
+        titles.addView(heading, LinearLayout.LayoutParams(-2, -2))
+        episodeLine = TextView(this).apply {
+            textSize = 13f; letterSpacing = 0.02f; setTextColor(Accent.DIM); maxLines = 1
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.manrope)
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        titles.addView(episodeLine, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(3) })
+        overlay.addView(topBar, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+            leftMargin = px(42); topMargin = px(28)
+        })
+
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, 0, px(8))
         }
-        info.addView(TextView(this).apply {
-            // The site's watch screen labels the title in amber and says nothing else above it.
-            text = if (title.isSeries) "SERIES" else "ORIGINAL FILM"
-            textSize = 10f; letterSpacing = 0.28f
-            setTextColor(Accent.AMBER)
-            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
-        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(9) })
-        heading = TextView(this).apply {
-            textSize = 34f; setTextColor(Accent.TEXT); maxLines = 2
-            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_bold)
-            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
-        }
-        info.addView(heading, LinearLayout.LayoutParams(-1, -2))
-        // Elapsed over duration, the one piece of state the site keeps on the watch screen.
+        // Elapsed over duration, the one piece of state the site keeps at the bottom of the watch screen.
         timeLine = TextView(this).apply {
-            textSize = 12f; letterSpacing = 0.06f; setTextColor(Accent.DIM); maxLines = 1
-            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.manrope)
+            textSize = 14f; letterSpacing = 0.04f; setTextColor(Accent.TEXT); maxLines = 1
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
             setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
         }
-        info.addView(timeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(8) })
-        episodeLine = TextView(this).apply {
-            textSize = 13f; letterSpacing = 0.02f; setTextColor(0xFFD6DCE5.toInt()); maxLines = 1
-            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
-        }
-        info.addView(episodeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(7) })
+        info.addView(timeLine, LinearLayout.LayoutParams(-1, -2))
         status = TextView(this).apply {
             textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
@@ -230,7 +245,6 @@ class MoviePlayerActivity : Activity() {
         })
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(button("Back") { finish() })
         sourcesButton = button("Change source") { showSources() }.also(row::addView)
         row.addView(button("Audio & Subtitles") { showTracks() })
         episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
@@ -284,17 +298,20 @@ class MoviePlayerActivity : Activity() {
     private fun px(value: Int) = (value * dp).toInt()
     private fun button(label: String, click: () -> Unit): TextView {
         val action = TextView(this).apply {
-            text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
-            isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
-            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
+            text = label; textSize = 14f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
+            isFocusable = true; isClickable = true; setPadding(px(22), px(12), px(22), px(12))
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(12) }
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
             fun style(focused: Boolean) {
-                // Glass with a white ring on focus; the only colour in the chrome is the red seek bar.
+                // The site's control row: rounded-lg glass, a white ring on focus. "Next" is the one
+                // solid button on the row, exactly as Play is on the home hero.
+                val primary = label.startsWith("Next")
                 background = GradientDrawable().apply {
-                    cornerRadius = px(22).toFloat()
-                    setColor(if (focused) 0x4DFFFFFF else 0x33FFFFFF)
-                    setStroke(if (focused) px(2) else 0, if (focused) 0xF2FFFFFF.toInt() else Color.TRANSPARENT)
+                    cornerRadius = px(12).toFloat()
+                    setColor(if (primary) Accent.TEXT else if (focused) 0x4DFFFFFF else 0x33FFFFFF)
+                    setStroke(if (focused && !primary) px(2) else 0, if (focused) 0xF2FFFFFF.toInt() else Color.TRANSPARENT)
                 }
-                setTextColor(Accent.TEXT)
+                setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
                 elevation = if (focused) px(9).toFloat() else 0f
             }
             style(false)

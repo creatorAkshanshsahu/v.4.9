@@ -1282,3 +1282,31 @@ caption row outside it, and a year/rating line doing duty as the subtitle.
   matches the site's `w-48 aspect-[2/3]`.
 - The eyebrow shows the kind (`MOVIE`/`SERIES`); year and rating moved into the tile's content description
   rather than shrinking the title to make room for three competing lines.
+
+## 52. Both players wear the site's chrome — 5.3.4 (code 113)
+
+The reference has exactly two player screens, and both are laid out the same way: a header that names what
+you are watching, one piece of state at the bottom, and no brand block floating over the picture.
+
+**Live (`/live`).** Header is now a glass back circle, a `LIVE` chip and `"<n> · <channel>"` in Sora bold —
+the app had no header at all, only a clock. The bottom block lost its badge and its gold card chrome:
+
+| | Reference | Now |
+| --- | --- | --- |
+| eyebrow | `Now playing`, amber, `tracking-widest` | `NOW PLAYING`, amber, 24% tracking |
+| headline | `text-5xl`, Sora bold | 36sp Sora bold |
+| now line | the programme | programme + its slot, no `NOW ·` prefix |
+| up next | `Up next: …` | `Up next: …`, 15sp muted |
+
+The dock, the progress hairline and the action row keep their glass styling. The `LIVE` chip stays amber:
+the reference paints `--live` red there, but a red badge was explicitly ruled out earlier, so this is the
+one place the build deliberately departs from the source.
+
+**Watch (`/watch/$id`).** The header got the same treatment — glass back circle, the title in Sora bold, and
+the `S1 · E3` line under it, moved up from the bottom where it used to sit under a 34sp heading. The
+`ORIGINAL FILM` eyebrow is gone: the site's watch screen has no eyebrow, only the title. Controls are now
+the site's `rounded-lg` 12dp glass at 14sp, and **Next** is the single solid button on the row, white with
+dark type, the way `Play` is on the hero.
+
+Kept deliberately, because they are app behaviour the demo never had: the source picker, audio/subtitle
+sheet, episode picker, playback details, retry, auto-next, the Media3 seek bar and the health scan.

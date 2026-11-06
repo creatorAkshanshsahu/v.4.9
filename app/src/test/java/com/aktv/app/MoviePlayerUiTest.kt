@@ -30,7 +30,11 @@ class MoviePlayerUiTest {
             val views = views(activity.findViewById(android.R.id.content))
             assertEquals(1, views.count { it is PlayerView })
             assertFalse(views.any { it.javaClass.name.contains("gecko", true) })
-            for (label in listOf("Back", "Change source", "Audio & Subtitles", "Retry", "Playback details")) {
+            // Back is the site's glass circle in the header, not a text button on the control row.
+            assertTrue("Back affordance", views.any {
+                it.contentDescription?.toString() == "Back" && it.isFocusable && it.isClickable
+            })
+            for (label in listOf("Change source", "Audio & Subtitles", "Retry", "Playback details")) {
                 assertTrue(label, views.filterIsInstance<TextView>().any { it.text.toString() == label && it.isFocusable && it.isClickable })
             }
             assertTrue(views.filterIsInstance<TextView>().any { it.text.toString() == "Sample film" })

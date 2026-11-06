@@ -72,6 +72,8 @@ class PlayerPreviewTest {
             }, 0, FrameLayout.LayoutParams(-1, -1))
             layer.findViewById<PlayerView>(R.id.playerView).visibility = View.INVISIBLE
             layer.findViewById<View>(R.id.playerScrim).alpha = 0.72f
+            layer.findViewById<View>(R.id.playerTopBar).alpha = 1f
+            layer.findViewById<TextView>(R.id.playerTopTitle).text = "1 · AK Sport HD"
             layer.findViewById<View>(R.id.playerClock).alpha = 1f
             val dock = layer.findViewById<View>(R.id.playerInfoDock)
             (dock.layoutParams as FrameLayout.LayoutParams).apply {
@@ -91,7 +93,7 @@ class PlayerPreviewTest {
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
             layer.findViewById<TextView>(R.id.infoName).text = "AK Sport HD"
             layer.findViewById<TextView>(R.id.infoNow).apply {
-                text = "NOW  ·  India v Australia  ·  2nd innings"
+                text = "India v Australia   14:00 – 18:00"
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoProgress).apply { visibility = View.VISIBLE }
@@ -99,7 +101,7 @@ class PlayerPreviewTest {
             layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress)
                 .progressTintList = android.content.res.ColorStateList.valueOf(0xFFE0A24B.toInt())
             layer.findViewById<TextView>(R.id.infoScheduleNext).apply {
-                text = "NEXT  ·  Post-match coverage"
+                text = "Up next:  Post-match coverage"
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoHint).visibility = View.GONE
