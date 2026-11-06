@@ -102,7 +102,9 @@ internal object HomeChrome {
         val heroHeight = (screenHeight * when {
             m.phone && m.compact -> 0.34f
             m.phone -> 0.46f
-            movies -> 0.60f
+            // A 2:3 poster shelf is the tallest row the app has; the movie hero yields 4% so the
+            // whole first row still lands on a 540dp screen.
+            movies -> 0.56f
             m.compact -> 0.58f
             else -> 0.60f
         }).toInt()
