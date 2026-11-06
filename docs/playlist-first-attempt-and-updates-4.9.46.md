@@ -1322,3 +1322,10 @@ sheet, episode picker, playback details, retry, auto-next, the Media3 seek bar a
 - **Stale brand cleaned out of the player:** the programme guide had been headed `AK TV / LIVE` since long
   before the rename; it says `STREAMR / LIVE` now, and the channel-search field uses the glass pill instead
   of borrowing the badge drawable.
+
+## 54. The scrim was upside down — 5.3.6 (code 115)
+
+`poster_scrim` used `angle="90"`, which put the dark end at the top of the panel and left the title sitting
+on bare artwork. It is `angle="270"` now — top (start, transparent) to bottom (end, `#F20A0B0E`) — so the
+kind eyebrow and the title always have the site's `scrim/90` floor under them, on both poster and channel
+cards.
