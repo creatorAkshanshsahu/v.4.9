@@ -1086,3 +1086,9 @@ and closes on the TV, it runs on the phone" report. So it is removed, not defaul
 - a Sony tile with no native source now says so instead of opening the site's page;
 - `TgServers.init` and the home setup are guarded, and the crash note is installed on the first line of
   `onCreate`, so a start-up failure leaves a report instead of an app that closes with nothing recorded.
+
+## 44. 5.0.6 — the deletion that took too much
+
+Removing the trailer panel also removed the four functions that followed it in the same file (`lastEpisode`,
+`bindSeasons`, `playCurrent`, the episode adapter), so 5.0.5 did not compile and was never published. The file
+is restored and the panel alone is gone; the tests that build a movie screen are what caught it.

@@ -200,5 +200,106 @@ class DetailActivity : Activity() {
         background = Ui.pill(dp, 0x552D4652, 24f)
     }
 
+    private fun lastEpisode(): Pair<Int, Int> {
+        val s = prefs.getInt("last_season_${title.imdb}", episodes.firstOrNull()?.season ?: 1)
+        val e = prefs.getInt("last_ep_${title.imdb}", episodes.firstOrNull { it.season == s }?.episode ?: 1)
+        return s to e
+    }
+
+    private fun bindSeasons() {
+        seasonRow.removeAllViews()
+        if (seasons.isEmpty()) return
+        seasons.forEach { s ->
+            val chip = TextView(this).apply {
+                text = "Season $s"; textSize = 14f; typeface = fSemi; isFocusable = true; isClickable = true
+                setPadding((20 * dp).toInt(), (9 * dp).toInt(), (20 * dp).toInt(), (9 * dp).toInt())
+                val bg = GradientDrawable().apply { cornerRadius = 40 * dp }; background = bg
+                val style = { f: Boolean ->
+                    bg.setColor(when { f -> Color.WHITE; s == season -> Color.argb(70, 255, 255, 255); else -> Color.argb(22, 255, 255, 255) })
+                    setTextColor(if (f) Accent.ABYSS else if (s == season) Accent.TEXT else Accent.DIM)
+                }
+                style(false); tag = style
+                setOnFocusChangeListener { _, f -> style(f); if (f && season != s) { season = s; refreshSeasonChips(); showSeason() } }
+                setOnClickListener { season = s; refreshSeasonChips(); showSeason(); epList.post { epList.getChildAt(0)?.requestFocus() } }
+            }
+            seasonRow.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (10 * dp).toInt() })
+        }
+        showSeason()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun refreshSeasonChips() {
+        for (i in 0 until seasonRow.childCount) { val c = seasonRow.getChildAt(i); (c.tag as? (Boolean) -> Unit)?.invoke(c.isFocused) }
+    }
+
+    private var seasonEps = listOf<Movies.Episode>()
+    private fun showSeason() {
+        seasonEps = episodes.filter { it.season == season }
+        epAdapter.notifyDataSetChanged(); epList.scrollToPosition(0)
+        epList.alpha = 0f; epList.animate().alpha(1f).setDuration(260).start()
+    }
+
+    private val epAdapter = object : RecyclerView.Adapter<VH>() {
+        override fun getItemCount() = seasonEps.size
+        override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
+            val card = LinearLayout(p.context).apply { orientation = LinearLayout.VERTICAL; isFocusable = true; isClickable = true }
+            val img = ImageView(p.context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; id = 1; clipToOutline = true
+                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(Color.argb(30, 255, 255, 255)) } }
+            card.addView(img, LinearLayout.LayoutParams((240 * dp).toInt(), (135 * dp).toInt()))
+            val n = tv(14f, Accent.TEXT, fSemi).apply { id = 2; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
+            card.addView(n, LinearLayout.LayoutParams((240 * dp).toInt(), -2).apply { topMargin = (10 * dp).toInt() })
+            card.addView(View(p.context).apply { id = 3; setBackgroundColor(pageAccent); visibility = View.GONE },
+                LinearLayout.LayoutParams((240 * dp).toInt(), (2 * dp).toInt()).apply { topMargin = (5 * dp).toInt() })
+            card.layoutParams = RecyclerView.LayoutParams(-2, -2).apply { marginEnd = (18 * dp).toInt() }
+            return VH(card)
+        }
+        override fun onBindViewHolder(h: VH, i: Int) {
+            val e = seasonEps[i]; val v = h.itemView
+            val img = v.findViewById<ImageView>(1); img.setImageDrawable(null); if (e.thumb.isNotEmpty()) img.load(e.thumb) { crossfade(true) }
+            v.findViewById<TextView>(2).text = "${e.episode}. ${e.name}"
+            v.setOnFocusChangeListener { x, f ->
+                x.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).translationZ(if (f) 20 * dp else 0f)
+                    .setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
+                (x as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(if (f) Accent.TEXT else Accent.DIM) }
+                if (f) {
+                    selectedEpisode = e.season to e.episode
+                    desc.text = e.overview.ifEmpty { title.description }
+                    updateEpisodeMarkers()
+                }
+            }
+            (v as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(Accent.DIM) }
+            v.findViewById<View>(3).visibility = if (selectedEpisode == (e.season to e.episode)) View.VISIBLE else View.GONE
+            v.setOnClickListener { selectedEpisode = e.season to e.episode; play(e.season, e.episode) }
+        }
+    }
+
+    private fun updateEpisodeMarkers() {
+        for (i in 0 until epList.childCount) {
+            val child = epList.getChildAt(i)
+            val position = epList.getChildAdapterPosition(child)
+            val episode = seasonEps.getOrNull(position)
+            child.findViewById<View>(3)?.visibility = if (episode != null && selectedEpisode == (episode.season to episode.episode)) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun playCurrent() {
+        if (title.isSeries) { val (s, e) = lastEpisode(); play(s, e) } else play(0, 0)
+    }
+
+    private fun play(s: Int, e: Int) {
+        if (title.tmdb <= 0) { Toast.makeText(this, "This title can't be played right now", Toast.LENGTH_SHORT).show(); return }
+        Movies.saveTitle(prefs, title)
+        if (title.isSeries) prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
+        MoviePlayerActivity.open(this, title, s, e, episodes)
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) ImmersiveUi.hide(window)
+    }
+
+    override fun onResume() { super.onResume(); if (::playBtn.isInitialized) bind() }
+    override fun onBackPressed() { finish(); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out) }
     override fun onDestroy() { io.shutdownNow(); ui.removeCallbacksAndMessages(null); super.onDestroy() }
 }
