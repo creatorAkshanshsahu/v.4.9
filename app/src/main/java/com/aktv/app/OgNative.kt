@@ -282,7 +282,7 @@ internal object OgNative {
         null
     }
 
-    private val bareMedia = Regex("""(?i)(?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|m3u|mp4|m4v)(?:\?[^\s"'<>\\]*)""")
+    private val bareMedia = Regex("""(?i)(?:https?:)?//[^\s"'<>\\]+?\.(?:m3u8|m3u|mp4|m4v)(?:\?[^\s"'<>\\]*)? """.trim())
     private val keyedMedia = Regex(
         """(?i)"(?:file|playlist|source|src|hls|url|link|stream)"\s*:\s*"((?:https?:)?//[^"\s]+)""""
     )

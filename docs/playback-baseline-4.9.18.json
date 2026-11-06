@@ -53,7 +53,7 @@
       "change": "Adds the OG provider: the enum gains OG(\"og\", \"OG\") and resolve() hands that provider to OgNative, which reads the media address each of theogpiratebot.online's servers names and plays it in this same native player.",
       "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
       "from": "8170b49a2c6462050ba7cacea4cd64bea764a8c95af34421ffa4e8d20b88cba7",
-      "to": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
+      "to": "1304adf89d0902445f1908c4f896120ef781ec494fdcd6755166a3d6c787bcd3",
       "unchanged": "FROST/OUT endpoint construction, parsing, limits, error kinds, recovery and cancel() are unchanged apart from the added branch."
     },
     {
@@ -95,7 +95,7 @@
       "change": "FrostResolver.resolve() gains a last resort: when the endpoint answers with nothing, or with only DASH manifests this player cannot open, it runs the site's own /watch page in the hidden browser and takes the .m3u8/.mp4 that page plays. Results are remembered per title for 30 minutes. The endpoint request itself (URL, headers, bounded read, exception mapping) is moved verbatim into direct().",
       "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
       "from": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
-      "to": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
+      "to": "1304adf89d0902445f1908c4f896120ef781ec494fdcd6755166a3d6c787bcd3",
       "unchanged": "No new host is trusted and nothing is decrypted: the address must still be HTTPS with a real host, DASH is still refused, and the resolved list is the same FrostSource type the player already preflights."
     },
     {
@@ -109,35 +109,35 @@
       "change": "The site-player fallback tries tgflix.lovable.app before tgfrost.lovable.app, loads it directly (no Referer wrapper) so the profile screen can be passed, and names the chosen address explicitly. The endpoint request, its headers and its exception mapping are untouched.",
       "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
       "from": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
-      "to": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
+      "to": "1304adf89d0902445f1908c4f896120ef781ec494fdcd6755166a3d6c787bcd3",
       "unchanged": "The endpoint URL, the HTTPS-only media rule, the DASH refusal and the FrostSource the player preflights are the same as the previous amendment."
     },
     {
       "change": "The site-player fallback now walks the family's real routes in order (tgvid embed, tgflix /play/{id}, tgfrost /watch), with a 45 s ceiling; watchUrl and the host list it replaced are gone.",
       "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
       "from": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
-      "to": "59ee3a98488040e22c98bc6121f76370b323554f901c5ceae826a4f41f26ce9f",
+      "to": "1304adf89d0902445f1908c4f896120ef781ec494fdcd6755166a3d6c787bcd3",
       "unchanged": "The endpoint request, the HTTPS-only media rule, the DASH refusal and the FrostSource contract the player preflights are unchanged."
     },
     {
       "change": "sitePlayback(): the sniffed page now travels with the source as Referer (and its origin as Origin) instead of the site root, and those headers are unchanged in every direct-API path.",
       "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
       "from": "59ee3a98488040e22c98bc6121f76370b323554f901c5ceae826a4f41f26ce9f",
-      "to": "718ba9479002ff09adda2e566bbc0ffef32df5ce01a9df7c502a6349512778b5",
+      "to": "1304adf89d0902445f1908c4f896120ef781ec494fdcd6755166a3d6c787bcd3",
       "unchanged": "Provider set, page order, timeouts, memoisation, format selection, recovery and every direct-API source construct are byte-identical apart from the referer/origin of sniffed sources."
     },
     {
       "change": "resolve(): a source is only returned if its manifest answers; a 404/403/410 address is dropped, and an endpoint that names only dead addresses falls through to the site's own player. sitePlayback() probes the stream before offering it, and the tgvid documented route is asked by id.",
       "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
       "from": "718ba9479002ff09adda2e566bbc0ffef32df5ce01a9df7c502a6349512778b5",
-      "to": "d0f736444f6ae5e63afa505d3f91707d6e3e2fe604f5369e772bc218685f61f8",
+      "to": "1304adf89d0902445f1908c4f896120ef781ec494fdcd6755166a3d6c787bcd3",
       "unchanged": "No DRM path, no player construct, no timeout, no provider order and no credential scope changes: the same URLs are requested, and the ones that answer 404 are simply not offered."
     },
     {
       "change": "resolve(): a source is only returned if its manifest answers; a 404/403/410 address is dropped, and an endpoint that names only dead addresses falls through to the site's own player. sitePlayback() probes the stream before offering it, and the tgvid documented route is asked by id.",
       "file": "app/src/main/java/com/aktv/app/OgNative.kt",
       "from": null,
-      "to": "01f53a22a9c345a8a1dcf4bd68b924100bbf767e617a17b0420212829cc8eb08",
+      "to": "b74fd918f503270e22ddcb5a3c826d372d76d67645c0c9e06cefca59329b7d5a",
       "unchanged": "The site's server list, its page order, its 45 s search deadline and every address it accepts are unchanged; TG's own endpoint is asked first because the site's player is TG underneath, and dead addresses are dropped."
     },
     {
@@ -158,7 +158,7 @@
       "change": "OG reads its servers' pages with PageCrawl over HTTP (frames, JSON fields, protocol-relative addresses) instead of the removed browser engine, and keeps the naming page as each source's Referer.",
       "file": "app/src/main/java/com/aktv/app/OgNative.kt",
       "from": "01f53a22a9c345a8a1dcf4bd68b924100bbf767e617a17b0420212829cc8eb08",
-      "to": "097ad099a029d56a549f7d4b7c92fe8ca1003c8bd33327ecba26020b37228ce5",
+      "to": "b74fd918f503270e22ddcb5a3c826d372d76d67645c0c9e06cefca59329b7d5a",
       "unchanged": "Server list and addresses, DASH/Widevine refusal, https-only rule, memo, deadline and report text are unchanged."
     }
   ],
@@ -173,7 +173,7 @@
     "app/src/main/java/com/aktv/app/JjtvResolver.kt": "6f85090e7fdbf6e1851dba6ae559448405c25664c882ad2517f4f399eea9654c",
     "app/src/main/java/com/aktv/app/LiveProviders.kt": "be9d4b7d1a02e672339beef4ed9eaee694666aae1d30242a8c2c612ca3fff9e0",
     "app/src/main/java/com/aktv/app/NativePlaybackPolicy.kt": "880302f75086bbfbaa1f1d17df5eea7a68a6e444556ca392c35ec43836f0ee2f",
-    "app/src/main/java/com/aktv/app/OgNative.kt": "097ad099a029d56a549f7d4b7c92fe8ca1003c8bd33327ecba26020b37228ce5",
+    "app/src/main/java/com/aktv/app/OgNative.kt": "b74fd918f503270e22ddcb5a3c826d372d76d67645c0c9e06cefca59329b7d5a",
     "app/src/main/java/com/aktv/app/StreamHttp.kt": "1981fadffc9b1ec78eed50a0f8ae426c6af6649a35f355b69c479951af3c6b9e",
     "app/src/main/java/com/aktv/app/StreamRequestPolicy.kt": "0e7e2393e3d338fc84aa1eee47ac20501b7b9132216f3da6f2d4c39b9095481c",
     "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
