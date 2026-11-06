@@ -98,7 +98,9 @@ internal object PageCrawl {
         val found = LinkedHashSet<String>()
         BARE.findAll(text).forEach { found += it.value }
         KEYED.findAll(text).forEach { match -> found += match.groupValues[1] }
-        RELATIVE_EXT.findAll(text).forEach { match -> found += match.groupValues[1] }
+        // Only a path that really is relative: an absolute http address is removed first, so its own path
+        // cannot be re-offered as an https one by resolving it against the page.
+        RELATIVE_EXT.findAll(BARE.replace(text, " ")).forEach { match -> found += match.groupValues[1] }
         TICKET.findAll(text).forEach { found += it.value }
         return found.mapNotNull { absolute(it, page) }.filter { format(it) != null }.distinct().take(MAX_HITS)
     }
