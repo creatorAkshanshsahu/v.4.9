@@ -227,6 +227,8 @@ internal class FrostResolver(
             add("https://tgvid.lovable.app/embed/$tv$server" to "https://tgvid.lovable.app/")
             add("https://tgflix.lovable.app/play/${title.id}" to null)
             add("${FrostProtocol.SITE}/watch/$tv$server" to "${FrostProtocol.SITE}/")
+            // The documented player route, addressed by id: the page that has served this player across builds.
+            add("https://tgvid.lovable.app/docs?id=${title.id}&type=${if (title.isSeries) "tv" else "movie"}" to "https://tgvid.lovable.app/docs")
             if (title.isSeries) add("https://tgflix.lovable.app/play/${title.id}?season=${title.season}&episode=${title.episode}" to null)
         }.distinctBy { it.first }
     }
@@ -251,7 +253,7 @@ internal class FrostResolver(
             "mp4" -> VodFormat.MP4
             else -> return null
         }
-        return FrostSource(
+        val sniffed = FrostSource(
             provider = provider,
             identity = "site:${provider.id}:${title.id}:${chosen.hashCode()}",
             url = chosen,
@@ -271,6 +273,8 @@ internal class FrostResolver(
             credentialOrigin = chosen,
             scraperName = "site player"
         )
+        // The page named it; that is not the same as the address still answering.
+        return sniffed.takeIf { FrostPreflight.check(it) != FrostPreflight.Verdict.DEAD }
     }
 
     /** No bundled sources, browser context, global cookie jar, or cached credentials. */
@@ -291,14 +295,19 @@ internal class FrostResolver(
         }
         // A DASH manifest from these hosts is Widevine, which this player does not open: a source list made
         // only of those is, for the viewer, an empty list.
-        val playable = direct.filter { it.format != VodFormat.DASH }
+        val playable = FrostPreflight.keep(direct.filter { it.format != VodFormat.DASH })
         if (playable.isNotEmpty()) { remember(title, provider, playable); return playable }
+        // The endpoint answered, but every address it named is gone. The site's own player still works, so
+        // take the stream it plays rather than showing a dead one.
         sitePlayback(title, provider)?.let { sniffed ->
-            val result = listOf(sniffed) + direct
+            if (FrostPreflight.keep(listOf(sniffed)).isEmpty()) return@let
+            val result = listOf(sniffed) + playable
             remember(title, provider, result)
             return result
         }
-        return direct
+        val usable = FrostPreflight.keep(direct)
+        if (usable.isEmpty() && direct.isNotEmpty()) throw FrostResolveException(kind = "stale")
+        return usable
     }
 
     private fun remember(title: FrostTitle, provider: FrostProvider, sources: List<FrostSource>) {

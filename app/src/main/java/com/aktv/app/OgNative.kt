@@ -79,6 +79,14 @@ internal object OgNative {
         cached(title).takeIf { !fresh && it.isNotEmpty() }?.let { return it }
         val found = LinkedHashSet<FrostSource>()
         val notes = mutableListOf<String>()
+        // This site's own player is TG underneath - its PLAYERS menu offers TG FROST and TG OUT for the same
+        // title id - so TG's own endpoint is asked first. That is headless (no browser engine, so it also
+        // works on a television), and it is the stream the site itself would play.
+        for (provider in listOf(FrostProvider.FROST, FrostProvider.OUT)) {
+            val viaTg = runCatching { FrostMovies.resolve(title, provider) }.getOrDefault(emptyList())
+            notes += "${provider.label} (the site's own player): " + if (viaTg.isEmpty()) "no source" else "${viaTg.size} source(s)"
+            viaTg.forEach { found += it }
+        }
         for (server in SERVERS) {
             try {
                 val sources = sources(title, server)
@@ -127,7 +135,14 @@ internal object OgNative {
         report = notes.joinToString("\n")
         outcome = notes.joinToString(" · ").take(320)
         if (found.isEmpty()) throw FrostResolveException(kind = "empty")
-        val result = found.toList()
+        // An address that answers "not found" is not a source: drop it here instead of spending sixteen
+        // seconds of the viewer's time watching a spinner for it.
+        val live = FrostPreflight.keep(found.toList())
+        notes += if (live.size == found.size) "all addresses answered" else "${found.size - live.size} stale address(es) dropped"
+        report = notes.joinToString("\n")
+        outcome = notes.joinToString(" · ").take(320)
+        if (live.isEmpty()) throw FrostResolveException(kind = "stale")
+        val result = live
         synchronized(memo) { memo[memoKey(title)] = Memo(System.currentTimeMillis() + 30 * 60_000, result) }
         return result
     }

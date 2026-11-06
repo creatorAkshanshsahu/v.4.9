@@ -1049,3 +1049,22 @@ something the player could not use - and a player that cannot load segments show
 - **Bounded startup**: sixteen seconds without a picture moves to the next source (was thirty), a stream that
   stops responding for twenty seconds does the same (was forty), and the whole startup budget is 45 seconds
   (was 120). A spinner is now a state that ends.
+
+## 42. 5.0.4 — the site's player is TG, and an address that answers 404 is not a source
+
+The playback details from the box named it exactly: `#1 OUT / HLS … HTTP 404 / Media3 2004 /
+InvalidResponseCodeException`, `manifest 0 … 0 bytes`, and on the OG side `Vidstuck: no address on its page ·
+Vidfast: no address on its page · Vidlink: no address on its page`. Two separate faults, one shape.
+
+**A dead address was still being offered.** The endpoint answered, so its URLs were handed to the player; the
+manifest then 404'd, and a player that gets 404 does not fail - it retries, holds the spinner, and burns the
+viewer's sixteen seconds. `FrostPreflight` now asks each address once, with the same client and the same
+per-source headers the player uses: `401/403/404/410`, an HLS answer that is not a playlist, or a dead MP4 is
+dropped; a timeout is kept, because a slow link is not a dead one. If nothing survives, the app says the
+addresses were stale instead of pretending to start.
+
+**OG is TG underneath.** theogpiratebot's player offers TG FROST and TG OUT for the same title id - it is the
+same stream, one layer down. So OG now asks TG's own endpoint **first**: headless (no browser engine, so it also
+works on a television, where the engine is off), no page scraping, no iframe hop. The site's own servers are
+still asked after that, and their addresses are preflighted the same way. The documented `tgvid` route is also
+asked by id (`/docs?id=<id>&type=<movie|tv>`), which is the page that has served this player across builds.
