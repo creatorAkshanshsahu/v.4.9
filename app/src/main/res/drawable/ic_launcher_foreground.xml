@@ -1,0 +1,9 @@
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 108dp canvas, 72dp safe zone: 6dp of breathing room on every side keeps the mark whole. -->
+    <item
+        android:drawable="@drawable/streamr_mark_fg"
+        android:bottom="6dp"
+        android:left="6dp"
+        android:right="6dp"
+        android:top="6dp"/>
+</layer-list>

@@ -230,7 +230,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
     private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF171310.toInt(), 0xFF1D1712.toInt(), 0xFF0D0C0A.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
-    private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
+    private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
     private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
     private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
@@ -287,7 +287,6 @@ class MainActivity : AppCompatActivity() {
         heroDesc = findViewById(R.id.heroDesc); heroNext = findViewById(R.id.heroNext)
         infoCard = findViewById(R.id.infoCard); infoLogo = findViewById(R.id.infoLogo); infoName = findViewById(R.id.infoName)
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
-        playerBrand = findViewById(R.id.playerBrand)
         infoMono = findViewById(R.id.infoMono); infoNow = findViewById(R.id.infoNow); infoProgress = findViewById(R.id.infoProgress)
         infoDesc = findViewById(R.id.infoDesc); infoScheduleNext = findViewById(R.id.infoScheduleNext)
         infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus); infoActions = findViewById(R.id.infoActions)
@@ -459,11 +458,14 @@ class MainActivity : AppCompatActivity() {
         runCatching { layoutHero(); styleSegs(); fillHero(null); loadChannels() }
             .onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
-        // A short, skippable reveal. No hidden movie-catalogue warm-up competing with live decoding.
-        home.alpha = 0f; home.translationY = 0f
-        intro.onReveal = { home.alpha = 1f }
-        intro.onDone = {
-            home.alpha = 1f; intro.visibility = View.GONE
+        // No entrance. The site opens on the shelf, so the app does too: no reveal, no sound mark, no
+        // full-screen canvas drawing before the first frame the viewer asked for.
+        home.alpha = 1f; home.translationY = 0f
+        intro.onReveal = null
+        intro.onDone = null
+        intro.visibility = View.GONE
+        ui.post {
+            if (isFinishing || currentFocus != null) return@post
             if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
             else segs[posOf(tab)].requestFocus()
         }
@@ -490,9 +492,8 @@ class MainActivity : AppCompatActivity() {
                 checkForUpdates(interactive = true)
             }
         }
-        // A television gets straight to the app: the entrance is the most expensive animation in it, and a
-        // low-memory box is where an expensive opening turns into a freeze or a close.
-        if (television || lowEnd || safeMode) intro.skip() else intro.start()
+        // The entrance view stays in the hierarchy but is never started: nothing animates, nothing is drawn.
+        intro.skip()
     }
 
     // ---------- helpers ----------
@@ -1379,7 +1380,6 @@ class MainActivity : AppCompatActivity() {
         infoCard.animate().alpha(0f).translationY(14 * dp).setDuration(450).withEndAction { infoActions.visibility = View.GONE }.start()
         playerScrim.animate().alpha(0f).setDuration(450).start()
         playerClock.animate().alpha(0f).setDuration(450).start()
-        playerBrand.animate().alpha(0f).setDuration(450).start()
     }
     private fun showInfo() {
         ui.removeCallbacks(hideInfo)
@@ -1387,7 +1387,6 @@ class MainActivity : AppCompatActivity() {
         infoCard.animate().alpha(1f).translationY(0f).setDuration(260).setInterpolator(DecelerateInterpolator(2f)).start()
         playerScrim.animate().alpha(1f).setDuration(260).start()
         playerClock.animate().alpha(1f).setDuration(260).start()
-        playerBrand.animate().alpha(1f).setDuration(260).start()
         ui.removeCallbacks(guideProgressTick); ui.postDelayed(guideProgressTick, 60_000)
         if (!healthScanActive) ui.postDelayed(hideInfo, 5000)
     }

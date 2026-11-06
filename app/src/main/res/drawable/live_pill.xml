@@ -1,5 +1,5 @@
-<!-- LIVE badge: one red capsule, no gradient. -->
+<!-- LIVE marker: a quiet amber tint, never a red badge. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="@color/live"/>
+    <solid android:color="#1FE0A24B"/>
     <corners android:radius="6dp"/>
 </shape>

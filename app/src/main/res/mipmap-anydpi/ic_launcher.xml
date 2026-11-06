@@ -1,4 +1,5 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item><color android:color="@color/night"/></item>
-    <item android:drawable="@drawable/streamr_mark" android:inset="16dp"/>
+    <!-- A centred bitmap keeps the mark's own aspect; stretching it into a square cut the shape in half. -->
+    <item><bitmap android:src="@drawable/streamr_mark" android:gravity="center"/></item>
 </layer-list>

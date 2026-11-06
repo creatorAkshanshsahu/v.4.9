@@ -1,5 +1,5 @@
 <resources>
-    <!-- Streamr, matched to the site: near-black blue ground, amber signal, one red for LIVE and progress. -->
+    <!-- Streamr, matched to the site: near-black blue ground, amber signal; no red badges. -->
     <color name="abyss">#0B0C10</color>
     <color name="night">#08090C</color>
     <color name="surface">#15181E</color>

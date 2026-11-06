@@ -1206,3 +1206,29 @@ exactly why the old crawler walked past it: it only accepted `.m3u8`/`.mp4`. It 
 
 The same rule incidentally covers any provider that hands its player a relative address, which three of
 the older OG servers do.
+
+## 49. No entrance, and a mark that is never cut — 5.3.1 (code 110)
+
+The app opened on a brand reveal that had to finish before the shelf could be touched. That is not what
+the site does, and on a slow box it is the most expensive thing in the launch path: a full-screen view
+drawing an animation, a sound mark, and a delayed fade-in for the shelf underneath.
+
+- **The entrance never starts.** `AkIntroView` stays in the hierarchy but is skipped and hidden, its
+  callbacks cleared, and the shelf is laid out at full alpha from the first frame. Focus lands on the
+  current tab immediately instead of waiting for the reveal's `onDone`. The launch path now has one job:
+  draw the shelf.
+- **The mark was being cut by two separate frames.** The legacy launcher was a `layer-list` holding a
+  461×512 bitmap stretched into the square icon, so the pointed edges ran past the crop; it is now a
+  centred bitmap at its own aspect. The adaptive foreground sat at the very edge of the 72dp safe zone,
+  where the outer mask eats the corners; it now sits 6dp inside it via `ic_launcher_foreground.xml`.
+- **The live badge is no longer red.** `live_pill` is a 12% amber tint with amber text, matching the
+  site's eyebrow instead of a red capsule.
+- **The oversized player logo is gone.** The 104×90 mark in the top-left of the live screen faded in with
+  the chrome — seen mid-fade it reads as half a logo. The reference watch screen has no such block; the
+  channel's own logo lives in the info card, where it belongs.
+- **`banner_img.png` is STREAMR again.** The shipped asset still said "AK TV / LIVE. FILMS. YOUR WORLD."
+  in red; it is now the mark plus an amber Sora wordmark on `#0B0C10`.
+
+Still open: the full screen-by-screen rebuild against `screen-safari-studio` is blocked — that repository
+returns 403 to every read attempt here (anonymous clone, `gh api`, raw fetch). It needs to be public,
+shared with the integration, or uploaded before visual parity work can continue.
