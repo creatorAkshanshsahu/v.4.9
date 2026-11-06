@@ -100,6 +100,7 @@ class MainActivity : AppCompatActivity() {
     private val ui = Handler(Looper.getMainLooper())
     private val fRegular by lazy { ResourcesCompat.getFont(this, R.font.sora_regular) ?: Typeface.DEFAULT }
     private val fSemi by lazy { ResourcesCompat.getFont(this, R.font.sora_semibold) ?: Typeface.DEFAULT_BOLD }
+    private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
     /** The site's second list (its "tata" playlist): its own section, played by the same native resolver. */
@@ -526,11 +527,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
-        this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
+        this.text = text; textSize = if (compact) 12f else 15f; typeface = fBold
         isFocusable = true; isClickable = true
-        setPadding((22 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt(), (22 * dp).toInt(), ((if (compact) 7 else 11) * dp).toInt())
-        // Play is a white pill with dark type; every other hero action is glass with a white ring on focus.
-        val bg = Ui.pill(dp, if (primary) Accent.TEXT else 0x33FFFFFF, 22f)
+        setPadding((24 * dp).toInt(), ((if (compact) 8 else 12) * dp).toInt(), (24 * dp).toInt(), ((if (compact) 8 else 12) * dp).toInt())
+        // Play is the site's white rounded-lg button with dark type; every other hero action is glass,
+        // ringed white on focus. Twelve is the site's --radius; a full pill is not its button shape.
+        val bg = Ui.pill(dp, if (primary) Accent.TEXT else 0x33FFFFFF, 12f)
         background = bg
         setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
         setOnFocusChangeListener { _, focused ->

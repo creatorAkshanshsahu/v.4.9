@@ -32,9 +32,8 @@ internal object HomeChrome {
         val m = metrics(screenWidth, screenHeight, dp, movies)
         fun px(value: Int) = (value * dp).toInt()
         val short = screenHeight / dp < 400
-        val nav = if (m.phone) 0 else if (m.compact) 64 else 76
-        val side = if (m.compact) 20 else 28
-        val inset = px(if (m.compact) 14 else 20)
+        val nav = if (m.phone) 0 else if (m.compact) 68 else 88
+        val side = if (m.compact) 20 else 48
 
         // The bar: wordmark left, glass pill tabs centred, round search and profile right.
         root.findViewById<View>(R.id.navRail).apply {
@@ -44,11 +43,17 @@ internal object HomeChrome {
         }
         root.findViewById<TextView>(R.id.akText).apply {
             visibility = View.VISIBLE
-            textSize = if (m.compact) 14f else 17f
+            textSize = if (m.compact) 16f else 22f
             setTextColor(Accent.AMBER)
-            letterSpacing = 0.22f
+            letterSpacing = -0.02f
         }
-        root.findViewById<View>(R.id.brandMark).visibility = View.GONE
+        // Mark plus wordmark, as in the site header — the mark is no longer hidden.
+        root.findViewById<View>(R.id.brandMark).apply {
+            visibility = View.VISIBLE
+            layoutParams.width = px(if (m.compact) 26 else 36)
+            layoutParams.height = px(if (m.compact) 26 else 36)
+            (layoutParams as ViewGroup.MarginLayoutParams).marginEnd = px(if (m.compact) 8 else 10)
+        }
         root.findViewById<View>(R.id.railTagline).visibility = View.GONE
         root.findViewById<View>(R.id.navProfile).apply {
             visibility = if (m.phone || short) View.GONE else View.VISIBLE
@@ -62,7 +67,7 @@ internal object HomeChrome {
             root.findViewById<TextView>(id).apply {
                 layoutParams.height = px(if (short) 34 else 36)
                 setPadding(px(if (m.compact) 12 else 16), 0, px(if (m.compact) 12 else 16), 0)
-                textSize = if (short) 10f else if (m.compact) 11f else 12f
+                textSize = if (short) 11f else if (m.compact) 12f else 14f
                 includeFontPadding = false
                 typeface = androidx.core.content.res.ResourcesCompat.getFont(root.context, R.font.sora_semibold)
             }
@@ -92,39 +97,38 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.topBar).layoutParams.height = 0
         root.findViewById<View>(R.id.librarySummary).visibility = View.GONE
 
-        // Hero: an inset, rounded artwork card directly under the bar, text anchored bottom-left inside it.
+        // Hero: full-bleed artwork behind the bar, copy anchored bottom-left, as on the site. No card,
+        // no rounding, no inset — the still runs to every edge of the screen.
         val heroHeight = (screenHeight * when {
             m.phone && m.compact -> 0.34f
             m.phone -> 0.46f
-            movies -> 0.42f
-            m.compact -> 0.52f
-            else -> 0.50f
+            movies -> 0.60f
+            m.compact -> 0.58f
+            else -> 0.60f
         }).toInt()
         root.findViewById<View>(R.id.heroMedia).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                height = heroHeight + px(nav) - px(6)
-                topMargin = px(nav) - px(6); marginStart = inset; marginEnd = inset
+                height = heroHeight + px(nav)
+                topMargin = 0; marginStart = 0; marginEnd = 0
             }
-            background = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.hero_card, root.context.theme)
-            clipToOutline = true
-            outlineProvider = object : android.view.ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: android.graphics.Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, px(24).toFloat())
-                }
-            }
+            background = null
+            clipToOutline = false
         }
         root.findViewById<View>(R.id.heroGlow).visibility = View.GONE
         root.findViewById<View>(R.id.heroTagline).visibility = View.GONE
-        root.findViewById<View>(R.id.heroArea).layoutParams.height = heroHeight + px(nav)
+        // The shelves ride up over the still by 40dp, the way the site pulls its rails with -mt-10.
+        root.findViewById<View>(R.id.heroArea).layoutParams.height =
+            heroHeight + px(nav) - (if (m.compact || m.phone) 0 else px(40))
         root.findViewById<View>(R.id.heroText).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                width = ((screenWidth - inset * 2 - px(80)) * 0.62f).toInt().coerceAtLeast(px(260))
-                marginStart = inset + px(if (m.compact) 20 else 32)
-                bottomMargin = px(if (m.compact) 20 else 30)
+                // max-w-2xl on the site: the copy never runs wider than 672dp.
+                width = minOf(px(672), (screenWidth - px(side) * 2).coerceAtLeast(px(260)))
+                marginStart = px(side)
+                bottomMargin = px(if (m.compact) 28 else 64)
             }
         }
         root.findViewById<TextView>(R.id.heroTitle).apply {
-            textSize = when { m.compact -> 26f; m.phone -> 30f; movies -> 40f; else -> 42f }
+            textSize = when { m.compact -> 28f; m.phone -> 32f; movies -> 44f; else -> 48f }
             maxLines = if (m.compact) 1 else 2
             setTextColor(Accent.TEXT)
         }
@@ -150,14 +154,14 @@ internal object HomeChrome {
                 width = px(if (m.compact) 84 else 104); height = px(if (m.compact) 54 else 66)
                 gravity = android.view.Gravity.TOP or android.view.Gravity.END
                 topMargin = px(nav) + px(24)
-                marginEnd = inset + px(28)
+                marginEnd = px(if (m.compact) 20 else 48)
             }
         }
         root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE
         root.findViewById<View>(R.id.heroMono).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
                 gravity = android.view.Gravity.TOP or android.view.Gravity.END
-                topMargin = px(nav) + px(24); marginEnd = inset + px(40)
+                topMargin = px(nav) + px(24); marginEnd = px(if (m.compact) 20 else 56)
             }
         }
         root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 12), 0, px(if (m.compact) 8 else 10))
@@ -168,17 +172,17 @@ internal object HomeChrome {
 
     fun styleRow(row: View, compact: Boolean, dp: Float) {
         val title = row.findViewById<TextView>(R.id.rowTitle)
-        title.textSize = if (compact) 15f else 18f
+        title.textSize = if (compact) 16f else 21f
         title.setTextColor(Accent.TEXT)
-        (title.parent as View).let { (it.layoutParams as ViewGroup.MarginLayoutParams).marginStart = ((if (compact) 20 else 28) * dp).toInt() }
+        (title.parent as View).let { (it.layoutParams as ViewGroup.MarginLayoutParams).marginStart = ((if (compact) 20 else 48) * dp).toInt() }
         val rv = row.findViewById<RecyclerView>(R.id.rowList)
-        rv.setPadding(((if (compact) 18 else 26) * dp).toInt(), (10 * dp).toInt(), (40 * dp).toInt(), (10 * dp).toInt())
+        rv.setPadding(((if (compact) 18 else 48) * dp).toInt(), (10 * dp).toInt(), (48 * dp).toInt(), (10 * dp).toInt())
     }
 
     fun styleTile(tile: View, poster: Boolean, compact: Boolean, dp: Float, landscape: Boolean = false) {
         val lp = tile.layoutParams as ViewGroup.MarginLayoutParams
         lp.setMargins((6 * dp).toInt(), (4 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt())
-        lp.marginStart = (8 * dp).toInt(); lp.marginEnd = (8 * dp).toInt()
+        lp.marginStart = (10 * dp).toInt(); lp.marginEnd = (10 * dp).toInt()
         if (landscape) {
             lp.width = ((if (compact) 176 else 200) * dp).toInt()
             lp.height = ((if (compact) 99 else 113) * dp).toInt()

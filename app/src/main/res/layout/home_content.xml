@@ -104,12 +104,13 @@
     <LinearLayout android:id="@+id/navRail" android:layout_width="match_parent" android:layout_height="76dp"
         android:layout_gravity="top" android:orientation="horizontal" android:gravity="center_vertical"
         android:paddingStart="28dp" android:paddingEnd="28dp">
+        <ImageView android:id="@+id/brandMark" android:layout_width="36dp" android:layout_height="36dp"
+            android:layout_marginEnd="10dp" android:src="@drawable/streamr_mark" android:scaleType="fitCenter"
+            android:contentDescription="STREAMR"/>
         <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:text="STREAMR" android:textSize="17sp" android:letterSpacing="0.22"
+            android:text="STREAMR" android:textSize="22sp" android:letterSpacing="-0.02"
             android:includeFontPadding="false" android:textColor="@color/amber"
             android:fontFamily="@font/sora_bold"/>
-        <ImageView android:id="@+id/brandMark" android:layout_width="0dp" android:layout_height="0dp"
-            android:visibility="gone" android:contentDescription="STREAMR"/>
         <TextView android:id="@+id/railTagline" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:visibility="gone" android:text="BY AKSHANSH"/>
         <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>

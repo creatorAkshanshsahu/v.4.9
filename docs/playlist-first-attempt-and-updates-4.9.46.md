@@ -1241,3 +1241,30 @@ drawing an animation, a sound mark, and a delayed fade-in for the shelf undernea
 Still open: the full screen-by-screen rebuild against `screen-safari-studio` is blocked — that repository
 returns 403 to every read attempt here (anonymous clone, `gh api`, raw fetch). It needs to be public,
 shared with the integration, or uploaded before visual parity work can continue.
+
+## 50. The reference, finally readable — 5.3.2 (code 111)
+
+`screen-safari-studio` was made public, so the actual source is now the spec instead of screenshots. It
+is small: five routes (`index`, `movies`, `series`, `live`, `watch/$id`), one `TopNav`, one `Rails` pair and
+`styles.css`. What it says, in numbers:
+
+| Token | Reference | Was |
+| --- | --- | --- |
+| bar | `px-12 py-6`, mark 40px + wordmark 24px Sora bold | 28dp gutter, wordmark only, 17sp, `letterSpacing 0.22` |
+| hero | full-bleed `70vh`, `px-12 pb-16`, copy `max-w-2xl` | inset rounded card, 20dp margins, 24dp corners |
+| rails | `px-12`, `gap-5`, `-mt-10` pull-up, label `text-2xl` | 26dp gutter, 8dp gaps, no overlap, 18sp label |
+| buttons | `rounded-lg` (12px), white Play, glass secondary | 22dp pill |
+| radius | 12 | 16–24 |
+
+Applied in one place — `HomeChrome.apply`, which owns the home geometry for the app *and* the snapshot
+tests — so the bar, hero, gutters and rail rhythm move together:
+
+- **Bar:** 88dp tall, 48dp gutter, brand mark restored at 36dp beside a 22sp tightly-tracked wordmark.
+- **Hero:** full-bleed. The artwork runs under the bar and to both edges, the copy column is capped at
+  672dp (the site's `max-w-2xl`) and sits 64dp off the bottom, and the shelves ride 40dp up over the still
+  the way `-mt-10` pulls the rails.
+- **Rails:** 48dp gutters, 20dp gaps, 21sp labels; hero actions are 12dp buttons with a 15sp bold face.
+
+Deliberate departures, because the app is not the demo: the shelves keep real channels and titles rather
+than the ten sample rows, `JioTV` stays as a fifth tab, and the LIVE/progress accents stay amber — the
+reference uses `--live` red there, but red badges were explicitly ruled out.
