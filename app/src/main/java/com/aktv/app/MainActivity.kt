@@ -1208,13 +1208,14 @@ class MainActivity : AppCompatActivity() {
         heroBadge.setTextColor(Accent.DIM)
         heroBadge.background = null
         showCinematicFallback(t)
-        heroTagline.visibility = if (channelsTab && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
-        heroSubheading.text = if (channelsTab) "A clearer view of what’s next." else "Find your next story."
+        // The site's hero has no strapline above the title, so nothing reintroduces one here.
+        heroTagline.visibility = View.GONE
+        heroSubheading.text = ""
         when (t) {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
                 heroDot.visibility = View.VISIBLE
-                (heroDot as? TextView)?.text = if (t.c.v2) "ALWAYS ON" else "LIVE"
+                (heroDot as? TextView)?.text = if (t.c.v2) "24/7" else "LIVE NOW"
                 heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.ION else Accent.LIVE)
                 (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
@@ -1225,7 +1226,7 @@ class MainActivity : AppCompatActivity() {
                     shown = pool.ifEmpty { listOf(t.c) }; shownCat = t.c.category
                     play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
                 } })
-                heroChips.addView(chip("ⓘ   Details").apply { setOnClickListener { showHomeChannelDetails(t.c) } })
+                heroChips.addView(chip("Details").apply { setOnClickListener { showHomeChannelDetails(t.c) } })
                 if (t.c.logo.isBlank()) {
                     heroLogo.visibility = View.GONE; heroMono.visibility = View.VISIBLE
                     heroMono.text = initials(t.c.name); heroMono.textSize = if (heroMono.text.length > 1) 62f else 84f
@@ -1259,7 +1260,13 @@ class MainActivity : AppCompatActivity() {
                     t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" }
                 ).joinToString(" · ")
                 heroChips.addView(chip("▶   Play", true).apply { setOnClickListener {
-                    stopPreview(); DetailActivity.open(this@MainActivity, t.m)
+                    stopPreview()
+                    // Play means play: a film starts on the first press, a series opens its episodes.
+                    if (!t.m.isSeries && t.m.tmdb > 0) {
+                        Movies.saveTitle(prefs, t.m)
+                        MoviePlayerActivity.open(this@MainActivity, t.m, 0, 0, emptyList())
+                        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                    } else DetailActivity.open(this@MainActivity, t.m)
                 } })
                 heroChips.addView(chip("More Info").apply { setOnClickListener {
                     stopPreview(); DetailActivity.open(this@MainActivity, t.m)

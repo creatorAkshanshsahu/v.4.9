@@ -1106,5 +1106,11 @@ built to that composition rather than to an interpretation of it.
 - **Hero**: an inset, 24dp-rounded artwork card under the bar (20dp side insets), text anchored bottom-left inside
   it - amber eyebrow ("LIVE", "ORIGINAL FILM", "SERIES"), one big title, a single muted fact line
   (`2026 · Sci-Fi · ★ 6.6`), three lines of synopsis, then **Play** (white pill, dark type) and **More Info** (glass).
-- **Rows**: 18sp semibold titles, 200x113 landscape cards and 122-wide posters, 26dp row padding - the site's rhythm
-  scaled for a ten-foot screen.
+- **Rows**: 18sp semibold titles, 200x113 landscape cards and 112-wide posters, 26dp row padding - the site's rhythm
+  scaled for a ten-foot screen. On a television the hero gives back enough height that the first row is complete rather
+  than clipped (0.50 of the screen for live, 0.42 for the film shelves).
+- **Cards**: 12dp rounded artwork with a bottom scrim, the title on the card's baseline at 13sp, the LIVE flag and the
+  programme one line above it - no more text fighting the card's edge.
+- **Player**: the watch screen's chrome - amber eyebrow, Sora title, `elapsed / duration` refreshed from the player tick,
+  then Back and one glass pill row (change source, audio & subtitles, retry, playback details). Play in the hero starts a
+  film immediately; a series opens its episodes instead of pretending to play a title with no episode selected.
