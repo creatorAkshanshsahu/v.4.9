@@ -50,7 +50,7 @@
             <TextView android:id="@+id/playerBack" android:layout_width="44dp" android:layout_height="44dp"
                 android:gravity="center" android:background="@drawable/circle_glass" android:focusable="true"
                 android:clickable="true" android:contentDescription="Back"
-                android:drawableStart="@drawable/ic_back" android:drawablePadding="0" android:paddingStart="0dp"/>
+                android:drawableStart="@drawable/ic_back" android:paddingStart="0dp"/>
             <TextView android:id="@+id/playerLive" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginStart="14dp" android:text="LIVE" android:background="@drawable/live_pill"
                 android:textColor="@color/amber" android:textSize="10sp" android:fontFamily="@font/sora_bold"
