@@ -20,7 +20,6 @@ object TgServers {
         forgetPreviousLiveSite(ctx)
         resolver.close()
         jjtv = JjtvResolver()
-        // The OG player's stream only exists after its scripts run, so the resolver needs the browser engine.
         OgNative.appContext = ctx.applicationContext
         MediaSniffer.appContext = ctx.applicationContext
         jioM3u = JioM3uResolver(
@@ -29,9 +28,8 @@ object TgServers {
             extra = listOf(JioM3uProtocol.TATA_PLAYLIST),
             cacheDir = java.io.File(ctx.filesDir, "playlists"),
             legacyCacheFile = java.io.File(ctx.filesDir, "jiotv-playlist.m3u8"),
-            // The site's front door refuses a scriptless client (HTTP 415 on every request shape), so the
-            // last resort is the same request read through the browser engine.
-            browser = { url -> BrowserFetch.playlist(ctx, url) }
+            // No browser engine: the playlist is read over HTTP or not at all.
+            browser = { _: String -> null }
         )
         resolver = TgResolver(initialFunction = prefs.getString("native_function", null), saveFunction = {
             prefs.edit().putString("native_function", it).apply()

@@ -259,7 +259,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        TgServers.init(applicationContext)
+        // First, before anything that can fail: a run that dies while starting must still leave a note, or the
+        // next launch has nothing to tell the viewer or this app's own diagnostics.
+        CrashLog.install(this)
+        CrashLog.beginSession(this)
+        // A resolver that cannot be built is a channel list that stays empty, not an app that closes.
+        runCatching { TgServers.init(applicationContext) }
         // Old releases remembered web/backup engines and guessed HTTP profiles. Do not carry those forward.
         if (!prefs.getBoolean("native_only_v2", false)) {
             val edit = prefs.edit()
@@ -450,7 +455,9 @@ class MainActivity : AppCompatActivity() {
             tv.setOnClickListener { switchTab(tabIds[i]) }
             tv.setOnFocusChangeListener { _, _ -> styleSegs() }
         }
-        styleSegs(); fillHero(null); loadChannels()
+        // One guarded setup: a failure here leaves a usable app with a message, not a closed one.
+        runCatching { layoutHero(); styleSegs(); fillHero(null); loadChannels() }
+            .onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
         // A short, skippable reveal. No hidden movie-catalogue warm-up competing with live decoding.
         home.alpha = 0f; home.translationY = 0f
@@ -465,9 +472,6 @@ class MainActivity : AppCompatActivity() {
         loadHomeTrending()
         // Warm only the first Movies and Series shelves, after the entrance and channel list have begun loading.
         if (!safeMode) ui.postDelayed({ if (!isFinishing && !isDestroyed) Movies.prefetchOnLaunch() }, 8_000)
-        // Records why a run died: an uncaught exception here, an unclean exit noted on the next start.
-        CrashLog.install(this)
-        CrashLog.beginSession(this)
         // A new APK published on GitHub is installed from inside the app, without a manual reinstall.
         ui.postDelayed({ if (!isFinishing && !isDestroyed) checkForUpdates(interactive = false) }, 3_500)
         watchNetworkForUpdates()
@@ -2556,25 +2560,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Opens the Sony channel's own player page (the same site the section comes from) inside the app, in
-     * the bundled browser, full screen with D-pad control. This is the section's fallback: same source,
-     * played by the site's own player, never a different provider and never a silent tile.
+     * What a channel with no native source now says.
+     *
+     * This used to hand the viewer to the site's own player inside the app, in the bundled browser. That engine
+     * is removed - on a television it is a stripped Chromium that takes the process down - so a channel the
+     * native resolver cannot open says so instead of opening a page.
      */
     private fun playOnSourcePage(ch: Channel, url: String? = null) {
-        val page = url ?: ch.page ?: return
         pageFallbackFor = ch.key
-        ++playToken; resolveJob?.cancel(true)
-        endNativeSession(); releasePlayer()
-        spinner.visibility = View.GONE
-        layer.visibility = View.GONE
-        home.visibility = View.VISIBLE
-        ImmersiveUi.show(window)
-        startActivity(
-            Intent(this, BrowserActivity::class.java)
-                .putExtra("url", page)
-                .putExtra("title", ch.name)
-                .putExtra("source", "Sony")
-        )
+        playMsg("${ch.name} has no native source right now.\nNothing was opened in a browser: this build plays native streams only.\nMENU: another channel · OK: details")
     }
 
     private fun releasePlayer() {

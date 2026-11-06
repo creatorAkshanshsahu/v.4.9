@@ -6,18 +6,20 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 
 /**
- * Whether this device may run a page in the browser engine at all.
+ * The browser engine is gone from this app.
  *
- * The site-player search (OG's servers, TG FROST's `/play` page, the JioTV gate) needs a browser engine. On a
- * television box that engine is often a stripped Chromium that takes the whole process down when it is
- * created, which is why "it crashes on the TV" and "it works on the phone" were both true. So the engine is
- * off by default on a TV or a low-RAM device, the native paths never touch it there, and the viewer can turn
- * it back on deliberately from the player's source menu once the box is known to survive it.
+ * Every page-reading path (OG's servers, TG FROST's `/play` page, the JioTV gate, the trailer panel) used a
+ * WebView, and on a television that engine is a stripped Chromium that takes the whole process down when it is
+ * created - which is why the app opened and closed on a TV and ran on a phone. Nothing here creates one any
+ * more: the flag is a constant, so the engine cannot be switched on by a stored preference either, and the
+ * native paths (TG's own endpoint, the movie catalogue, the channel playlist) are the only ones left.
  */
 internal object SiteBrowserGate {
 
-    @Volatile var allowed: Boolean = true
-    @Volatile var reason: String = ""
+    /** Always false. Kept as a name so the reports and the player menu can say so plainly. */
+    const val allowed: Boolean = false
+
+    val reason: String get() = "browser engine removed"
 
     fun isTelevision(context: Context): Boolean {
         val pm = context.packageManager
@@ -30,24 +32,10 @@ internal object SiteBrowserGate {
     fun isLowRam(context: Context): Boolean =
         (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true
 
-    /** The default for a device that has never been asked: phones and tablets yes, TVs no. */
-    fun defaultFor(context: Context): Boolean = !isTelevision(context) && !isLowRam(context)
+    fun defaultFor(context: Context): Boolean = false
 
-    /** Reads the stored choice (or the device default) and records why the engine is off, for the report. */
-    fun load(context: Context, stored: Boolean?, explain: Boolean = true) {
-        allowed = stored ?: defaultFor(context)
-        reason = when {
-            allowed -> ""
-            explain.not() -> ""
-            isTelevision(context) -> "off on this TV (its browser engine crashes the app)"
-            isLowRam(context) -> "off on this low-memory device"
-            else -> ""
-        }
-    }
+    /** No-op: there is no engine to configure. The stored value is ignored, not read. */
+    fun load(context: Context, stored: Boolean?, explain: Boolean = true) = Unit
 
-    fun summary(): String = when {
-        allowed -> "site player search: on"
-        reason.isNotBlank() -> "site player search: $reason"
-        else -> "site player search: off"
-    }
+    fun summary(): String = "site player search: off · browser engine removed"
 }

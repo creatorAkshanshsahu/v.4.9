@@ -654,51 +654,23 @@ class MoviePlayerActivity : Activity() {
         val firstSource = labels.size
         val listed = sources.filter { source -> ogFound.none { it.identity == source.identity } }
         labels.addAll(listed.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
-        // The site's own servers, last in the list and clearly marked as not native: picking one plays the
-        // title on that site's player inside the app, which is where those servers live.
-        val og = OgSources.menu(title.type, title.id, title.season, title.episode)
-        val firstOg = labels.size
-        labels.addAll(og.map { it.first })
-        // The last entry is the switch for the browser engine itself, because on a TV it is the one thing that
-        // can take the app down, and on a TV it starts off.
-        val firstGate = labels.size
-        labels.add("Site player search: " + (if (SiteBrowserGate.allowed) "ON" else "OFF") +
-            (if (SiteBrowserGate.allowed) "" else " · " + SiteBrowserGate.reason))
+        // Native only. The site-server entries and the browser-engine switch were removed with the engine: on a
+        // television that engine is what took the app down, so every entry here plays in this player.
         val request = title
         showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language / server")
             .setItems(labels.toTypedArray()) { _, index ->
                 if (title != request) return@setItems
                 desiredPlay = true
                 when {
-                    index == firstGate -> {
-                        val next = !SiteBrowserGate.allowed
-                        prefs.edit().putBoolean("site_browser", next).apply()
-                        SiteBrowserGate.load(this, next)
-                        Toast.makeText(this, if (next) "Site player search is on. A TV whose browser engine crashes will close the app." else "Site player search is off. Native sources only.", Toast.LENGTH_LONG).show()
-                    }
                     index == 0 -> begin(FrostProvider.FROST)
                     index == 1 -> begin(FrostProvider.OUT)
                     index == 2 -> begin(FrostProvider.OG)
-                    index >= firstOg -> openOgServer(index - firstOg)
                     index >= firstSource -> listed.getOrNull(index - firstSource)?.let { begin(it.provider, it) }
                     else -> ogFound.getOrNull(index - firstFound)?.let { begin(it.provider, it) }
                 }
             }.setNegativeButton("Close", null).create())
     }
 
-    /**
-     * Plays this title on the site's own player, on the server the user picked, inside the app browser.
-     * Nothing is extracted from it and nothing is guessed: the TMDB identity is the one this screen was
-     * opened with, and the server number is the site's own.
-     */
-    private fun openOgServer(server: Int) {
-        startActivity(
-            Intent(this, BrowserActivity::class.java)
-                .putExtra("url", OgSources.playerUrl(title.type, title.id, server, title.season, title.episode))
-                .putExtra("title", "$titleName · ${OgSources.label(server)}".trim())
-                .putExtra("source", "OG")
-        )
-    }
     private fun showTracks() {
         val owner = player ?: run { showSources(); return }
         showDialog(AlertDialog.Builder(this).setTitle("Native track controls")

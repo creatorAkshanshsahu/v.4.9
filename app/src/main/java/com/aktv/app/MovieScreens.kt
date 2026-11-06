@@ -11,10 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.*
 import android.view.animation.DecelerateInterpolator
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.res.ResourcesCompat
@@ -49,11 +45,10 @@ class DetailActivity : Activity() {
     private var episodes = listOf<Movies.Episode>(); private var seasons = listOf<Int>(); private var season = 1
     private lateinit var backdrop: ImageView; private lateinit var logo: ImageView; private lateinit var nameTv: TextView
     private lateinit var facts: TextView; private lateinit var desc: TextView; private lateinit var playBtn: TextView
-    private lateinit var trailerBtn: TextView; private lateinit var metadataChips: LinearLayout
+    private lateinit var metadataChips: LinearLayout
     private lateinit var seasonRow: LinearLayout; private lateinit var epList: RecyclerView; private lateinit var body: LinearLayout
     private lateinit var loading: ProgressBar
     private var selectedEpisode: Pair<Int, Int>? = null
-    private var trailerDialog: AlertDialog? = null; private var trailerWebView: WebView? = null
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -119,8 +114,6 @@ class DetailActivity : Activity() {
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         playBtn = button("▶  Play", primary = true) { playCurrent() }
         buttons.addView(playBtn)
-        trailerBtn = button("▶  Trailer", primary = false) { showTrailerPanel() }
-        buttons.addView(trailerBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
         loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(pageAccent) }
         buttons.addView(loading, LinearLayout.LayoutParams((28 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (16 * dp).toInt() })
         body.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (26 * dp).toInt() })
@@ -207,161 +200,5 @@ class DetailActivity : Activity() {
         background = Ui.pill(dp, 0x552D4652, 24f)
     }
 
-    /** In-app VOD-only YouTube embed. A missing key, non-embeddable video or WebView error is explicit. */
-    private fun showTrailerPanel() {
-        if (trailerDialog?.isShowing == true) return
-        val frame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val web = WebView(this).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = true
-            webChromeClient = WebChromeClient()
-            visibility = View.GONE
-        }
-        trailerWebView = web
-        val state = TextView(this).apply {
-            text = "Loading trailer…"; textSize = 16f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
-            setPadding((24 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt())
-        }
-        frame.addView(web, FrameLayout.LayoutParams(-1, -1))
-        frame.addView(state, FrameLayout.LayoutParams(-1, -1))
-        val dialog = AlertDialog.Builder(this).setTitle("Trailer · ${title.name.take(70)}")
-            .setView(frame).setNegativeButton("Close", null).create()
-        trailerDialog = dialog
-        dialog.setOnDismissListener {
-            if (trailerDialog === dialog) trailerDialog = null
-            if (trailerWebView === web) trailerWebView = null
-            web.stopLoading(); web.loadUrl("about:blank"); web.destroy()
-        }
-        dialog.setOnShowListener { dialog.window?.setLayout((resources.displayMetrics.widthPixels * 0.88f).toInt(), (resources.displayMetrics.heightPixels * 0.82f).toInt()) }
-        dialog.show()
-        io.execute {
-            val key = try { Movies.trailerKey(title.type, title.tmdb) } catch (_: Exception) { null }
-            ui.post {
-                if (!dialog.isShowing || isFinishing || isDestroyed) return@post
-                if (key.isNullOrBlank() || !key.matches(Regex("[A-Za-z0-9_-]{6,64}"))) {
-                    state.text = "Trailer unavailable for this title."
-                    return@post
-                }
-                state.text = "Loading YouTube trailer…"
-                web.visibility = View.VISIBLE
-                web.webViewClient = object : WebViewClient() {
-                    override fun onPageFinished(view: WebView?, url: String?) {
-                        if (url == "about:blank") return
-                    }
-                    override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?) {
-                        if (request?.isForMainFrame == true) {
-                            state.text = "Trailer unavailable on this TV."
-                            state.visibility = View.VISIBLE
-                        }
-                    }
-                }
-                val html = """<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"><style>html,body,#player,#state{margin:0;width:100%;height:100%;background:#070c14;color:#eff6fa;font:16px sans-serif}#state{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}</style><div id="player"></div><div id="state">Loading YouTube trailer…</div><script src="https://www.youtube.com/iframe_api"></script><script>function onYouTubeIframeAPIReady(){new YT.Player('player',{width:'100%',height:'100%',videoId:'$key',playerVars:{playsinline:1,rel:0,autoplay:0},events:{onReady:function(){document.getElementById('state').style.display='none'},onError:function(){document.getElementById('state').innerText='Trailer unavailable on this TV';document.getElementById('state').style.display='grid'}}})}</script>"""
-                web.loadDataWithBaseURL("https://www.youtube-nocookie.com/", html, "text/html", "UTF-8", null)
-            }
-        }
-    }
-
-    private fun lastEpisode(): Pair<Int, Int> {
-        val s = prefs.getInt("last_season_${title.imdb}", episodes.firstOrNull()?.season ?: 1)
-        val e = prefs.getInt("last_ep_${title.imdb}", episodes.firstOrNull { it.season == s }?.episode ?: 1)
-        return s to e
-    }
-
-    private fun bindSeasons() {
-        seasonRow.removeAllViews()
-        if (seasons.isEmpty()) return
-        seasons.forEach { s ->
-            val chip = TextView(this).apply {
-                text = "Season $s"; textSize = 14f; typeface = fSemi; isFocusable = true; isClickable = true
-                setPadding((20 * dp).toInt(), (9 * dp).toInt(), (20 * dp).toInt(), (9 * dp).toInt())
-                val bg = GradientDrawable().apply { cornerRadius = 40 * dp }; background = bg
-                val style = { f: Boolean ->
-                    bg.setColor(when { f -> Color.WHITE; s == season -> Color.argb(70, 255, 255, 255); else -> Color.argb(22, 255, 255, 255) })
-                    setTextColor(if (f) Accent.ABYSS else if (s == season) Accent.TEXT else Accent.DIM)
-                }
-                style(false); tag = style
-                setOnFocusChangeListener { _, f -> style(f); if (f && season != s) { season = s; refreshSeasonChips(); showSeason() } }
-                setOnClickListener { season = s; refreshSeasonChips(); showSeason(); epList.post { epList.getChildAt(0)?.requestFocus() } }
-            }
-            seasonRow.addView(chip, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (10 * dp).toInt() })
-        }
-        showSeason()
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun refreshSeasonChips() {
-        for (i in 0 until seasonRow.childCount) { val c = seasonRow.getChildAt(i); (c.tag as? (Boolean) -> Unit)?.invoke(c.isFocused) }
-    }
-
-    private var seasonEps = listOf<Movies.Episode>()
-    private fun showSeason() {
-        seasonEps = episodes.filter { it.season == season }
-        epAdapter.notifyDataSetChanged(); epList.scrollToPosition(0)
-        epList.alpha = 0f; epList.animate().alpha(1f).setDuration(260).start()
-    }
-
-    private val epAdapter = object : RecyclerView.Adapter<VH>() {
-        override fun getItemCount() = seasonEps.size
-        override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
-            val card = LinearLayout(p.context).apply { orientation = LinearLayout.VERTICAL; isFocusable = true; isClickable = true }
-            val img = ImageView(p.context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; id = 1; clipToOutline = true
-                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(Color.argb(30, 255, 255, 255)) } }
-            card.addView(img, LinearLayout.LayoutParams((240 * dp).toInt(), (135 * dp).toInt()))
-            val n = tv(14f, Accent.TEXT, fSemi).apply { id = 2; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-            card.addView(n, LinearLayout.LayoutParams((240 * dp).toInt(), -2).apply { topMargin = (10 * dp).toInt() })
-            card.addView(View(p.context).apply { id = 3; setBackgroundColor(pageAccent); visibility = View.GONE },
-                LinearLayout.LayoutParams((240 * dp).toInt(), (2 * dp).toInt()).apply { topMargin = (5 * dp).toInt() })
-            card.layoutParams = RecyclerView.LayoutParams(-2, -2).apply { marginEnd = (18 * dp).toInt() }
-            return VH(card)
-        }
-        override fun onBindViewHolder(h: VH, i: Int) {
-            val e = seasonEps[i]; val v = h.itemView
-            val img = v.findViewById<ImageView>(1); img.setImageDrawable(null); if (e.thumb.isNotEmpty()) img.load(e.thumb) { crossfade(true) }
-            v.findViewById<TextView>(2).text = "${e.episode}. ${e.name}"
-            v.setOnFocusChangeListener { x, f ->
-                x.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).translationZ(if (f) 20 * dp else 0f)
-                    .setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
-                (x as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(if (f) Accent.TEXT else Accent.DIM) }
-                if (f) {
-                    selectedEpisode = e.season to e.episode
-                    desc.text = e.overview.ifEmpty { title.description }
-                    updateEpisodeMarkers()
-                }
-            }
-            (v as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(Accent.DIM) }
-            v.findViewById<View>(3).visibility = if (selectedEpisode == (e.season to e.episode)) View.VISIBLE else View.GONE
-            v.setOnClickListener { selectedEpisode = e.season to e.episode; play(e.season, e.episode) }
-        }
-    }
-
-    private fun updateEpisodeMarkers() {
-        for (i in 0 until epList.childCount) {
-            val child = epList.getChildAt(i)
-            val position = epList.getChildAdapterPosition(child)
-            val episode = seasonEps.getOrNull(position)
-            child.findViewById<View>(3)?.visibility = if (episode != null && selectedEpisode == (episode.season to episode.episode)) View.VISIBLE else View.GONE
-        }
-    }
-
-    private fun playCurrent() {
-        if (title.isSeries) { val (s, e) = lastEpisode(); play(s, e) } else play(0, 0)
-    }
-
-    private fun play(s: Int, e: Int) {
-        if (title.tmdb <= 0) { Toast.makeText(this, "This title can't be played right now", Toast.LENGTH_SHORT).show(); return }
-        Movies.saveTitle(prefs, title)
-        if (title.isSeries) prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
-        MoviePlayerActivity.open(this, title, s, e, episodes)
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) ImmersiveUi.hide(window)
-    }
-
-    override fun onResume() { super.onResume(); if (::playBtn.isInitialized) bind() }
-    override fun onBackPressed() { finish(); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out) }
-    override fun onDestroy() { trailerDialog?.dismiss(); io.shutdownNow(); ui.removeCallbacksAndMessages(null); super.onDestroy() }
+    override fun onDestroy() { io.shutdownNow(); ui.removeCallbacksAndMessages(null); super.onDestroy() }
 }

@@ -1068,3 +1068,21 @@ same stream, one layer down. So OG now asks TG's own endpoint **first**: headles
 works on a television, where the engine is off), no page scraping, no iframe hop. The site's own servers are
 still asked after that, and their addresses are preflighted the same way. The documented `tgvid` route is also
 asked by id (`/docs?id=<id>&type=<movie|tv>`), which is the page that has served this player across builds.
+
+## 43. 5.0.5 — the browser engine is gone
+
+Every page-reading path in this app used a WebView: OG's server pages, TG FROST's `/play` page, the JioTV gate,
+the Sony tile fallback, the movie trailer panel, and the playlist's last-resort fetch. On a television that
+engine is a stripped Chromium, and creating it takes the whole process down - which is exactly the "it opens
+and closes on the TV, it runs on the phone" report. So it is removed, not defaulted off:
+
+- `SiteBrowserGate.allowed` is a `const false`; `load()` is a no-op, so a stored preference cannot turn it on;
+- `MediaSniffer.find()` returns "nothing found" without constructing anything - the entry point stays so the
+  resolvers still compile, and no page is ever run;
+- `BrowserActivity` and `BrowserFetch` are deleted, and the manifest no longer declares a browser activity;
+- the movie player's source menu loses the site-server entries and its engine switch: every entry plays here;
+- the trailer panel (a YouTube WebView) is deleted with its button - the button was `lateinit`, and a screen
+  that touched it would have thrown;
+- a Sony tile with no native source now says so instead of opening the site's page;
+- `TgServers.init` and the home setup are guarded, and the crash note is installed on the first line of
+  `onCreate`, so a start-up failure leaves a report instead of an app that closes with nothing recorded.
