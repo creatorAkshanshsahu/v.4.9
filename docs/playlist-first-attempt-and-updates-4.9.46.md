@@ -1342,3 +1342,35 @@ iterations of the preview render settled the compromise:
   show in full; 128dp looked better in isolation and lost the last line of every card.
 - The guard is now geometric: it asserts the hero's copy top clears the bar's height, instead of a magic
   shelf height that stopped meaning anything once the tiles changed size.
+
+## 56. Why no update dialog, and what it reads now — 5.4.1 (code 120)
+
+A television sat on 5.2.1 while 5.3.0 … 5.4.0 were published, and never showed the "Update available"
+dialog. The check was failing, and failing **silently**: an automatic check that cannot reach GitHub wrote
+nothing anywhere, and a TV has no log to inspect.
+
+Two things were wrong with the source it trusted:
+
+- **`/releases/latest/download/update.json` is a redirect whose destination GitHub's CDN caches.** The
+  `?t=` cache-buster the code relied on is stripped by GitHub on the 302 (verified: the `Location` header
+  comes back without the query), so the check re-read the same cached entry — including a cached 404 from
+  around the moment the rolling `latest` release is deleted and re-created on every publish. The app could
+  sit there for hours or days "checking" and never see a manifest.
+- **There was no second source.** One blocked host meant no updates, forever, with no signal.
+
+So the release **API** is now the primary source and the download path is the fallback:
+
+- `GET https://api.github.com/repos/<owner>/<repo>/releases/tags/latest` is answered from GitHub's
+  database, not the asset CDN, and carries everything the installer verifies: the version (published in
+  the release notes as `Version code **120**`), the per-ABI asset name, its byte size, and its `sha256:`
+  digest. `UpdateManifest.fromReleaseApi` parses that with the same rules as the manifest — https only, a
+  64-hex checksum, a finished (`uploaded`) asset — and returns nothing if any of them are missing.
+- If the API cannot be reached, `Updater.check` falls back to the manifest asset exactly as before, so a
+  network that blocks `api.github.com` still updates.
+- **A failed automatic check is now visible:** at most once a day the app says it could not reach GitHub,
+  instead of pretending everything is current.
+- **MENU on the home screen** runs an explicit check, because the rail's version chip is hidden on a
+  television and there was no manual route left.
+
+This build has to be installed once by hand — the 5.2.1 install on the device cannot be told anything by
+code that is not on it yet. From 5.4.1 onward the dialog appears on its own.

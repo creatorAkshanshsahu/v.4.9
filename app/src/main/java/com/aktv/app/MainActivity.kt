@@ -2643,6 +2643,13 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         if (intro.visibility == View.VISIBLE) { if (e.action == KeyEvent.ACTION_DOWN) intro.skip(); return true }
         if (searchShown) return searchKey(e) || super.dispatchKeyEvent(e)
+        // The rail's version chip is hidden on a television, which left the update check with no manual
+        // route at all. MENU on the home screen asks GitHub now instead of waiting for the next launch.
+        if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_MENU) {
+            Toast.makeText(this, "Checking GitHub for a newer STREAMR build…", Toast.LENGTH_SHORT).show()
+            checkForUpdates(interactive = true)
+            return true
+        }
         if (layer.visibility == View.VISIBLE && healthScanActive && e.action == KeyEvent.ACTION_DOWN) {
             when (e.keyCode) {
                 KeyEvent.KEYCODE_BACK -> { finishChannelHealthScan(completed = false, showReport = true); return true }
@@ -2960,6 +2967,15 @@ class MainActivity : AppCompatActivity() {
                 else if (interactive) {
                     Toast.makeText(this, if (reachable) "STREAMR $appVersion is the latest published build." else
                         "Couldn't reach the update service. Check the connection and try again.", Toast.LENGTH_LONG).show()
+                } else if (!reachable) {
+                    // A silent failure is how a published build reaches nobody: the TV has no log to read, so
+                    // say it out loud, at most once a day, and keep the next launch trying.
+                    val since = System.currentTimeMillis() - prefs.getLong("update_failure_notified_at", 0L)
+                    if (since > 24 * 60 * 60 * 1000L) {
+                        prefs.edit().putLong("update_failure_notified_at", System.currentTimeMillis()).apply()
+                        Toast.makeText(this, "Couldn't check GitHub for an update. Open the version chip or " +
+                            "restart when the connection settles.", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }
