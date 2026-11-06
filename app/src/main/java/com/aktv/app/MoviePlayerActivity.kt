@@ -406,7 +406,7 @@ class MoviePlayerActivity : Activity() {
         currentSource?.let(::forgetFailedSource)
         captureProgress(); releasePlayer(); dialog?.dismiss()
         if (startupAt == 0L) startupAt = SystemClock.elapsedRealtime()
-        if (SystemClock.elapsedRealtime() - startupAt > 120_000) { fail("No picture within two minutes. Try another source or retry."); return }
+        if (SystemClock.elapsedRealtime() - startupAt > 45_000) { fail("No picture within 45 seconds. Try another source or retry."); return }
         val next = sources.firstOrNull { recovery.take(it) }
         if (next != null) startSource(next, softwareRetried.contains(next.provider))
         else recovery.alternative()?.let { resolve(it) } ?: fail(lastFailure.ifBlank { "No playable native movie source. Try again later or select another provider." })
@@ -574,14 +574,16 @@ class MoviePlayerActivity : Activity() {
                     status.text = "Playing · ${activeSource.label}"
                 }
                 when {
-                    startupAt > 0 && now - startupAt >= 120_000 -> fail("Native movie startup timed out. Retry or choose another provider.")
-                    !frame && attemptAt > 0 && now - attemptAt >= 30_000 -> {
+                    startupAt > 0 && now - startupAt >= 45_000 -> fail("No picture within 45 seconds. Retry or choose another provider.")
+                    // A source that has not produced a picture in sixteen seconds is buffering, not starting:
+                    // move on rather than leave the viewer watching a spinner.
+                    !frame && attemptAt > 0 && now - attemptAt >= 16_000 -> {
                         trace?.timeout()
-                        lastFailure = "No picture from this movie source within 30 seconds."
+                        lastFailure = "No picture from this movie source within 16 seconds."
                         val source = currentSource
                         if (source == null || trace?.canRetryDecoder() != true || !retrySoftware(source)) nextSource()
                     }
-                    frame && bufferingAt > 0 && now - bufferingAt >= 40_000 -> {
+                    frame && bufferingAt > 0 && now - bufferingAt >= 20_000 -> {
                         lastFailure = "The movie stream stopped responding."
                         nextSource()
                     }

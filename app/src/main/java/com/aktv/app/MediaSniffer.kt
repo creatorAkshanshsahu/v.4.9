@@ -60,7 +60,7 @@ internal object MediaSniffer {
         // The page may fetch an audio rendition before the real one, so a manifest is not the answer until it
         // has been read: a master with video variants is the one the native player needs, or the player would
         // play sound over a black screen and never finish starting.
-        val chosen = choose(found)
+        val chosen = choose(found, referer ?: target)
         lastSummary = when {
             chosen != null -> if (found.size > 1) "manifest found (${found.size} candidates)" else "manifest found"
             found.isNotEmpty() -> "${found.size} manifest(s), none carries video"
@@ -70,24 +70,24 @@ internal object MediaSniffer {
     }
 
     /** The master playlist that lists video variants, else the first manifest that is not an audio track. */
-    private fun choose(found: List<String>): String? {
+    private fun choose(found: List<String>, referer: String): String? {
         if (found.isEmpty()) return null
         for (url in found.take(6)) {
-            val body = peek(url) ?: continue
+            val body = peek(url, referer) ?: continue
             if (body.contains("#EXT-X-STREAM-INF", true) && body.contains("RESOLUTION", true)) return url
         }
         for (url in found.take(6)) {
             if (AUDIO_ONLY.containsMatchIn(url)) continue
-            val body = peek(url) ?: return url
+            val body = peek(url, referer) ?: return url
             if (body.contains("#EXT-X-STREAM-INF", true) || body.contains("#EXTINF", true)) return url
         }
         return found.firstOrNull { !AUDIO_ONLY.containsMatchIn(it) }
     }
 
     /** Reads a manifest directly, so the choice is made on what it contains rather than on its name. */
-    private fun peek(url: String): String? = try {
+    private fun peek(url: String, referer: String): String? = try {
         val request = Request.Builder().url(url).header("User-Agent", TgHttp.USER_AGENT)
-            .header("Referer", "https://theogpiratebot.online/").build()
+            .header("Referer", referer).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) null else response.body?.byteStream()?.let { input ->
                 val buffer = ByteArray(64 * 1024)
@@ -107,7 +107,7 @@ internal object MediaSniffer {
     private val client = OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS).callTimeout(6, TimeUnit.SECONDS).build()
 
-    private val MEDIA_IN_TEXT = Regex("""https?://[^\s"'<>\\]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
+    private val MEDIA_IN_TEXT = Regex("""https?://[^\s"'<>\\]+?\.(?:m3u8|mpd)(?:\?[^\s"'<>\\]*)?""", RegexOption.IGNORE_CASE)
 
     /** Media addresses named inside a response body (a player's JSON often names its own manifest). */
     fun mediaIn(body: String): List<String> =

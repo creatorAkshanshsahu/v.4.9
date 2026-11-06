@@ -234,9 +234,14 @@ internal class FrostResolver(
     private fun sitePlayback(title: FrostTitle, provider: FrostProvider): FrostSource? {
         val context = MediaSniffer.appContext ?: return null
         var media: String? = null
+        // The page the stream was taken from is the Referer the CDN expects: a movie host that serves the
+        // manifest to one page refuses it when the app asks from anywhere else, and a refused manifest is
+        // a player that buffers forever instead of an error anyone can read.
+        var sourcePage = "${FrostProtocol.SITE}/"
         val deadline = System.currentTimeMillis() + 45_000
         for ((page, referer) in sitePages(title, provider)) {
             if (System.currentTimeMillis() > deadline) break
+            sourcePage = referer ?: page
             media = try { MediaSniffer.find(context, page, referer) } catch (_: Exception) { null }
             if (media != null) break
         }
@@ -254,7 +259,14 @@ internal class FrostResolver(
             quality = "",
             language = "",
             hevc = null,
-            headers = mapOf("User-Agent" to TgHttp.USER_AGENT, "Referer" to "${FrostProtocol.SITE}/"),
+            headers = mapOf(
+                "User-Agent" to TgHttp.USER_AGENT,
+                "Referer" to sourcePage,
+                "Origin" to sourcePage.substringBefore("/", "https://").let { scheme ->
+                    val rest = sourcePage.removePrefix("$scheme://")
+                    "$scheme://${rest.substringBefore("/")}"
+                }
+            ),
             subtitles = emptyList(),
             credentialOrigin = chosen,
             scraperName = "site player"

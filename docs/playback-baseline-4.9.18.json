@@ -1,143 +1,150 @@
 {
- "amendments": [
-  {
-   "change": "JjtvResolver.SITE only: jjtvxweb.pages.dev (live /pind = HTTP 451) -> giotv-6op.pages.dev (live /pind = HTTP 200, same advertised contract).",
-   "file": "app/src/main/java/com/aktv/app/JjtvResolver.kt",
-   "from": "3b983b9ff38af374f98a5f254ae6d097e5a80153f5af8dde0c40c8dee0432334",
-   "to": "6f85090e7fdbf6e1851dba6ae559448405c25664c882ad2517f4f399eea9654c",
-   "unchanged": "Request construction, discovery, cookie selection, caching, DRM and limits are byte-identical apart from the site constant."
+  "amendments": [
+    {
+      "change": "JjtvResolver.SITE only: jjtvxweb.pages.dev (live /pind = HTTP 451) -> giotv-6op.pages.dev (live /pind = HTTP 200, same advertised contract).",
+      "file": "app/src/main/java/com/aktv/app/JjtvResolver.kt",
+      "from": "3b983b9ff38af374f98a5f254ae6d097e5a80153f5af8dde0c40c8dee0432334",
+      "to": "6f85090e7fdbf6e1851dba6ae559448405c25664c882ad2517f4f399eea9654c",
+      "unchanged": "Request construction, discovery, cookie selection, caching, DRM and limits are byte-identical apart from the site constant."
+    },
+    {
+      "change": "Adds displayName(); provider names shown to the user now follow the configured site. Enum, ordering and sourceKey are unchanged.",
+      "file": "app/src/main/java/com/aktv/app/LiveProviders.kt",
+      "from": "79d52aaaa8ba1d4f1481c6e45e922a51c2732d7f0287893895c3d72015957975",
+      "to": "25a29a716a3e79294b3ad9553817bacd1ad3413a8f9be1d5866f64f15bec196b",
+      "unchanged": "Provider order, V2 guard, provider(source) and the source fingerprint are unchanged."
+    },
+    {
+      "change": "Playlist (JIOM3U) additions only: new invalidateJio(), and jioCatalogue() is now internal because it returns the playlist's internal Entry type.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "0bd1e84f2223a2c6a0256368c3f5de0f30b3d73c90c05c0aafea8082ec27425c",
+      "to": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
+      "unchanged": "TgResolver/JjtvResolver calls, discovery, caching, the persisted TG function id and forgetPreviousLiveSite are byte-identical; no existing provider call, request or DRM rule was modified."
+    },
+    {
+      "change": "TgResponse gains an optional finalUrl: the address after redirects, so a playlist probe can keep the signed CDN URL instead of the redirecting one.",
+      "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
+      "from": "e7d1280843ea87bdc35b0c5719f4052ab14e7d402ecd7463a99353128c0af6c1",
+      "to": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
+      "unchanged": "Request construction, headers, timeouts, discovery, caching, response decoding and every limit are byte-identical; the new field defaults to null for every existing caller."
+    },
+    {
+      "change": "TgStream gains omitOrigin: a stream whose media host is a signed CDN link rather than a website is not given a browser origin.",
+      "file": "app/src/main/java/com/aktv/app/TgProtocol.kt",
+      "from": "abeff56787f99ca1fae5b418a0a66c393218e34bac7dc7613ac02f93efd085ee",
+      "to": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
+      "unchanged": "Every existing field, default and decode path is byte-identical; the new flag defaults to false for TG, V2 and the website providers."
+    },
+    {
+      "change": "StreamRequestPolicy.request() sends no Origin/Referer when the stream sets omitOrigin, and keeps the stream's own User-Agent on the CDN and its segments.",
+      "file": "app/src/main/java/com/aktv/app/StreamRequestPolicy.kt",
+      "from": "73b1736da6362bb7a841381ab3c8bc0442469c7113255e1e4e44e0f7ab149ab9",
+      "to": "0e7e2393e3d338fc84aa1eee47ac20501b7b9132216f3da6f2d4c39b9095481c",
+      "unchanged": "Token handling, channel-scope learning, header sanitising, redirect taint rules and every origin check are unchanged; only the branch that builds Origin/Referer is guarded by the new flag, which is false for every provider except the playlist."
+    },
+    {
+      "change": "JioM3uResolver construction only: init() now hands the playlist resolver the app-private cache file (files/jiotv-playlist.m3u8) so a refused playlist refresh cannot empty the JioTV section.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
+      "to": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
+      "unchanged": "Provider order, the JIOM3U dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
+    },
+    {
+      "change": "Adds the OG provider: the enum gains OG(\"og\", \"OG\") and resolve() hands that provider to OgNative, which reads the media address each of theogpiratebot.online's servers names and plays it in this same native player.",
+      "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+      "from": "8170b49a2c6462050ba7cacea4cd64bea764a8c95af34421ffa4e8d20b88cba7",
+      "to": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
+      "unchanged": "FROST/OUT endpoint construction, parsing, limits, error kinds, recovery and cancel() are unchanged apart from the added branch."
+    },
+    {
+      "change": "JioM3uResolver construction only: the playlist resolver now serves the site's second list too (catalogueOf), keeps both on disk under a cache directory, and may read a playlist through the browser engine after every scriptless request is refused; tataCatalogue() exposes the second list.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
+      "to": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
+      "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
+    },
+    {
+      "change": "TgHttp gains optional read/call timeouts so a large playlist can be fetched on a slow link; the default construction is byte-for-byte the shared client every other call already used.",
+      "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
+      "from": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
+      "to": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
+      "unchanged": "Request building, headers, bounded body read, redirect/final-url reporting and the default 5/6/12 s client are unchanged."
+    },
+    {
+      "change": "JioM3uResolver construction only: the playlist resolver now gets a slow-link transport, keeps its lists in cacheDir, still reads the 4.9.61 cache file, and exposes tataCatalogue().",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
+      "to": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146",
+      "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
+    },
+    {
+      "change": "One added line in init: OgNative.appContext = ctx.applicationContext, so the OG resolver can run the site's player in the browser engine when no page names a stream. Nothing else in the file changed.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146",
+      "to": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
+      "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line stays as it was; the resolver itself is unchanged."
+    },
+    {
+      "change": "jioCatalogue() now reads only the JioTV playlist (catalogueOf) instead of the merged catalogue, and cachedJioCatalogue() exposes the disk copy so a section can paint before the network answers.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
+      "to": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
+      "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), refreshSite(), tataCatalogue() and every TG/JJTV path are unchanged; the resolver itself is untouched by this edit."
+    },
+    {
+      "change": "FrostResolver.resolve() gains a last resort: when the endpoint answers with nothing, or with only DASH manifests this player cannot open, it runs the site's own /watch page in the hidden browser and takes the .m3u8/.mp4 that page plays. Results are remembered per title for 30 minutes. The endpoint request itself (URL, headers, bounded read, exception mapping) is moved verbatim into direct().",
+      "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+      "from": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
+      "to": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
+      "unchanged": "No new host is trusted and nothing is decrypted: the address must still be HTTPS with a real host, DASH is still refused, and the resolved list is the same FrostSource type the player already preflights."
+    },
+    {
+      "change": "One added line in init: MediaSniffer.appContext = ctx.applicationContext, so the VOD resolvers can run a site's own player in the browser engine off the UI thread.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
+      "to": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb",
+      "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line is unchanged."
+    },
+    {
+      "change": "The site-player fallback tries tgflix.lovable.app before tgfrost.lovable.app, loads it directly (no Referer wrapper) so the profile screen can be passed, and names the chosen address explicitly. The endpoint request, its headers and its exception mapping are untouched.",
+      "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+      "from": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
+      "to": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
+      "unchanged": "The endpoint URL, the HTTPS-only media rule, the DASH refusal and the FrostSource the player preflights are the same as the previous amendment."
+    },
+    {
+      "change": "The site-player fallback now walks the family's real routes in order (tgvid embed, tgflix /play/{id}, tgfrost /watch), with a 45 s ceiling; watchUrl and the host list it replaced are gone.",
+      "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+      "from": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
+      "to": "59ee3a98488040e22c98bc6121f76370b323554f901c5ceae826a4f41f26ce9f",
+      "unchanged": "The endpoint request, the HTTPS-only media rule, the DASH refusal and the FrostSource contract the player preflights are unchanged."
+    },
+    {
+      "change": "sitePlayback(): the sniffed page now travels with the source as Referer (and its origin as Origin) instead of the site root, and those headers are unchanged in every direct-API path.",
+      "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+      "from": "59ee3a98488040e22c98bc6121f76370b323554f901c5ceae826a4f41f26ce9f",
+      "to": "718ba9479002ff09adda2e566bbc0ffef32df5ce01a9df7c502a6349512778b5",
+      "unchanged": "Provider set, page order, timeouts, memoisation, format selection, recovery and every direct-API source construct are byte-identical apart from the referer/origin of sniffed sources."
+    }
+  ],
+  "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
+  "sha256": {
+    "app/src/main/java/com/aktv/app/ClearKeyDashManifestParser.kt": "3b6ce8a9adeed73195bd55898d00806efa87cf58471736d56e8e76e08ed2bc78",
+    "app/src/main/java/com/aktv/app/FrostMedia.kt": "0f62c6dc20fe6bfd8e8db03fe70e91857e6a3e100fb66c280a6ae4919e0afcb1",
+    "app/src/main/java/com/aktv/app/FrostMovies.kt": "718ba9479002ff09adda2e566bbc0ffef32df5ce01a9df7c502a6349512778b5",
+    "app/src/main/java/com/aktv/app/HttpReferenceClock.kt": "b8dc8e872957ed6bc9f10726050dfcb0bdd464ebef0db3bc42769fe911ba7479",
+    "app/src/main/java/com/aktv/app/JjtvProtocol.kt": "399495f6588165cb12ab1f2afaeab09cb8d54743dc2865f84704b42dc2e651ef",
+    "app/src/main/java/com/aktv/app/JjtvRequestProfiles.kt": "e95e0103df5052e5d3271ee55125f8b633b7e21c6e3c868e4c559aeeb0f4f497",
+    "app/src/main/java/com/aktv/app/JjtvResolver.kt": "6f85090e7fdbf6e1851dba6ae559448405c25664c882ad2517f4f399eea9654c",
+    "app/src/main/java/com/aktv/app/LiveProviders.kt": "be9d4b7d1a02e672339beef4ed9eaee694666aae1d30242a8c2c612ca3fff9e0",
+    "app/src/main/java/com/aktv/app/NativePlaybackPolicy.kt": "880302f75086bbfbaa1f1d17df5eea7a68a6e444556ca392c35ec43836f0ee2f",
+    "app/src/main/java/com/aktv/app/StreamHttp.kt": "1981fadffc9b1ec78eed50a0f8ae426c6af6649a35f355b69c479951af3c6b9e",
+    "app/src/main/java/com/aktv/app/StreamRequestPolicy.kt": "0e7e2393e3d338fc84aa1eee47ac20501b7b9132216f3da6f2d4c39b9095481c",
+    "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
+    "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
+    "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
+    "app/src/main/java/com/aktv/app/TgResolver.kt": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
+    "app/src/main/java/com/aktv/app/TgServers.kt": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb"
   },
-  {
-   "change": "Adds displayName(); provider names shown to the user now follow the configured site. Enum, ordering and sourceKey are unchanged.",
-   "file": "app/src/main/java/com/aktv/app/LiveProviders.kt",
-   "from": "79d52aaaa8ba1d4f1481c6e45e922a51c2732d7f0287893895c3d72015957975",
-   "to": "25a29a716a3e79294b3ad9553817bacd1ad3413a8f9be1d5866f64f15bec196b",
-   "unchanged": "Provider order, V2 guard, provider(source) and the source fingerprint are unchanged."
-  },
-  {
-   "change": "Playlist (JIOM3U) additions only: new invalidateJio(), and jioCatalogue() is now internal because it returns the playlist's internal Entry type.",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "0bd1e84f2223a2c6a0256368c3f5de0f30b3d73c90c05c0aafea8082ec27425c",
-   "to": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
-   "unchanged": "TgResolver/JjtvResolver calls, discovery, caching, the persisted TG function id and forgetPreviousLiveSite are byte-identical; no existing provider call, request or DRM rule was modified."
-  },
-  {
-   "change": "TgResponse gains an optional finalUrl: the address after redirects, so a playlist probe can keep the signed CDN URL instead of the redirecting one.",
-   "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
-   "from": "e7d1280843ea87bdc35b0c5719f4052ab14e7d402ecd7463a99353128c0af6c1",
-   "to": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
-   "unchanged": "Request construction, headers, timeouts, discovery, caching, response decoding and every limit are byte-identical; the new field defaults to null for every existing caller."
-  },
-  {
-   "change": "TgStream gains omitOrigin: a stream whose media host is a signed CDN link rather than a website is not given a browser origin.",
-   "file": "app/src/main/java/com/aktv/app/TgProtocol.kt",
-   "from": "abeff56787f99ca1fae5b418a0a66c393218e34bac7dc7613ac02f93efd085ee",
-   "to": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
-   "unchanged": "Every existing field, default and decode path is byte-identical; the new flag defaults to false for TG, V2 and the website providers."
-  },
-  {
-   "change": "StreamRequestPolicy.request() sends no Origin/Referer when the stream sets omitOrigin, and keeps the stream's own User-Agent on the CDN and its segments.",
-   "file": "app/src/main/java/com/aktv/app/StreamRequestPolicy.kt",
-   "from": "73b1736da6362bb7a841381ab3c8bc0442469c7113255e1e4e44e0f7ab149ab9",
-   "to": "0e7e2393e3d338fc84aa1eee47ac20501b7b9132216f3da6f2d4c39b9095481c",
-   "unchanged": "Token handling, channel-scope learning, header sanitising, redirect taint rules and every origin check are unchanged; only the branch that builds Origin/Referer is guarded by the new flag, which is false for every provider except the playlist."
-  },
-  {
-   "change": "JioM3uResolver construction only: init() now hands the playlist resolver the app-private cache file (files/jiotv-playlist.m3u8) so a refused playlist refresh cannot empty the JioTV section.",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "0ee27d3d2a6253d84cc668286b0c92827453b59d7c22e4c14213ae98d566be25",
-   "to": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
-   "unchanged": "Provider order, the JIOM3U dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
-  },
-  {
-   "change": "Adds the OG provider: the enum gains OG(\"og\", \"OG\") and resolve() hands that provider to OgNative, which reads the media address each of theogpiratebot.online's servers names and plays it in this same native player.",
-   "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
-   "from": "8170b49a2c6462050ba7cacea4cd64bea764a8c95af34421ffa4e8d20b88cba7",
-   "to": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
-   "unchanged": "FROST/OUT endpoint construction, parsing, limits, error kinds, recovery and cancel() are unchanged apart from the added branch."
-  },
-  {
-   "change": "JioM3uResolver construction only: the playlist resolver now serves the site's second list too (catalogueOf), keeps both on disk under a cache directory, and may read a playlist through the browser engine after every scriptless request is refused; tataCatalogue() exposes the second list.",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "e5cd1e88308a93b9f4200bc98a3d3038b1cffac53fd9796801d7bbc33605ca05",
-   "to": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
-   "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
-  },
-  {
-   "change": "TgHttp gains optional read/call timeouts so a large playlist can be fetched on a slow link; the default construction is byte-for-byte the shared client every other call already used.",
-   "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
-   "from": "1e204d804072320f7d0c7c2c7fcded60b81fc00f46c95ae4186bb7145dfa5c2c",
-   "to": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
-   "unchanged": "Request building, headers, bounded body read, redirect/final-url reporting and the default 5/6/12 s client are unchanged."
-  },
-  {
-   "change": "JioM3uResolver construction only: the playlist resolver now gets a slow-link transport, keeps its lists in cacheDir, still reads the 4.9.61 cache file, and exposes tataCatalogue().",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "bce7e351fe4faf0eea6207baabf2a4b9494cdb554c491831cd7a3f60abc41a03",
-   "to": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146",
-   "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), jioCatalogue(), refreshSite() and every TG/JJTV path are unchanged."
-  },
-  {
-   "change": "One added line in init: OgNative.appContext = ctx.applicationContext, so the OG resolver can run the site's player in the browser engine when no page names a stream. Nothing else in the file changed.",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "0a743f747bbe8d0a0bbb47b8043fdd912c1563b7fcc61e5d30eb1eef7a812146",
-   "to": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
-   "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line stays as it was; the resolver itself is unchanged."
-  },
-  {
-   "change": "jioCatalogue() now reads only the JioTV playlist (catalogueOf) instead of the merged catalogue, and cachedJioCatalogue() exposes the disk copy so a section can paint before the network answers.",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "f340c5a0985a0cf17d4b83420a55a1ab4e562108d37ced01bbe59e506114dc03",
-   "to": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
-   "unchanged": "Provider order, fetchFrom() dispatch, invalidateJio(), refreshSite(), tataCatalogue() and every TG/JJTV path are unchanged; the resolver itself is untouched by this edit."
-  },
-  {
-   "change": "FrostResolver.resolve() gains a last resort: when the endpoint answers with nothing, or with only DASH manifests this player cannot open, it runs the site's own /watch page in the hidden browser and takes the .m3u8/.mp4 that page plays. Results are remembered per title for 30 minutes. The endpoint request itself (URL, headers, bounded read, exception mapping) is moved verbatim into direct().",
-   "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
-   "from": "d9960ec6e66aef5719a9200b11cb214147a21f35c7d4dddd9e608b314d44c22f",
-   "to": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
-   "unchanged": "No new host is trusted and nothing is decrypted: the address must still be HTTPS with a real host, DASH is still refused, and the resolved list is the same FrostSource type the player already preflights."
-  },
-  {
-   "change": "One added line in init: MediaSniffer.appContext = ctx.applicationContext, so the VOD resolvers can run a site's own player in the browser engine off the UI thread.",
-   "file": "app/src/main/java/com/aktv/app/TgServers.kt",
-   "from": "dc9bf7af7c7e9d65ca042f736bef70bfaf3a5fef1121a892fa23b4a7039ff036",
-   "to": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb",
-   "unchanged": "Every provider order, fetch hint, invalidate and JioTV construction line is unchanged."
-  },
-  {
-   "change": "The site-player fallback tries tgflix.lovable.app before tgfrost.lovable.app, loads it directly (no Referer wrapper) so the profile screen can be passed, and names the chosen address explicitly. The endpoint request, its headers and its exception mapping are untouched.",
-   "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
-   "from": "7dd714526ff10ed6bc5e9ad853662ec607f183ea55b845711e06d884c247bc4d",
-   "to": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
-   "unchanged": "The endpoint URL, the HTTPS-only media rule, the DASH refusal and the FrostSource the player preflights are the same as the previous amendment."
-  },
-  {
-   "change": "The site-player fallback now walks the family's real routes in order (tgvid embed, tgflix /play/{id}, tgfrost /watch), with a 45 s ceiling; watchUrl and the host list it replaced are gone.",
-   "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
-   "from": "b3b2f15400028813b26fc5265148ecc491a549e3e5e2604dc87cd27c2d76d61c",
-   "to": "59ee3a98488040e22c98bc6121f76370b323554f901c5ceae826a4f41f26ce9f",
-   "unchanged": "The endpoint request, the HTTPS-only media rule, the DASH refusal and the FrostSource contract the player preflights are unchanged."
-  }
- ],
- "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
- "sha256": {
-  "app/src/main/java/com/aktv/app/ClearKeyDashManifestParser.kt": "3b6ce8a9adeed73195bd55898d00806efa87cf58471736d56e8e76e08ed2bc78",
-  "app/src/main/java/com/aktv/app/FrostMedia.kt": "0f62c6dc20fe6bfd8e8db03fe70e91857e6a3e100fb66c280a6ae4919e0afcb1",
-  "app/src/main/java/com/aktv/app/FrostMovies.kt": "59ee3a98488040e22c98bc6121f76370b323554f901c5ceae826a4f41f26ce9f",
-  "app/src/main/java/com/aktv/app/HttpReferenceClock.kt": "b8dc8e872957ed6bc9f10726050dfcb0bdd464ebef0db3bc42769fe911ba7479",
-  "app/src/main/java/com/aktv/app/JjtvProtocol.kt": "399495f6588165cb12ab1f2afaeab09cb8d54743dc2865f84704b42dc2e651ef",
-  "app/src/main/java/com/aktv/app/JjtvRequestProfiles.kt": "e95e0103df5052e5d3271ee55125f8b633b7e21c6e3c868e4c559aeeb0f4f497",
-  "app/src/main/java/com/aktv/app/JjtvResolver.kt": "6f85090e7fdbf6e1851dba6ae559448405c25664c882ad2517f4f399eea9654c",
-  "app/src/main/java/com/aktv/app/LiveProviders.kt": "be9d4b7d1a02e672339beef4ed9eaee694666aae1d30242a8c2c612ca3fff9e0",
-  "app/src/main/java/com/aktv/app/NativePlaybackPolicy.kt": "880302f75086bbfbaa1f1d17df5eea7a68a6e444556ca392c35ec43836f0ee2f",
-  "app/src/main/java/com/aktv/app/StreamHttp.kt": "1981fadffc9b1ec78eed50a0f8ae426c6af6649a35f355b69c479951af3c6b9e",
-  "app/src/main/java/com/aktv/app/StreamRequestPolicy.kt": "0e7e2393e3d338fc84aa1eee47ac20501b7b9132216f3da6f2d4c39b9095481c",
-  "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
-  "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
-  "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
-  "app/src/main/java/com/aktv/app/TgResolver.kt": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
-  "app/src/main/java/com/aktv/app/TgServers.kt": "73ada58d1d35c6745feb862da2c41cae17a9fd8436b7480022c8f993c68846eb"
- },
- "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
+  "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }

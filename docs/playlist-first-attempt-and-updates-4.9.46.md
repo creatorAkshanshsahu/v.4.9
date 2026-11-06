@@ -1033,3 +1033,19 @@ The app is STREAMR now, by Akshansh, and it does not share a screen with the old
 The shared list/row background (`Ui.focusBg`) still activated to a slate blue from the old identity; it now
 activates to amber glass, so every list that uses it - search keys, the channel guide, episode lists - matches
 the bar. The search layer already sits on the new ground and inherits the new type.
+
+## 41. 5.0.3 — a source that buffers is not a source that plays
+
+A movie host serves its manifest to the page it belongs to. The app was asking with the site's root as
+`Referer` no matter which page it had taken the stream from, so a CDN that checks the referer answered with
+something the player could not use - and a player that cannot load segments shows a spinner, not an error.
+
+- **The page travels with the source**: `Referer` is the page the stream was sniffed from, `Origin` is that
+  page's origin. Both are sent by the player's own HTTP client, per source.
+- **The sniffer asks with the same referer** when it reads a manifest to decide whether it carries video;
+  before, it always claimed to come from one site, which is why the choice could be blind.
+- **A body can name a trailer or an ad as readily as a stream**, so text-scraped candidates are manifests only
+  (`.m3u8`, `.mpd`). Network-level interception still catches a direct file.
+- **Bounded startup**: sixteen seconds without a picture moves to the next source (was thirty), a stream that
+  stops responding for twenty seconds does the same (was forty), and the whole startup budget is 45 seconds
+  (was 120). A spinner is now a state that ends.
