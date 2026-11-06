@@ -95,6 +95,23 @@ class MainActivity : AppCompatActivity() {
     private val GUIDE = "$SITE/api/public/guide"              // programme details (V1)
     private val UA = "Mozilla/5.0 (Linux; Android 9; TV) AppleWebKit/537.36 Chrome/110 Safari/537.36"
     private val io = Executors.newFixedThreadPool(4)
+
+    /**
+     * Work queued for a pool this activity may already have shut down must never reach the crash handler.
+     *
+     * A delayed callback - the JioTV retry, a prefetch, an update check - can be posted from a
+     * `runOnUiThread` block that was queued *before* `onDestroy` cleared the handler: it then arrives after
+     * the pools are gone and `execute` throws `RejectedExecutionException` on the main thread. On a
+     * television that is "the app closed by itself, right after opening".
+     */
+    private fun submit(service: java.util.concurrent.ExecutorService, block: () -> Unit) {
+        if (isFinishing || isDestroyed) return
+        try {
+            service.execute(block)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // The run is over; the work was optional.
+        }
+    }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
     private val dp by lazy { resources.displayMetrics.density }
     private val ui = Handler(Looper.getMainLooper())
@@ -783,7 +800,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadHomeTrending() {
         if (trendingLoading || trendingTitles.isNotEmpty()) return
         trendingLoading = true
-        io.execute {
+        submit(io) {
             val loaded = try { Movies.shelf(Movies.MOVIE_SHELVES.first()).take(20) } catch (_: Exception) { emptyList() }
             runOnUiThread {
                 trendingLoading = false
@@ -802,7 +819,7 @@ class MainActivity : AppCompatActivity() {
         readCache("v1.json")?.let { try { applyV1(parseV1(it)) } catch (_: Exception) {} }
         readCache("v2.json")?.let { try { applyV2(parseV2(it)) } catch (_: Exception) {} }
         v1Msg = "Loading channels…"; updateStatus()
-        io.execute {
+        submit(io) {
             try {
                 val j = get(BASE); val list = parseV1(j)
                 if (list.isEmpty()) throw IOException("empty channel list")
@@ -814,7 +831,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        io.execute {
+        submit(io) {
             try {
                 val j = get(BASE_V2); val list = parseV2(j)
                 if (list.isEmpty()) throw IOException("empty list")
@@ -835,7 +852,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadTataChannels() {
         if (tataLoaded) return
         tataLoaded = true
-        io.execute {
+        submit(io) {
             try {
                 val tata = TgServers.tataCatalogue().map { e ->
                     Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
@@ -856,7 +873,7 @@ class MainActivity : AppCompatActivity() {
     private fun loadJioChannels() {
         if (jioCatalogLoaded) return
         jioMsg = "Loading JioTV channels…"; updateStatus()
-        io.execute {
+        submit(io) {
             // The list that answered last time is on disk: put the section up from it immediately, then let the
             // network replace it. This is what made 4.9.61 feel instant and this section feel slow.
             if (allJio.isEmpty()) {
@@ -882,7 +899,7 @@ class MainActivity : AppCompatActivity() {
                         // One quiet retry, because a TV link that is barely moving drops the first request.
                         jioRetried = true; jioCatalogLoaded = false
                         jioMsg = "Loading JioTV channels…"; updateStatus()
-                        ui.postDelayed({ loadJioChannels() }, 5_000)
+                        if (!isFinishing && !isDestroyed) ui.postDelayed({ loadJioChannels() }, 5_000)
                     } else if (allJio.isEmpty()) {
                         jioMsg = "JioTV channels didn't load (${why(e)}). Check the connection and reopen the app."
                         updateStatus()
@@ -1314,7 +1331,7 @@ class MainActivity : AppCompatActivity() {
             else { guideWaiters[c.id] = mutableListOf(cb); true }
         }
         if (!leader) return
-        io.execute {
+        submit(io) {
             val community = try { ExternalEpg.guide(applicationContext, c.id) } catch (_: Exception) { null }
             val tgFallback = if (guideHasSchedule(community)) null
                 else try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
@@ -2757,7 +2774,7 @@ class MainActivity : AppCompatActivity() {
     }
     /** Downloads a changed community feed off-main; only refreshes the visible V1 guide after a new file lands. */
     private fun refreshProgrammeFeed() {
-        io.execute {
+        submit(io) {
             val changed = ExternalEpg.refreshIfDue(applicationContext)
             if (changed) ui.post {
                 val ch = if (layer.visibility == View.VISIBLE) shown.getOrNull(current) else (heroTile as? Tile.Ch)?.c
@@ -2952,7 +2969,7 @@ class MainActivity : AppCompatActivity() {
         if (!interactive && !fresh &&
             (if (force) since < UpdateConfig.BUILD_GRACE_MS else since < UpdateConfig.CHECK_INTERVAL_MS)) return
         updateChecking = true
-        io.execute {
+        submit(io) {
             var reachable = true
             val release = try { Updater.check(this) } catch (_: Exception) { reachable = false; null }
             runOnUiThread {
@@ -3068,7 +3085,7 @@ class MainActivity : AppCompatActivity() {
             setCancelable(false)
             show()
         }
-        io.execute {
+        submit(io) {
             try {
                 val file = Updater.download(this, release, { percent ->
                     runOnUiThread { if (dialogProgress.isShowing) dialogProgress.progress = percent }

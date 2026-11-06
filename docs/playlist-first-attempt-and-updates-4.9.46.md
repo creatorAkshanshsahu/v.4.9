@@ -1392,3 +1392,36 @@ retired "AK" branding is gone from the binary.
 - **AK is out of the UI:** the hero's placeholder title said "AK News", the hero logo caption said "AK NEWS",
   the EPG request carried an `AK-TV-EPG/1.0` user agent, and three unused `aktv_*_cinematic` / `ic_brand`
   crimson vectors were still in `res/drawable`. All changed or deleted; `res` now contains no AK branding.
+
+## 58. The crash on start: a retry into a dead thread pool — 5.4.3 (code 122)
+
+A television reported "it keeps crashing on start and I can't do anything". The first thing built was a test
+that actually boots `MainActivity`, because nothing in the suite did: every earlier UI test inflated a layout
+or drove `MoviePlayerActivity`, so an `onCreate` that throws would have shipped green.
+
+The test crashed on its own, with the reason:
+
+```
+RejectedExecutionException
+  at MainActivity.loadJioChannels(MainActivity.kt:859)
+  ... ui.postDelayed({ loadJioChannels() }, 5_000)
+```
+
+`io` is a per-activity `Executors.newFixedThreadPool(4)` that `onDestroy` shuts down. The JioTV load posts a
+5-second retry, and that retry is posted from inside a `runOnUiThread` block. If the screen is torn down while
+that block is queued (BACK, HOME, a relaunch, or the crash/relaunch loop itself), the block runs anyway,
+posts the retry, the retry lands after `shutdownNow()` and `execute` throws **on the main thread**, killing
+the process. A playlist that fails to load makes it worse: the retry re-arms every 5 seconds, so the app can
+crash on open, restart, crash again.
+
+- **Every pool submission now goes through `submit(service) { }`**, which returns silently when the activity
+  is finishing or destroyed and swallows `RejectedExecutionException`. All nine `io.execute` call sites in
+  `MainActivity` use it.
+- **The JioTV retry does not re-arm** once the activity is finishing or destroyed.
+
+Two regression tests now boot the real activity on a television qualifier (`w960dp-h540dp-land-television`):
+one for `onCreate`, one for the first 20 seconds of posted work, and one that destroys the activity and then
+runs 40 more seconds of queued callbacks — the exact shape of the crash.
+
+If the box still closes by itself, the app now has somewhere to say why: 15 seconds in it offers the previous
+run's note (crash stack, or "ended without a clean stop") with a Copy button.

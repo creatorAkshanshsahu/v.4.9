@@ -42,4 +42,16 @@ class MainActivityLaunchTest {
             controller.destroy()
         }
     }
+
+    @Test
+    fun `a delayed callback that arrives after the screen is gone does not kill the process`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        val activity = controller.get()
+        // Queue the launch work (JioTV load, its 5s retry, prefetches), then tear the activity down the way
+        // BACK or HOME does. Anything that fires afterwards used to reach a shut-down thread pool and throw.
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(6))
+        controller.pause().stop().destroy()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(40))
+        assertNotNull(activity)
+    }
 }
