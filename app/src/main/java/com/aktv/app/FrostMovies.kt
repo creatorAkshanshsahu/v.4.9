@@ -286,7 +286,7 @@ internal class FrostResolver(
             ?.takeIf { !fresh && it.until > System.currentTimeMillis() }?.let { return it.sources }
         val watchPage = sitePages(title, provider).firstOrNull { it.first.contains("/watch/") }?.first
             ?: "${FrostProtocol.SITE}/"
-        val direct = try {
+        val listed = try {
             withSiteReferer(direct(title, provider), watchPage)
         } catch (error: FrostResolveException) {
             // The site itself would have moved on to its next server; so do we, before telling anyone it failed.
@@ -297,7 +297,7 @@ internal class FrostResolver(
         }
         // A DASH manifest from these hosts is Widevine, which this player does not open: a source list made
         // only of those is, for the viewer, an empty list.
-        val playable = FrostPreflight.keep(direct.filter { it.format != VodFormat.DASH })
+        val playable = FrostPreflight.keep(listed.filter { it.format != VodFormat.DASH })
         if (playable.isNotEmpty()) { remember(title, provider, playable); return playable }
         // The endpoint answered, but every address it named is gone. The site's own player still works, so
         // take the stream it plays rather than showing a dead one.
@@ -307,8 +307,8 @@ internal class FrostResolver(
             remember(title, provider, result)
             return result
         }
-        val usable = FrostPreflight.keep(direct)
-        if (usable.isEmpty() && direct.isNotEmpty()) throw FrostResolveException(kind = "stale")
+        val usable = FrostPreflight.keep(listed)
+        if (usable.isEmpty() && listed.isNotEmpty()) throw FrostResolveException(kind = "stale")
         return usable
     }
 
