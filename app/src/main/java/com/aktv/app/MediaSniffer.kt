@@ -285,6 +285,16 @@ internal object MediaSniffer {
             Handler(Looper.getMainLooper()).postDelayed({ poll(step + 1) }, STEP_MS)
         }
 
+        /** `evaluateJavascript` answers with a JSON string literal holding the JSON array of bodies. */
+        private fun decode(raw: String?): List<String>? = try {
+            if (raw.isNullOrBlank() || raw == "null") null else {
+                val arr = org.json.JSONArray(org.json.JSONObject("{\"v\":$raw}").getString("v"))
+                (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotBlank() } }
+            }
+        } catch (_: Throwable) {
+            null
+        }
+
         private fun readBodies(view: WebView) {
             val js = "JSON.stringify(window.__akBodies||[])"
             try {
