@@ -128,8 +128,6 @@ class MainActivity : AppCompatActivity() {
     /** The site's second list (its "tata" playlist): its own section, played by the same native resolver. */
     private var tataJio = listOf<Channel>()
     private var tataMsg = "Loading TATA channels…"
-    /** Keys of the Sony section's tiles: playlist-only channels, re-pinned wherever they reappear. */
-    private var sonyPinned = setOf<String>(); private var sonyTiles = listOf<Channel>()
     /** The channel whose page player was opened by the fallback, so a retry never bounces into it twice. */
     private var pageFallbackFor: String? = null
     private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
@@ -765,11 +763,9 @@ class MainActivity : AppCompatActivity() {
             0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; else -> "Live TV"
         }
         findViewById<TextView>(R.id.sectionKicker).apply {
-            // The Sony section is the newest part of Live TV, so name it in the header.
-            val sonyLive = tab == 0 && SonyPage.channels(allJio).isNotEmpty()
             text = when (tab) {
-                0 -> if (sonyLive) "LIVE · SONY SECTION INCLUDED" else "LIVE, RIGHT NOW"
-                1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · SONY SECTION · NATIVE CLEARKEY"
+                0 -> "LIVE, RIGHT NOW"
+                1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · NATIVE CLEARKEY"
                 3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"
                 else -> "TATA PLAYLIST · NATIVE CLEARKEY"
             }
@@ -970,22 +966,6 @@ class MainActivity : AppCompatActivity() {
         // The JioTV playlist is *not* fetched here. It is a second, large catalogue with its own playlist and
         // key document; pulling it on every start while the live shelf is still loading is what made a TV
         // stutter on open and die when the JioTV tab was finally opened. It now loads when that tab is opened.
-        primeJioFromDisk()
-    }
-
-    /**
-     * The shelf's Sony row is built from the JioTV catalogue, so its copy on disk is read at launch: one
-     * file read, no request. The network copy still waits until the JioTV section is opened.
-     */
-    private fun primeJioFromDisk() {
-        submit(io) {
-            val cached = try { TgServers.cachedJioCatalogue() } catch (_: Exception) { emptyList() }
-            if (cached.isEmpty()) return@submit
-            val channels = cached.map { e ->
-                Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
-            }
-            runOnUiThread { if (!jioCatalogLoaded && allJio.isEmpty() && !isFinishing && !isDestroyed) applyJio(channels, fromCache = true) }
-        }
     }
 
     private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; else -> all }
@@ -1084,15 +1064,9 @@ class MainActivity : AppCompatActivity() {
         if (tab == 2 || (fromCache && tab == 0)) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
         if (searchShown) updateResults()
     }
-    /**
-     * The channel behind a stored key. The tab's own list wins, then the playlist, so a Sony tile the
-     * user favourited on Live TV is still found when the tiles themselves come from the playlist, and
-     * it keeps its pin: it must replay from the same source it was saved from.
-     */
-    private fun channelFor(key: String): Channel? {
-        val found = (sonyTiles + pool() + allJio + tataJio + allV2).firstOrNull { it.key == key } ?: return null
-        return if (found.key in sonyPinned) found.copy(jio = true, pinned = true) else found
-    }
+    /** The channel behind a stored key: the tab's own list first, then every list the app can hold. */
+    private fun channelFor(key: String): Channel? =
+        (pool() + allJio + tataJio + allV2).firstOrNull { it.key == key }
 
     private fun favTiles(): List<Tile> {
         val l = favs.mapNotNull { channelFor(it) }.map { Tile.Ch(it) }
@@ -1125,15 +1099,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun liveRows(channels: List<Channel>, alwaysOn: Boolean = false): List<Row> {
         val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
-        // The one Sony section. Every tile is a channel of allinonereborn2.online/sony, resolved from that
-        // site's own playlist and pinned to it: no TG or GioTV lookup is ever tried for these.
-        // Native first: a Sony tile bound to a channel of the site's own playlist plays that channel on this
-        // app's player. Only a tile the playlist does not carry keeps the site's page as its last resort.
-        val sony = SonyPage.playlistChannels(allJio)
-        sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
-            if (!alwaysOn && sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (!alwaysOn) add(Row("Trending Now", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
@@ -1142,18 +1109,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The JioTV tab is also the playlist section: the same M3U8 catalogue that supplies these tiles
-     * supplies their native stream, ClearKey document and cookie, so a tile here never borrows another
-     * provider's channel. The Sony page's tiles are bound to that catalogue and shown as the one Sony
-     * section above the full playlist; the same section is the only Sony row on Live TV.
+     * The JioTV tab is the playlist section: the same M3U8 catalogue that supplies these tiles supplies
+     * their native stream, ClearKey document and cookie, so a tile here never borrows another provider.
      */
     private fun jioRows(channels: List<Channel>): List<Row> {
         return buildList {
-            // In this section the playlist is the player, so the Sony tiles here play natively like every
-            // other channel in it; only Live TV's copy of the section opens the page.
-            val sony = SonyPage.playlistChannels(channels.ifEmpty { allJio })
-            sonyPinned = sony.map { it.key }.toSet(); sonyTiles = sony
-            if (sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, favTiles()))
             addAll(recentRow())

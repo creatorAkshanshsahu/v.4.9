@@ -113,44 +113,6 @@ class TgLiveContractTest {
     }
 
     /**
-     * Opt-in read of the real playlist that powers the one Sony section. The section is bound to the
-     * `allinonereborn2.online` m3u8 catalogue, so this proves against the live feed that the page's 22
-     * tiles still bind to the channels that playlist actually carries, and reports any it drops.
-     */
-    @Test fun `sony section binds the page tiles to the live playlist`() {
-        assumeTrue(System.getProperty("aktv.live.jio") == "true")
-        val response = TgHttp().get(
-            JioM3uProtocol.PLAYLIST,
-            linkedMapOf("Accept" to "*/*", "User-Agent" to JioM3uProtocol.UA_OVERRIDE)
-        )
-        assertEquals("the playlist did not answer 200", 200, response.code)
-        val entries = JioM3uProtocol.parse(response.body.toString(Charsets.UTF_8))
-        assertTrue("the playlist parsed to no channels", entries.size > 20)
-        val catalogue = entries.map { MainActivity.Channel(it.id, it.name, it.category, it.logo, jio = true) }
-        val section = SonyPage.channels(catalogue)
-        println("TG_NATIVE " + JSONObject().put("provider", "SonyPage").put("step", "sonySection")
-            .put("playlistChannels", entries.size).put("tiles", section.size)
-            .put("names", JSONObject(section.associate { it.id to it.name } as Map<*, *>)))
-        // Which page tiles this playlist cannot serve yet: the report below names them, and names every
-        // Sony-family channel the playlist does carry, so a missing tile is a matching fix, not a guess.
-        val boundNames = section.map { it.name }.toSet()
-        val family = catalogue.map { it.name }.filter { name ->
-            val l = name.lowercase()
-            listOf("sony", "sab", "pix", "max", "bbc earth", "wah", "aath", "pal", "ten 1", "ten 2",
-                "ten 3", "ten 4", "ten 5", "six").any { it in l }
-        }
-        println("TG_NATIVE " + JSONObject().put("provider", "SonyPage").put("step", "sonyCandidates")
-            .put("pageTiles", SonyPage.TILES.size).put("bound", boundNames.size)
-            .put("catalogueSonyFamily", JSONArray(family)))
-        // Exactly the page's tiles, every one of them pinned to that site's own player.
-        assertEquals(SonyPage.TILES.size, section.size)
-        assertTrue(section.all { it.pinned && !it.v2 && it.page != null })
-        // The report names which of the page's tiles the playlist also carries; the section itself is
-        // always the page's 22, so a shrink is visible instead of silent.
-        assertEquals(SonyPage.TILES.size, section.size)
-    }
-
-    /**
      * Opt-in read of the replacement site's current player page. Names only, so a site that moves its
      * endpoints is reported instead of silently failing; the resolver reads them at runtime anyway.
      */

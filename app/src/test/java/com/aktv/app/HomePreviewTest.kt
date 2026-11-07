@@ -99,21 +99,14 @@ class HomePreviewTest {
                 }
                 view.setTextColor(if (selected) Accent.ABYSS else Accent.DIM)
             }
-            // The Live tab's real shape: generic channels, then the one Sony section built by the shipped
-            // selector, then trending. The names below are the ones the live feed actually serves.
-            val sonyCatalogue = listOf(
-                "SET HD", "Sony SAB HD", "Sony SAB SD", "Sony Marathi SD", "Sony Pal", "Sony aath",
-                "Sony Yay Hindi", "Sony Max HD", "Sony MAX1", "Sony Wah", "Sony MAX2", "Sony Pix HD",
-                "Sony Ten 1 HD", "Sony Ten 2 HD", "Sony Ten 3 Hindi HD", "Sony BBC Earth HD"
-            ).mapIndexed { index, name -> MainActivity.Channel((3400 + index).toString(), name, "Sony", "") }
-            // The shipped selector for the one Sony section: the page's tiles bound to the playlist.
-            val sonyShelf = SonyPage.channels(sonyCatalogue.map { it.copy(jio = true) })
+            // The Live tab's real shape: the live row, the trending strip, then the recent row. The Sony
+            // section that used to sit between them is gone; nothing here uses the browser or the site page.
             // Mirrors the app's own monogram rule, so the preview shows what a logo-less tile really shows.
             fun initials(n: String): String {
                 val w = n.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
                 return (if (w.size >= 2) "${w[0].first()}${w[1].first()}" else n.trim().take(2)).uppercase()
             }
-            val liveTitles = listOf("Live Channels", SonyPage.TITLE, "Trending on AK")
+            val liveTitles = listOf("Live Channels", "Trending Now", "Recently watched")
             val movieTitles = listOf("Trending movies", "Top rated movies", "Keep watching")
             val rows = root.findViewById<RecyclerView>(R.id.rows)
             rows.layoutManager = LinearLayoutManager(activity)
@@ -124,12 +117,11 @@ class HomePreviewTest {
                     HomeChrome.styleRow(holder.itemView, compact, 1f)
                     holder.itemView.findViewById<TextView>(R.id.rowTitle).text =
                         if (movies) movieTitles[position] else liveTitles[position]
-                    val isSony = !movies && position == 1
-                    val landscape = !movies && position == 2
+                    val landscape = !movies && position == 1
                     val list = holder.itemView.findViewById<RecyclerView>(R.id.rowList)
                     list.layoutManager = LinearLayoutManager(activity, RecyclerView.HORIZONTAL, false)
                     list.adapter = object : RecyclerView.Adapter<VH>() {
-                        override fun getItemCount() = if (isSony) sonyShelf.size else 8
+                        override fun getItemCount() = 8
                         override fun onCreateViewHolder(parent: ViewGroup, type: Int) = VH(LayoutInflater.from(activity)
                             .inflate(if (movies) R.layout.item_poster else if (landscape) R.layout.item_trending else R.layout.item_tile, parent, false))
                         override fun onBindViewHolder(item: VH, index: Int) {
@@ -161,7 +153,6 @@ class HomePreviewTest {
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
                                 tile.findViewById<TextView>(R.id.posterMeta).text = if (movies) "MOVIE" else "SERIES"
                             } else {
-                                val channel = if (isSony) sonyShelf.getOrNull(index) else null
                                 val cardColor = colors[index % 5]
                                 tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                                     intArrayOf(cardColor, Ui.mix(cardColor, Accent.ABYSS, 0.48f))).apply {
@@ -172,17 +163,15 @@ class HomePreviewTest {
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE
-                                    // The Sony row shows the real channel names the section selected, so the
-                                    // preview proves the section renders - not just that a row exists.
-                                    text = if (channel != null) initials(channel.name) else "AK"
+                                    text = "SR"
                                     setTextColor(Accent.GLOSS_HI)
                                     textSize = if (compact) 18f else 23f
                                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
                                 }
-                                val names = listOf("AK News", "AK Sport", "AK Reality", "AK Kids", "AK Hits")
-                                tile.findViewById<TextView>(R.id.name).text = channel?.name ?: names[index % 5]
-                                tile.findViewById<TextView>(R.id.nowCaption).text = if (channel != null) "SONY  ·  LIVE"
-                                    else listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
+                                val names = listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")
+                                tile.findViewById<TextView>(R.id.name).text = names[index % 5]
+                                tile.findViewById<TextView>(R.id.nowCaption).text =
+                                    listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
                             }
                         }
                     }

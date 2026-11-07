@@ -34,8 +34,14 @@ class MoviePlayerUiTest {
             assertTrue("Back affordance", views.any {
                 it.contentDescription?.toString() == "Back" && it.isFocusable && it.isClickable
             })
-            for (label in listOf("Change source", "Audio & Subtitles", "Retry", "Playback details")) {
+            for (label in listOf("Source", "Audio & Subtitles", "Retry", "Playback details")) {
                 assertTrue(label, views.filterIsInstance<TextView>().any { it.text.toString() == label && it.isFocusable && it.isClickable })
+            }
+            // The site's centre transport: -10s, play/pause, +10s, each its own focusable control.
+            for (label in listOf("Back 10 seconds", "Play or pause", "Forward 10 seconds")) {
+                assertTrue(label, views.any {
+                    it.contentDescription?.toString() == label && it.isFocusable && it.isClickable
+                })
             }
             assertTrue(views.filterIsInstance<TextView>().any { it.text.toString() == "Sample film" })
             assertNull(views.filterIsInstance<PlayerView>().single().player)

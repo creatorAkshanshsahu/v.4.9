@@ -1500,3 +1500,32 @@ opened once.
 - **Opening the JioTV section still fetches fresh**, because the decision is `!jioCatalogLoaded`, not "is there
   a list"; selecting the section again clears the single retry and asks once more.
 - **`Trending on AK` is now `Trending Now`** — the last "AK" label in the UI after the 5.4.2 rebrand.
+
+## 62. The Sony section is gone, and the player is rebuilt on the site's own transport — 5.4.7 (code 126)
+
+**The Sony section is removed, not hidden.** `SonyPage`, its 22 page tiles, the `sonyPinned`/`sonyTiles`
+bookkeeping, the "SONY SECTION INCLUDED" kicker, the second Sony row on the playlist section, the pinned-tile
+identity in `channelFor`, the opt-in contract test and the preview's Sony row are all deleted. Nothing in the
+app opens `allinonereborn2.online`, not the browser engine and not a site page: the app plays what its own
+playlist carries. `Channel.pinned`/`Channel.page` survive only because `ChannelProviderOrder` is written
+against them; nothing sets them now.
+
+That also removed the reason 5.4.6 read the JioTV playlist from disk at launch, so the launch path is now the
+live list and the 24/7 list — nothing else.
+
+**The movie/series player is rebuilt on the site's watch screen.** `PlayerView`'s own controller is off
+(`useController = false`), because the app was drawing a second set of controls on top of it. Everything on
+screen is now the app's own, in the reference's shape:
+
+- **Top left:** the glass back circle, the title, and `SEASON n · EPISODE m` underneath; the clock at the far end.
+- **Centre:** the transport — `-10s`, the one solid play/pause circle, `+10s`, with the site's white focus ring
+  (`3px`) and its 250ms lift.
+- **Bottom:** elapsed/total over a thin amber progress bar, the **Source** button (renamed from "Change source")
+  with Retry, Auto next and Playback details on their own pill row, then the control row: Audio & Subtitles,
+  Episodes, the filled Next episode.
+- **Controls leave on their own** 5.5 seconds after the last interaction, and focus returns to the player view;
+  any D-pad key brings them back instead of seeking blind, which is what would have happened with no
+  controller behind them.
+
+New assets: `ic_play`, `ic_pause`, `ic_replay10`, `ic_forward10` (Lucide geometry, same stroke weight as the
+existing `ic_back`). `MoviePlayerUiTest` now asserts the three transport controls as well as the button labels.
