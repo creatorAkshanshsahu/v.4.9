@@ -61,4 +61,29 @@ class ExternalEpgTest {
             assertNull(EpgXmlTv.guide(index["872"].orEmpty(), now))
         } finally { file.delete() }
     }
+
+    @Test fun `a playlist channel is matched to the feed by its name when its id is different`() {
+        val now = Instant.parse("2030-01-01T09:30:00Z").epochSecond
+        val xml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <tv>
+              <channel id="144"><display-name>Sony SAB HD</display-name></channel>
+              <programme start="20300101090000 +0000" stop="20300101100000 +0000" channel="144">
+                <title>Sony show</title>
+              </programme>
+            </tv>
+        """.trimIndent()
+        val file = File.createTempFile("aktv-epg-name-test", ".xml.gz")
+        try {
+            GZIPOutputStream(FileOutputStream(file)).bufferedWriter(Charsets.UTF_8).use { it.write(xml) }
+            val names = HashMap<String, String>()
+            val index = EpgXmlTv.parse(file, now, names)
+            // "Sony SAB HD" and "sony sab" are the same channel: HD/SD is a feed tag, not part of the name.
+            assertEquals("144", names[ExternalEpg.normalize("Sony SAB HD")])
+            assertEquals(ExternalEpg.normalize("Sony SAB"), ExternalEpg.normalize("Sony SAB HD"))
+            assertNotNull(EpgXmlTv.guide(index[names[ExternalEpg.normalize("sony sab")].orEmpty()].orEmpty(), now))
+        } finally {
+            file.delete()
+        }
+    }
 }

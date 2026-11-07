@@ -398,12 +398,10 @@ class MainActivity : AppCompatActivity() {
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         findViewById<TextView>(R.id.segJio).background = segBgs[2]
         heroOrb.background = orbBg
-        infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xF0151310.toInt(), 0xE00C0B0A.toInt())).apply {
-            cornerRadius = 16 * dp
-            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x59E8A44C)
-        }
-        infoCard.elevation = 10 * dp
+        // Nothing sits behind the channel block: the site floats its now-playing text straight on the
+        // picture, and the scrim underneath is what keeps it readable. No panel, no border, no elevation.
+        infoCard.background = null
+        infoCard.elevation = 0f
         findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
             setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
         }
@@ -1478,8 +1476,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (!leader) return
         submit(io) {
-            val community = try { ExternalEpg.guide(applicationContext, c.id) } catch (_: Exception) { null }
-            val tgFallback = if (guideHasSchedule(community)) null
+            val community = try { ExternalEpg.guide(applicationContext, c.id, c.name) } catch (_: Exception) { null }
+            // The site's own guide only knows the site's channels; a playlist channel is never in it.
+            val tgFallback = if (guideHasSchedule(community) || c.jio) null
                 else try { Epg.parse(get("$GUIDE/${c.id}", 2)) } catch (_: Exception) { null }
             val guide = community?.takeIf(::guideHasSchedule)
                 ?: tgFallback?.takeIf(::guideHasSchedule)

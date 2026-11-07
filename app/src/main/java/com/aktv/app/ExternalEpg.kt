@@ -32,14 +32,25 @@ object ExternalEpg {
     private const val RETRY_MS = 10 * 60 * 1000L
     private val lock = Any()
     @Volatile private var index: Map<String, List<Programme>>? = null
+    /** XMLTV display-name → channel id, so a playlist channel can be matched by the name it is known by. */
+    @Volatile private var aliases: Map<String, String> = emptyMap()
     @Volatile private var loadedAt = 0L
     @Volatile private var retryAt = 0L
 
-    fun guide(context: Context, channelId: String, nowSec: Long = System.currentTimeMillis() / 1000): Guide? {
-        if (channelId.isBlank() || channelId.length > 16 || !channelId.all(Char::isDigit)) return null
+    fun guide(context: Context, channelId: String, name: String = "", nowSec: Long = System.currentTimeMillis() / 1000): Guide? {
         val schedules = loadIndex(context, nowSec) ?: return null
-        return EpgXmlTv.guide(schedules[channelId].orEmpty(), nowSec)
+        val direct = schedules[channelId.takeIf { it.isNotBlank() && it.length <= 32 }.orEmpty()].orEmpty()
+        // A playlist channel is identified by whatever its m3u8 says. When that id is not the one the feed
+        // publishes, the channel's name is the only thing the two lists share, so it is tried as well.
+        val byName = if (direct.isEmpty() && name.isNotBlank()) {
+            aliases[normalize(name)]?.let { schedules[it] }.orEmpty()
+        } else emptyList()
+        return EpgXmlTv.guide(direct.ifEmpty { byName }, nowSec)
     }
+
+    /** "Sony SAB HD" and "sony sab" are the same channel; HD/SD is a feed tag, not part of the name. */
+    internal fun normalize(name: String): String =
+        name.lowercase().replace(Regex("\b(hd|sd|uhd|4k)\b"), "").replace(Regex("[^a-z0-9]"), "").trim()
 
     /** Refreshes a due feed on the caller's background executor, without requiring a guide panel to be open. */
     fun refreshIfDue(context: Context, nowSec: Long = System.currentTimeMillis() / 1000): Boolean {
@@ -71,7 +82,9 @@ object ExternalEpg {
             }
         }
         try {
-            val parsed = EpgXmlTv.parse(file, nowSec)
+            val names = HashMap<String, String>()
+            val parsed = EpgXmlTv.parse(file, nowSec, names)
+            aliases = names
             index = parsed
             val fileAge = (System.currentTimeMillis() - file.lastModified()).coerceAtLeast(0L)
             loadedAt = System.currentTimeMillis() - fileAge.coerceAtMost(REFRESH_MS)
@@ -131,7 +144,13 @@ internal object EpgXmlTv {
     private const val KEEP_PAST_SECONDS = 2 * 60 * 60L
     private const val KEEP_FUTURE_SECONDS = 48 * 60 * 60L
 
-    fun parse(file: File, nowSec: Long): Map<String, List<Programme>> {
+    fun parse(file: File, nowSec: Long): Map<String, List<Programme>> = parse(file, nowSec, null)
+
+    /**
+     * [names], when given, is filled with display-name → channel id from the feed's `<channel>` blocks.
+     * It is collected in the same pass: parsing an 8 MB feed twice on a television is not free.
+     */
+    fun parse(file: File, nowSec: Long, names: MutableMap<String, String>?): Map<String, List<Programme>> {
         val result = HashMap<String, MutableList<Programme>>()
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -144,6 +163,8 @@ internal object EpgXmlTv {
             var title = ""
             var desc = ""
             var category = ""
+            var declaredId = ""
+            var declaredName = ""
             while (event != XmlPullParser.END_DOCUMENT) {
                 when (event) {
                     XmlPullParser.START_TAG -> when (parser.name) {
@@ -153,11 +174,18 @@ internal object EpgXmlTv {
                             stop = parseXmlTvTime(parser.getAttributeValue(null, "stop").orEmpty())
                             title = ""; desc = ""; category = ""
                         }
+                        "channel" -> { declaredId = parser.getAttributeValue(null, "id").orEmpty(); declaredName = "" }
+                        "display-name" -> if (declaredId.isNotBlank()) declaredName = parser.nextText().trim().take(120)
                         "title" -> title = parser.nextText().trim().take(180)
                         "desc" -> desc = parser.nextText().trim().take(480)
                         "category" -> if (category.isEmpty()) category = parser.nextText().trim().take(80) else parser.nextText()
                     }
-                    XmlPullParser.END_TAG -> if (parser.name == "programme") {
+                    XmlPullParser.END_TAG -> if (parser.name == "channel") {
+                        if (names != null && declaredId.isNotBlank() && declaredName.isNotBlank()) {
+                            names[ExternalEpg.normalize(declaredName)] = declaredId
+                        }
+                        declaredId = ""; declaredName = ""
+                    } else if (parser.name == "programme") {
                         if (channel.isNotBlank() && channel.length <= 32 && title.isNotBlank() && stop > start &&
                             stop >= nowSec - KEEP_PAST_SECONDS && start <= nowSec + KEEP_FUTURE_SECONDS) {
                             result.getOrPut(channel) { ArrayList() }.add(Programme(

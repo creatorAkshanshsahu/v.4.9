@@ -1581,3 +1581,27 @@ title/`SEASON n · EPISODE m` header, the single action row (`Change source`, `A
 the four new transport icons are deleted with it.
 
 If a player screen should change again, it changes in a build of its own.
+
+## 65. Nothing boxed, and the JioTV section gets its programme details — 5.4.10 (code 129)
+
+**The player block floats.** `infoCard` had a dark `LEFT_RIGHT` gradient panel with an amber `1dp` border and
+`10dp` elevation behind the channel text — that was the box. It is now `background = null`, `elevation = 0`:
+`NOW PLAYING`, the programme, `Up next:` and the `20:00 ——— 21:00` bar sit straight on the picture, held
+readable by the existing scrim, exactly like the reference page. Only the two chevrons keep a glass circle,
+because they are controls.
+
+**The JioTV section had no schedule at all.** Playlist channels are identified by whatever their m3u8 writes
+(`tvg-id`, usually the channel number), and the community JioTV XMLTV feed publishes its own ids; when the two
+did not agree, `ExternalEpg.guide` refused the channel outright — it only accepted ids of up to 16 digits — and
+the app fell through to the live site's guide endpoint, which has never heard of a playlist channel. So the
+section said "Programme information unavailable" everywhere and the player showed no programme name.
+
+- **The feed's `<channel>` blocks are now read** in the same parse pass (`display-name` → id), because parsing
+  an 8 MB feed twice on a television is not free.
+- **`ExternalEpg.guide(context, id, name)`** looks the id up first and, if that misses, the normalised name.
+  `normalize` drops the HD/SD/UHD/4K feed tags and everything that is not a letter or a digit, so
+  `Sony SAB HD` and `sony sab` are the same channel.
+- **`fetchGuide` passes the channel's name**, so the shelf's caption on focus and the player's now/next block
+  both use it.
+- **The site guide endpoint is skipped for playlist channels** — it cannot know them, so asking it was a
+  wasted request on every focus.
