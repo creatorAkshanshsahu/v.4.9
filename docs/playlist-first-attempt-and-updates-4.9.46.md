@@ -1633,3 +1633,21 @@ rule is unchanged, so drifting across the bar still does not load a section by a
 leave the bar — right of the search circle, and DOWN from it, hand focus back to the last card the
 viewer was on via `backToShelf()`; LEFT of Live TV does nothing. The slot arithmetic lives in `TopBarWalk` and `TopBarWalkTest` pins it down, so the bar cannot silently
 become a dead end again.
+
+## 68. The back arrow sat on the rim of its circle, and the zap chevrons are gone (5.4.12)
+
+"The arrow button of backing from player is out of circles." Both players drew the back affordance as an
+empty `TextView` with `setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_back, …)` / `drawableStart`.
+A compound drawable is laid out inside the *compound padding* of a TextView, so with no text to take up
+the middle the 24dp arrow was pinned to the start edge of the 44–46dp circle and touched the rim — the
+glass circle looked like it had a stray arrow next to it. Only `gravity = CENTER` was set, and gravity
+positions text, not drawables.
+
+Both players now use an `ImageView` with `scaleType = CENTER`: the arrow keeps its 24dp size and is drawn
+dead centre in the circle. `MoviePlayerUiTest` asserts the back view is an `ImageView` with centre
+scaling, so the compound-drawable version cannot come back.
+
+The live player also loses its stacked channel-up/channel-down chevrons (`zapColumn`, `zapUp`, `zapDown`,
+`ic_chevron_up`, `ic_chevron_down`). They duplicated controls the remote already has — UP/DOWN on the live
+screen changes channel — and they were drawn with the same off-centre compound-drawable fault. The hidden
+key hint no longer advertises them either.

@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.media3.ui.PlayerView
 import org.junit.Assert.*
@@ -34,6 +35,11 @@ class MoviePlayerUiTest {
             assertTrue("Back affordance", views.any {
                 it.contentDescription?.toString() == "Back" && it.isFocusable && it.isClickable
             })
+            // The arrow belongs in the middle of the circle: a compound drawable on an empty TextView is
+            // pinned to the start edge, which is what pushed it out to the rim of the glass circle.
+            val back = views.first { it.contentDescription?.toString() == "Back" }
+            assertTrue("the back arrow is centred in its circle: ${back.javaClass.simpleName}",
+                back is ImageView && back.scaleType == ImageView.ScaleType.CENTER)
             for (label in listOf("Change source", "Audio & Subtitles", "Retry", "Playback details")) {
                 assertTrue(label, views.filterIsInstance<TextView>().any { it.text.toString() == label && it.isFocusable && it.isClickable })
             }

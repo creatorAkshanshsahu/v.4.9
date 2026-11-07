@@ -47,10 +47,12 @@
         <LinearLayout android:id="@+id/playerTopBar" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="top|start" android:layout_marginStart="40dp" android:layout_marginTop="30dp"
             android:orientation="horizontal" android:gravity="center_vertical" android:alpha="0">
-            <TextView android:id="@+id/playerBack" android:layout_width="44dp" android:layout_height="44dp"
-                android:gravity="center" android:background="@drawable/circle_glass" android:focusable="true"
-                android:clickable="true" android:contentDescription="Back"
-                android:drawableStart="@drawable/ic_back" android:paddingStart="0dp"/>
+            <!-- An ImageView, not a TextView with a start drawable: a compound drawable on an empty
+                 TextView is pinned to the start edge, so the arrow sat against the rim of the circle. -->
+            <ImageView android:id="@+id/playerBack" android:layout_width="44dp" android:layout_height="44dp"
+                android:background="@drawable/circle_glass" android:src="@drawable/ic_back"
+                android:scaleType="center" android:focusable="true" android:clickable="true"
+                android:contentDescription="Back"/>
             <TextView android:id="@+id/playerLive" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginStart="14dp" android:text="LIVE" android:background="@drawable/live_chip"
                 android:textColor="@color/abyss" android:textSize="10sp" android:fontFamily="@font/sora_bold"
@@ -127,17 +129,6 @@
                 <TextView android:id="@+id/infoHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="7dp" android:textColor="@color/text_faint" android:textSize="11sp"
                     android:visibility="gone"/>
-            </LinearLayout>
-            <LinearLayout android:id="@+id/zapColumn" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="20dp" android:orientation="vertical" android:gravity="center_vertical">
-                <TextView android:id="@+id/zapUp" android:layout_width="46dp" android:layout_height="46dp"
-                    android:gravity="center" android:focusable="true" android:clickable="true"
-                    android:contentDescription="Channel up" android:drawableStart="@drawable/ic_chevron_up"
-                    android:paddingStart="0dp"/>
-                <TextView android:id="@+id/zapDown" android:layout_width="46dp" android:layout_height="46dp"
-                    android:layout_marginTop="12dp" android:gravity="center" android:focusable="true"
-                    android:clickable="true" android:contentDescription="Channel down"
-                    android:drawableStart="@drawable/ic_chevron_down" android:paddingStart="0dp"/>
             </LinearLayout>
             </LinearLayout>
         </LinearLayout>

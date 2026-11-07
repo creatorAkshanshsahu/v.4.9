@@ -115,7 +115,7 @@ class MoviePlayerActivity : Activity() {
     private lateinit var sourcesButton: TextView
     private lateinit var episodesButton: TextView
     private lateinit var autoNextButton: TextView
-    private val actionButtons = mutableListOf<TextView>()
+    private val actionButtons = mutableListOf<View>()
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
@@ -182,10 +182,13 @@ class MoviePlayerActivity : Activity() {
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
-        val back = TextView(this).apply {
+        // An ImageView with centre scaling: the arrow is drawn in the middle of the glass circle. As a
+        // compound drawable on an empty TextView it was pinned to the start edge and sat against the rim.
+        val back = ImageView(this).apply {
             background = androidx.core.content.res.ResourcesCompat.getDrawable(resources, R.drawable.circle_glass, theme)
-            setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_back, 0, 0, 0)
-            contentDescription = "Back"; isFocusable = true; isClickable = true; gravity = Gravity.CENTER
+            setImageResource(R.drawable.ic_back)
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = "Back"; isFocusable = true; isClickable = true
             setOnClickListener { finish() }
             setOnFocusChangeListener { v, focused ->
                 v.animate().scaleX(if (focused) 1.1f else 1f).scaleY(if (focused) 1.1f else 1f)

@@ -273,7 +273,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var home: ViewGroup; private var homeFocusMode = 0; private var lastHomeFocus: View? = null
     private lateinit var guide: ViewGroup; private lateinit var guideScrim: View; private lateinit var guideDivider: View
     // The site's right-hand channel pane: always on screen while a channel plays, not a drawer.
-    private lateinit var zapUp: TextView; private lateinit var zapDown: TextView
     private lateinit var catList: RecyclerView; private lateinit var chList: RecyclerView
     private lateinit var chCol: View; private lateinit var chHeader: TextView; private lateinit var channelSearch: EditText
     private var guideShown = false; private var shownCat = ""
@@ -438,7 +437,7 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.infoHint).visibility = View.GONE
         }
         findViewById<TextView>(R.id.infoHint).text = SpannableStringBuilder().apply {
-            key(this, "▲ ▼", "Channel"); append("     "); key(this, "▶", "All channels"); append("     ")
+            key(this, "▶", "All channels"); append("     ")
             key(this, "GUIDE", "Schedule"); append("     "); key(this, "Hold OK", "Reload"); append("     ")
             key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
         }
@@ -467,18 +466,6 @@ class MainActivity : AppCompatActivity() {
         chCol = findViewById(R.id.chCol); chHeader = findViewById(R.id.chHeader); channelSearch = findViewById(R.id.channelSearch)
         guide.background = Ui.pill(dp, 0xF2100713.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-        zapUp = findViewById(R.id.zapUp); zapDown = findViewById(R.id.zapDown)
-        listOf(zapUp, zapDown).forEach { button ->
-            button.background = Ui.pill(dp, 0x4D0E1014.toInt(), 100f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x66FFFFFF) }
-            button.setOnFocusChangeListener { v, focused ->
-                v.background = Ui.pill(dp, if (focused) 0xE6FFFFFF.toInt() else 0x4D0E1014.toInt(), 100f).apply {
-                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) 0xFFFFFFFF.toInt() else 0x66FFFFFF)
-                }
-                v.animate().scaleX(if (focused) 1.08f else 1f).scaleY(if (focused) 1.08f else 1f).setDuration(150).start()
-            }
-        }
-        zapUp.setOnClickListener { play(current - 1) }
-        zapDown.setOnClickListener { play(current + 1) }
         listOf(catList to catAdapter, chList to chAdapter).forEach { (rv, ad) ->
             rv.layoutManager = LinearLayoutManager(this); rv.adapter = ad; rv.itemAnimator = null
             rv.overScrollMode = View.OVER_SCROLL_NEVER
