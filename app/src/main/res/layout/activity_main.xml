@@ -62,8 +62,20 @@
                 android:includeFontPadding="false"/>
         </LinearLayout>
         <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"
+            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="372dp"
             android:layout_marginBottom="28dp" android:orientation="vertical">
+            <!-- Channel up / down, the site's two glass chevrons beside the now/next block. -->
+            <LinearLayout android:id="@+id/zapRow" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="end|center_vertical">
+                <TextView android:id="@+id/zapUp" android:layout_width="44dp" android:layout_height="44dp"
+                    android:gravity="center" android:focusable="true" android:clickable="true"
+                    android:contentDescription="Channel up" android:drawableStart="@drawable/ic_chevron_up"
+                    android:paddingStart="0dp"/>
+                <TextView android:id="@+id/zapDown" android:layout_width="44dp" android:layout_height="44dp"
+                    android:layout_marginStart="10dp" android:gravity="center" android:focusable="true"
+                    android:clickable="true" android:contentDescription="Channel down"
+                    android:drawableStart="@drawable/ic_chevron_down" android:paddingStart="0dp"/>
+            </LinearLayout>
             <LinearLayout android:id="@+id/infoActions" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="center_vertical|end" android:visibility="gone">
                 <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>

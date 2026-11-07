@@ -1529,3 +1529,24 @@ screen is now the app's own, in the reference's shape:
 
 New assets: `ic_play`, `ic_pause`, `ic_replay10`, `ic_forward10` (Lucide geometry, same stroke weight as the
 existing `ic_back`). `MoviePlayerUiTest` now asserts the three transport controls as well as the button labels.
+
+## 63. The live player gets the site's permanent channel pane — 5.4.8 (code 127)
+
+The last place the app still behaved like its old self was the live player: the channel guide was a
+Right-key drawer with a category column, while the reference `/live` keeps a **320 px glass pane on the right
+for as long as a channel plays**. That is now what the app does.
+
+- **`buildLiveGuide()`** adds the pane to the player layer at `end`, `top 76dp`, `bottom 190dp`,
+  `right 32dp`, rounded 24dp, `#D90E1014` with a 1dp white edge — the reference's `bottom-40 right-10 top-20
+  w-80 rounded-2xl` in dp. Header `CHANNELS`, then the section's own list in `item_guide_ch` rows: number,
+  logo or monogram, name, and a `Now playing` marker on the channel that is on screen.
+- **It is part of the player, not an overlay**: it appears with `play()` and disappears with `closePlayer()`,
+  `resetGuide()` or `onStop`.
+- **Right puts focus on the playing channel**; the list then owns Up/Down. **Left** (or Back) returns to the
+  player chrome and focuses the first action, so the remote cannot get stuck in the pane. CHANNEL UP/DOWN
+  still zap. The old drawer and its scrim are no longer reachable — the categories step went with it.
+- **Channel up / down chevrons** (`ic_chevron_up`, `ic_chevron_down`) sit above the action row, right-aligned,
+  in the reference's glass circles.
+- The info block now stops at 372dp from the right so nothing hides behind the pane, and the top bar keeps
+  the site's `no · name` reading (`1 · Nova News`), which `bindInfo` already produced.
+- The Sony-era comment in `play()` is gone with the code it described.

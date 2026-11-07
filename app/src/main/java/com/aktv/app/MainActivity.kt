@@ -271,6 +271,10 @@ class MainActivity : AppCompatActivity() {
     private val FAV = "Favorites"
     private lateinit var home: ViewGroup; private var homeFocusMode = 0; private var lastHomeFocus: View? = null
     private lateinit var guide: ViewGroup; private lateinit var guideScrim: View; private lateinit var guideDivider: View
+    // The site's right-hand channel pane: always on screen while a channel plays, not a drawer.
+    private lateinit var liveGuide: LinearLayout; private lateinit var liveGuideList: RecyclerView
+    private lateinit var zapUp: TextView; private lateinit var zapDown: TextView
+    private var liveGuideChannels: List<Channel> = emptyList()
     private lateinit var catList: RecyclerView; private lateinit var chList: RecyclerView
     private lateinit var chCol: View; private lateinit var chHeader: TextView; private lateinit var channelSearch: EditText
     private var guideShown = false; private var shownCat = ""
@@ -465,6 +469,19 @@ class MainActivity : AppCompatActivity() {
         chCol = findViewById(R.id.chCol); chHeader = findViewById(R.id.chHeader); channelSearch = findViewById(R.id.channelSearch)
         guide.background = Ui.pill(dp, 0xF2100713.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        runCatching { buildLiveGuide() }.onFailure { CrashLog.record(this, it, "live guide") }
+        zapUp = findViewById(R.id.zapUp); zapDown = findViewById(R.id.zapDown)
+        listOf(zapUp, zapDown).forEach { button ->
+            button.background = Ui.pill(dp, 0x4D0E1014.toInt(), 100f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x66FFFFFF) }
+            button.setOnFocusChangeListener { v, focused ->
+                v.background = Ui.pill(dp, if (focused) 0xE6FFFFFF.toInt() else 0x4D0E1014.toInt(), 100f).apply {
+                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) 0xFFFFFFFF.toInt() else 0x66FFFFFF)
+                }
+                v.animate().scaleX(if (focused) 1.08f else 1f).scaleY(if (focused) 1.08f else 1f).setDuration(150).start()
+            }
+        }
+        zapUp.setOnClickListener { play(current - 1) }
+        zapDown.setOnClickListener { play(current + 1) }
         listOf(catList to catAdapter, chList to chAdapter).forEach { (rv, ad) ->
             rv.layoutManager = LinearLayoutManager(this); rv.adapter = ad; rv.itemAnimator = null
             rv.overScrollMode = View.OVER_SCROLL_NEVER
@@ -1713,9 +1730,7 @@ class MainActivity : AppCompatActivity() {
         requestedNativeProvider = null
         val ch = shown[current]
         pageFallbackFor = null
-        // Only a Live TV Sony tile plays the site's own player, because only those tiles carry the slug.
-        // The JioTV section is the playlist: a Sony channel there is an ordinary channel and plays on the
-        // native player like every other channel in that section. A name never diverts a real channel.
+        // Nothing carries a site page any more: every channel plays on the native player.
         val page = ch.page
         if (page != null) { rememberChannel(ch); playOnSourcePage(ch, page); return }
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
@@ -1727,6 +1742,7 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = true
         if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
         ImmersiveUi.hide(window)
+        runCatching { showLiveGuide() }.onFailure { CrashLog.record(this, it, "live guide") }
         playMsg(null); bindInfo(ch)
         resolveAndStart(ch)
         if (healthScanActive) {
@@ -2765,6 +2781,7 @@ class MainActivity : AppCompatActivity() {
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         endNativeSession(); playToken++; resolveJob?.cancel(true); playMsg(null); playerSession = false
         releasePlayer(); nativeSources = emptyList(); ui.removeCallbacks(hideInfo); resetGuide(); resetProgrammeGuide()
+        hideLiveGuide()
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = false
         layer.animate().cancel(); layer.visibility = View.GONE; home.visibility = View.VISIBLE
         ImmersiveUi.show(window)
@@ -2810,6 +2827,14 @@ class MainActivity : AppCompatActivity() {
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> return true
             }
         }
+        if (layer.visibility == View.VISIBLE && liveGuideHasFocus()) {
+            if (e.action == KeyEvent.ACTION_DOWN) when (e.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_BACK -> { leaveLiveGuide(); return true }
+                KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
+                KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
+            }
+            return super.dispatchKeyEvent(e)
+        }
         if (layer.visibility == View.VISIBLE && programmeGuideShown) return programmeGuideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && guideShown) return guideKey(e) || super.dispatchKeyEvent(e)
         if (layer.visibility == View.VISIBLE && PlayerRemoteKeyPolicy.delegateToFocusedAction(
@@ -2839,7 +2864,7 @@ class MainActivity : AppCompatActivity() {
         if (e.action == KeyEvent.ACTION_DOWN && e.keyCode == KeyEvent.KEYCODE_BACK &&
             (layer.visibility == View.VISIBLE || playerSession)) { closePlayer(); return true }
         if (layer.visibility == View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) when (e.keyCode) {
-            KeyEvent.KEYCODE_DPAD_RIGHT -> { openGuide(); return true }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> { focusLiveGuide(); return true }
             KeyEvent.KEYCODE_GUIDE -> { showProgrammeGuide(); return true }
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
@@ -3438,8 +3463,118 @@ class MainActivity : AppCompatActivity() {
         guideScrim.animate().alpha(0f).setDuration(200).withEndAction { if (!guideShown) guideScrim.visibility = View.GONE }.start()
     }
 
+    // ---------- the permanent live guide ----------
+
+    /**
+     * The site's `/live` channel pane: a glass column on the right, from under the header to above the
+     * now/next block, listing the section's channels. It is part of the player, not a drawer — the old
+     * Right-key drawer is gone, which is what the reference does and what a remote expects.
+     */
+    private fun buildLiveGuide() {
+        val header = TextView(this).apply {
+            text = "CHANNELS"; setTextColor(Accent.DIM); textSize = 11f; letterSpacing = 0.18f
+            typeface = fSemi; setPadding(px(12), px(6), 0, px(10))
+        }
+        liveGuideList = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            adapter = liveGuideAdapter
+            itemAnimator = null
+            overScrollMode = View.OVER_SCROLL_NEVER
+            clipToPadding = false
+        }
+        liveGuide = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(10), px(12), px(10), px(12))
+            background = Ui.pill(dp, 0xD90E1014.toInt(), 24f).apply {
+                setStroke((1 * dp).toInt().coerceAtLeast(1), 0x33FFFFFF)
+            }
+            addView(header, LinearLayout.LayoutParams(-1, -2))
+            addView(liveGuideList, LinearLayout.LayoutParams(-1, 0, 1f))
+            visibility = View.GONE
+        }
+        (layer as ViewGroup).addView(liveGuide, FrameLayout.LayoutParams(px(320), -1, Gravity.END).apply {
+            topMargin = px(76); bottomMargin = px(190); rightMargin = px(32)
+        })
+    }
+
+    private fun showLiveGuide() {
+        if (!::liveGuide.isInitialized) return
+        liveGuideChannels = pool()
+        liveGuideAdapter.notifyDataSetChanged()
+        if (liveGuide.visibility != View.VISIBLE) {
+            liveGuide.animate().cancel()
+            liveGuide.visibility = View.VISIBLE; liveGuide.alpha = 0f; liveGuide.translationX = 24 * dp
+            liveGuide.animate().alpha(1f).translationX(0f).setDuration(220)
+                .setInterpolator(DecelerateInterpolator(2f)).start()
+        }
+        val at = current
+        liveGuideList.post { if (at in liveGuideChannels.indices) liveGuideList.scrollToPosition(at) }
+    }
+
+    private fun hideLiveGuide() {
+        if (!::liveGuide.isInitialized) return
+        liveGuide.animate().cancel()
+        currentFocus?.takeIf { within(it, liveGuideList) }?.clearFocus()
+        liveGuide.visibility = View.GONE
+    }
+
+    /** One press of Right puts the remote's focus on the channel that is playing. */
+    private fun focusLiveGuide() {
+        showLiveGuide()
+        val at = current
+        if (at !in liveGuideChannels.indices) return
+        liveGuideList.scrollToPosition(at)
+        liveGuideList.post {
+            liveGuideList.findViewHolderForAdapterPosition(at)?.itemView?.requestFocus() ?: liveGuideList.requestFocus()
+        }
+    }
+
+    private fun leaveLiveGuide() {
+        currentFocus?.clearFocus()
+        if (layer.visibility != View.VISIBLE) return
+        showInfo()
+        // The actions are the only focusable chrome in the player, so Left lands on the first of them.
+        if (::infoGuideAction.isInitialized) infoGuideAction.requestFocus()
+    }
+
+    private fun liveGuideHasFocus() = ::liveGuideList.isInitialized && within(currentFocus, liveGuideList)
+
+    private val liveGuideAdapter = object : RecyclerView.Adapter<VH>() {
+        override fun getItemCount() = liveGuideChannels.size
+        override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
+            val v = LayoutInflater.from(p.context).inflate(R.layout.item_guide_ch, p, false)
+            v.background = Ui.focusBg(dp, 14f)
+            v.findViewById<View>(R.id.chLogoBox).background = Ui.pill(dp, Accent.SURFACE, 12f)
+            return VH(v)
+        }
+        override fun onBindViewHolder(h: VH, i: Int) {
+            val v = h.itemView; val ch = liveGuideChannels[i]
+            val name = v.findViewById<TextView>(R.id.chName)
+            name.text = ch.name
+            v.findViewById<TextView>(R.id.chNum).text = (i + 1).toString()
+            bindLogo(v.findViewById(R.id.chLogo), v.findViewById(R.id.chMono), ch)
+            val playing = shown.getOrNull(current)?.key == ch.key
+            v.findViewById<View>(R.id.chNow).visibility = if (playing) View.VISIBLE else View.GONE
+            v.findViewById<View>(R.id.chFav).visibility = if (ch.key in favs) View.VISIBLE else View.GONE
+            v.isActivated = playing
+            val style = { f: Boolean -> name.setTextColor(if (f) Accent.ABYSS else if (playing) Accent.TEXT else Accent.DIM) }
+            style(v.isFocused)
+            v.setOnFocusChangeListener { _, f -> style(f); if (f) showInfo() }
+            v.setOnClickListener { playFromLiveGuide(i) }
+        }
+    }
+
+    private fun playFromLiveGuide(i: Int) {
+        val list = pool()
+        if (i !in list.indices) return
+        shown = list
+        play(i)
+        liveGuideList.post { liveGuideAdapter.notifyDataSetChanged() }
+    }
+
     /** Hard reset when the player itself closes: hide the guide and give focus back to the home screen. */
     private fun resetGuide() {
+        hideLiveGuide()
         guideShown = false; guideCat = ""; ui.removeCallbacks(guideTimeout)
         guide.animate().cancel(); guideScrim.animate().cancel()
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
