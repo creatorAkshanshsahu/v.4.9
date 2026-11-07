@@ -1487,3 +1487,16 @@ it, the death.
 
 Launch now fetches: the live list (v1), the 24/7 list (v2), and the first TMDB shelf for the trending strip.
 Nothing else.
+
+## 61. What the deferral cost, and paying it — 5.4.6 (code 125)
+
+Deferring the JioTV fetch left one visible hole: the shelf's **Sony** row is built from that catalogue
+(`SonyPage.playlistChannels(allJio)`), so on a fresh start the row vanished until the JioTV section had been
+opened once.
+
+- **The copy on disk is read at launch** (`primeJioFromDisk`): one file read of the last good playlist, no
+  request, no key document. It fills `allJio` just enough for the Sony row, and it is applied as a cached
+  catalogue, so it never claims the network list has been loaded.
+- **Opening the JioTV section still fetches fresh**, because the decision is `!jioCatalogLoaded`, not "is there
+  a list"; selecting the section again clears the single retry and asks once more.
+- **`Trending on AK` is now `Trending Now`** — the last "AK" label in the UI after the 5.4.2 rebrand.

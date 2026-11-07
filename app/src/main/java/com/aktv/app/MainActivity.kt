@@ -970,6 +970,22 @@ class MainActivity : AppCompatActivity() {
         // The JioTV playlist is *not* fetched here. It is a second, large catalogue with its own playlist and
         // key document; pulling it on every start while the live shelf is still loading is what made a TV
         // stutter on open and die when the JioTV tab was finally opened. It now loads when that tab is opened.
+        primeJioFromDisk()
+    }
+
+    /**
+     * The shelf's Sony row is built from the JioTV catalogue, so its copy on disk is read at launch: one
+     * file read, no request. The network copy still waits until the JioTV section is opened.
+     */
+    private fun primeJioFromDisk() {
+        submit(io) {
+            val cached = try { TgServers.cachedJioCatalogue() } catch (_: Exception) { emptyList() }
+            if (cached.isEmpty()) return@submit
+            val channels = cached.map { e ->
+                Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
+            }
+            runOnUiThread { if (!jioCatalogLoaded && allJio.isEmpty() && !isFinishing && !isDestroyed) applyJio(channels, fromCache = true) }
+        }
     }
 
     private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; else -> all }
@@ -1013,7 +1029,7 @@ class MainActivity : AppCompatActivity() {
                     val channels = cached.map { e ->
                         Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
                     }
-                    runOnUiThread { applyJio(channels) }
+                    runOnUiThread { applyJio(channels, fromCache = true) }
                 }
             }
             // The site's two lists are independent: one being refused must not take the other with it.
@@ -1058,14 +1074,14 @@ class MainActivity : AppCompatActivity() {
         return out
     }
 
-    private fun applyJio(list: List<Channel>) {
-        jioCatalogLoaded = true
-        jioInFlight = false
+    private fun applyJio(list: List<Channel>, fromCache: Boolean = false) {
+        if (!fromCache) { jioCatalogLoaded = true; jioInFlight = false }
         if (list == allJio) return
         allJio = list; seedAccents(list); updateStatus()
         // Only its own section redraws: a JioTV list arriving while the viewer is on the shelf used to
         // rebuild the shelf's rows for no visible reason, which is the stutter that came with this list.
-        if (tab == 2) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
+        // The one exception is the disk copy, because it is what fills the shelf's Sony row.
+        if (tab == 2 || (fromCache && tab == 0)) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
         if (searchShown) updateResults()
     }
     /**
@@ -1118,7 +1134,7 @@ class MainActivity : AppCompatActivity() {
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
             if (!alwaysOn && sony.isNotEmpty()) add(Row(SonyPage.TITLE, sony.map { Tile.Ch(it) }))
-            if (!alwaysOn) add(Row("Trending on AK", trend, landscape = trendingTitles.isNotEmpty()))
+            if (!alwaysOn) add(Row("Trending Now", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
@@ -1280,13 +1296,13 @@ class MainActivity : AppCompatActivity() {
         if (t == tab) {
             if ((t == 3 || t == 4) && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
             // A section that failed while loading is retried by selecting it again.
-            if (t == 2 && allJio.isEmpty() && !jioInFlight) loadJioChannels()
+            if (t == 2 && !jioCatalogLoaded && !jioInFlight) { jioRetried = false; loadJioChannels() }
             if (t == 5 && tataJio.isEmpty() && !tataLoaded) loadTataChannels()
             return
         }
         // A list is fetched the first time its section is opened, never at launch: one section cannot slow
         // the shelf down or starve the box's memory for the others.
-        if (t == 2 && allJio.isEmpty()) loadJioChannels()
+        if (t == 2 && !jioCatalogLoaded) loadJioChannels()
         if (t == 5 && tataJio.isEmpty()) loadTataChannels()
         val dir = if (t > tab) 1 else -1
         tab = t; layoutHero(); styleSegs(); stopPreview()
