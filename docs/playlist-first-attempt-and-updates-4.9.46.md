@@ -1465,3 +1465,25 @@ does get through is written down **and put on the screen**, because a television
 Two more tests boot the activity on the television qualifier: one leaves a stack in `last-exit.txt` and
 checks that the failure screen shows it instead of the shelf, one sets a launch streak of four and checks
 that a silent loop is surfaced the same way.
+
+## 60. The JioTV list stops loading itself at launch — 5.4.5 (code 124)
+
+"App works for a second, then lags, and crashes when I switch to JioTV." The list was the reason: `loadChannels`,
+the call that paints the live shelf at start, ended with `loadJioChannels()`. So every launch fetched **two**
+catalogues — the live list and the whole JioTV m3u8 playlist with its own key document — and every delivery of
+the JioTV list called `refreshRows()` when `tab == 0`, rebuilding the shelf's rows while the viewer was looking
+at them. On a box with a small heap that is the stutter on open and, once the JioTV section was opened on top of
+it, the death.
+
+- **JioTV is fetched the first time its section is opened**, never at launch. `switchTab(2)` starts it; selecting
+  the section again retries a list that failed, so a bad moment is recoverable.
+- **A delivery only redraws its own section** (`tab == 2`). A JioTV list arriving behind the shelf no longer
+  touches the shelf.
+- **One request at a time.** `jioInFlight` stops a second fetch while the first is still running, and the single
+  5-second retry from 5.4.3 still applies.
+- **The TATA section loads the same way**, so both of the site's extra lists are gone from the launch path.
+- **Row building is guarded**: `refreshRows` and `refreshRowsKeepFocus` now record a `Throwable` and show
+  "This section could not be drawn" instead of taking the process down from a `runOnUiThread` block.
+
+Launch now fetches: the live list (v1), the 24/7 list (v2), and the first TMDB shelf for the trending strip.
+Nothing else.

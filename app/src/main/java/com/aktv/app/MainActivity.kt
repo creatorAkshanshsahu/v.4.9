@@ -133,6 +133,7 @@ class MainActivity : AppCompatActivity() {
     /** The channel whose page player was opened by the fallback, so a retry never bounces into it twice. */
     private var pageFallbackFor: String? = null
     private var v1CatalogLoaded = false; private var v2CatalogLoaded = false; private var jioCatalogLoaded = false
+    private var jioInFlight = false
     /** The section gets one silent retry before it is allowed to say it failed. */
     private var jioRetried = false
     /** The second list has its own loader and its own retry. */
@@ -966,7 +967,9 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { applyV2(list) }
             } catch (_: Exception) {}
         }
-        loadJioChannels()
+        // The JioTV playlist is *not* fetched here. It is a second, large catalogue with its own playlist and
+        // key document; pulling it on every start while the live shelf is still loading is what made a TV
+        // stutter on open and die when the JioTV tab was finally opened. It now loads when that tab is opened.
     }
 
     private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; else -> all }
@@ -998,7 +1001,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadJioChannels() {
-        if (jioCatalogLoaded) return
+        if (jioCatalogLoaded || jioInFlight) return
+        jioInFlight = true
         jioMsg = "Loading JioTV channels…"; updateStatus()
         submit(io) {
             // The list that answered last time is on disk: put the section up from it immediately, then let the
@@ -1022,10 +1026,12 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { applyJio(channels) }
             } catch (e: Exception) {
                 runOnUiThread {
+                    jioInFlight = false
                     if (allJio.isEmpty() && !jioRetried) {
                         // One quiet retry, because a TV link that is barely moving drops the first request.
                         jioRetried = true; jioCatalogLoaded = false
                         jioMsg = "Loading JioTV channels…"; updateStatus()
+                        jioInFlight = false
                         if (!isFinishing && !isDestroyed) ui.postDelayed({ loadJioChannels() }, 5_000)
                     } else if (allJio.isEmpty()) {
                         jioMsg = "JioTV channels didn't load (${why(e)}). Check the connection and reopen the app."
@@ -1054,9 +1060,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyJio(list: List<Channel>) {
         jioCatalogLoaded = true
+        jioInFlight = false
         if (list == allJio) return
         allJio = list; seedAccents(list); updateStatus()
-        if (tab == 2 || tab == 0) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
+        // Only its own section redraws: a JioTV list arriving while the viewer is on the shelf used to
+        // rebuild the shelf's rows for no visible reason, which is the stutter that came with this list.
+        if (tab == 2) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
         if (searchShown) updateResults()
     }
     /**
@@ -1225,6 +1234,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshRows() {
+        try {
+            buildRows()
+        } catch (t: Throwable) {
+            // Row building runs on the main thread after every list arrives; a throw here closed the app.
+            CrashLog.record(this, t, "rows")
+            rows = emptyList(); inner.clear(); rowAdapter.notifyDataSetChanged()
+            playMsg("This section could not be drawn. Another section will still work.")
+        }
+    }
+
+    private fun buildRows() {
         rows = when (tab) {
             0 -> liveRows(all)
             1 -> liveRows(allV2, alwaysOn = true)
@@ -1259,8 +1279,15 @@ class MainActivity : AppCompatActivity() {
     private fun switchTab(t: Int) {
         if (t == tab) {
             if ((t == 3 || t == 4) && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
+            // A section that failed while loading is retried by selecting it again.
+            if (t == 2 && allJio.isEmpty() && !jioInFlight) loadJioChannels()
+            if (t == 5 && tataJio.isEmpty() && !tataLoaded) loadTataChannels()
             return
         }
+        // A list is fetched the first time its section is opened, never at launch: one section cannot slow
+        // the shelf down or starve the box's memory for the others.
+        if (t == 2 && allJio.isEmpty()) loadJioChannels()
+        if (t == 5 && tataJio.isEmpty()) loadTataChannels()
         val dir = if (t > tab) 1 else -1
         tab = t; layoutHero(); styleSegs(); stopPreview()
         val shift = 28 * dp * dir
@@ -3669,6 +3696,10 @@ class MainActivity : AppCompatActivity() {
 
     /** Rebuilds the rows (e.g. a new "Recently watched" entry) without losing the scroll position. */
     private fun refreshRowsKeepFocus(requestFocus: Boolean = true) {
+        runCatching { rebuildRowsKeepingFocus(requestFocus) }.onFailure { CrashLog.record(this, it, "rows keep focus") }
+    }
+
+    private fun rebuildRowsKeepingFocus(requestFocus: Boolean) {
         val lm = rowsView.layoutManager as LinearLayoutManager
         val pos = lm.findFirstVisibleItemPosition()
         val top = lm.findViewByPosition(pos)?.top ?: 0
