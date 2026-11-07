@@ -2898,28 +2898,18 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) {
             val focus = currentFocus
             val inRail = focus != null && (focus === searchBtn || segs.any { it === focus })
-            // The bar is walkable again: Live TV → JioTV → Movies → Series → search, and OK opens whichever
-            // section has focus. Only the ends leave the bar (right of search and down from it return to the
-            // shelf, left of Live TV does nothing), so a remote can always reach every tab. Without this the
-            // old handler sent RIGHT straight back down to the rows and swallowed LEFT, which left the bar
-            // with no way to move between the tabs at all.
+            // The bar is walkable again: Live TV → JioTV → Movies → Series → search, one slot per press,
+            // and OK opens whichever section has focus. Before this, RIGHT was sent straight back down to
+            // the shelf and LEFT was swallowed whole, so the only tab a remote could stand on was the
+            // active one and JioTV/Movies/Series could not be opened at all.
             if (inRail) when (e.keyCode) {
-                KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    val i = segs.indexOfFirst { it === focus }
-                    when {
-                        focus === searchBtn -> backToShelf()
-                        i in 0 until segs.lastIndex -> segs[i + 1].requestFocus()
-                        i == segs.lastIndex -> searchBtn.requestFocus()
-                        else -> backToShelf()
-                    }
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    val i = segs.indexOfFirst { it === focus }
-                    when {
-                        focus === searchBtn -> segs.last().requestFocus()
-                        i > 0 -> segs[i - 1].requestFocus()
-                        else -> Unit   // nothing left of Live TV
+                KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    val right = e.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT
+                    val slot = if (focus === searchBtn) TopBarWalk.searchSlot(segs.size) else segs.indexOfFirst { it === focus }
+                    when (val target = TopBarWalk.step(slot, segs.size, right)) {
+                        TopBarWalk.searchSlot(segs.size) -> searchBtn.requestFocus()
+                        TopBarWalk.OFF -> if (right) backToShelf()   // nothing to the left of Live TV
+                        else -> segs[target].requestFocus()
                     }
                     return true
                 }

@@ -1631,5 +1631,5 @@ The bar now walks: `Live TV → JioTV → Movies → Series → search`, focus m
 RIGHT and back again on LEFT, with OK opening whichever section has focus (the "tabs open only on OK"
 rule is unchanged, so drifting across the bar still does not load a section by accident). Only the ends
 leave the bar — right of the search circle, and DOWN from it, hand focus back to the last card the
-viewer was on via `backToShelf()`; LEFT of Live TV does nothing. `HomeTabBarTest` pins the walk down
-under Robolectric so the bar cannot silently become a dead end again.
+viewer was on via `backToShelf()`; LEFT of Live TV does nothing. The slot arithmetic lives in `TopBarWalk` and `TopBarWalkTest` pins it down, so the bar cannot silently
+become a dead end again.
