@@ -50,7 +50,11 @@ object ExternalEpg {
 
     /** "Sony SAB HD" and "sony sab" are the same channel; HD/SD is a feed tag, not part of the name. */
     internal fun normalize(name: String): String =
-        name.lowercase().replace(Regex("\b(hd|sd|uhd|4k)\b"), "").replace(Regex("[^a-z0-9]"), "").trim()
+        // Raw string: in a normal Kotlin string "\b" is a backspace, not a word boundary.
+        name.lowercase()
+            .replace(Regex("""\b(hd|sd|uhd|4k)\b"""), "")
+            .replace(Regex("[^a-z0-9]"), "")
+            .trim()
 
     /** Refreshes a due feed on the caller's background executor, without requiring a guide panel to be open. */
     fun refreshIfDue(context: Context, nowSec: Long = System.currentTimeMillis() / 1000): Boolean {
@@ -182,7 +186,9 @@ internal object EpgXmlTv {
                     }
                     XmlPullParser.END_TAG -> if (parser.name == "channel") {
                         if (names != null && declaredId.isNotBlank() && declaredName.isNotBlank()) {
-                            names[ExternalEpg.normalize(declaredName)] = declaredId
+                            // A name that normalises to nothing (a channel called "HD") is no alias at all.
+                            val key = ExternalEpg.normalize(declaredName)
+                            if (key.isNotBlank()) names[key] = declaredId
                         }
                         declaredId = ""; declaredName = ""
                     } else if (parser.name == "programme") {
