@@ -1618,3 +1618,18 @@ backspace byte inside a channel name, never the ` HD` suffix it was written for,
 `Sony SAB HD` normalised to `sonysabhd` and never met the feed's `Sony SAB`. The fix is a
 raw string — `Regex("""\\b(hd|sd|uhd|4k)\\b""")` — plus a guard that a name normalising to
 nothing (a channel literally called `HD`) is not stored as an alias for the empty key.
+
+## 67. The top bar could not be walked with a remote (5.4.11)
+
+Reported as "unable to select the upper tab like jiotv movies series with my remote". The pills were
+reachable but the bar was a trap. In `dispatchKeyEvent`, whenever focus was on a pill or the search
+circle, `DPAD_RIGHT` was redirected straight back down to the shelf and `DPAD_LEFT` was consumed
+outright (`return true`, nothing moved). So the only pill a remote could ever stand on was the active
+one; JioTV, Movies and Series were impossible to open, which makes the app look like it has one section.
+
+The bar now walks: `Live TV → JioTV → Movies → Series → search`, focus moving one pill at a time on
+RIGHT and back again on LEFT, with OK opening whichever section has focus (the "tabs open only on OK"
+rule is unchanged, so drifting across the bar still does not load a section by accident). Only the ends
+leave the bar — right of the search circle, and DOWN from it, hand focus back to the last card the
+viewer was on via `backToShelf()`; LEFT of Live TV does nothing. `HomeTabBarTest` pins the walk down
+under Robolectric so the bar cannot silently become a dead end again.

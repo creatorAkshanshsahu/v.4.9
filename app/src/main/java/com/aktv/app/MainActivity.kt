@@ -766,6 +766,12 @@ class MainActivity : AppCompatActivity() {
         tv.scaleY = tv.scaleX
     }
 
+    /** Returns focus from the top bar to the last card the viewer was on, or the shelf itself. */
+    private fun backToShelf() {
+        val back = lastRowsFocus
+        if (back?.takeIf { it.isAttachedToWindow && isInside(it, rowsView) }?.requestFocus() != true) rowsView.requestFocus()
+    }
+
     private fun styleSegs() {
         searchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tabIds[i] == tab) }
@@ -2892,15 +2898,33 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility != View.VISIBLE && e.action == KeyEvent.ACTION_DOWN) {
             val focus = currentFocus
             val inRail = focus != null && (focus === searchBtn || segs.any { it === focus })
+            // The bar is walkable again: Live TV → JioTV → Movies → Series → search, and OK opens whichever
+            // section has focus. Only the ends leave the bar (right of search and down from it return to the
+            // shelf, left of Live TV does nothing), so a remote can always reach every tab. Without this the
+            // old handler sent RIGHT straight back down to the rows and swallowed LEFT, which left the bar
+            // with no way to move between the tabs at all.
             if (inRail) when (e.keyCode) {
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    val back = lastRowsFocus
-                    if (back?.takeIf { it.isAttachedToWindow && isInside(it, rowsView) }?.requestFocus() != true) rowsView.requestFocus()
+                    val i = segs.indexOfFirst { it === focus }
+                    when {
+                        focus === searchBtn -> backToShelf()
+                        i in 0 until segs.lastIndex -> segs[i + 1].requestFocus()
+                        i == segs.lastIndex -> searchBtn.requestFocus()
+                        else -> backToShelf()
+                    }
                     return true
                 }
-                KeyEvent.KEYCODE_DPAD_LEFT -> return true
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    val i = segs.indexOfFirst { it === focus }
+                    when {
+                        focus === searchBtn -> segs.last().requestFocus()
+                        i > 0 -> segs[i - 1].requestFocus()
+                        else -> Unit   // nothing left of Live TV
+                    }
+                    return true
+                }
                 KeyEvent.KEYCODE_DPAD_UP -> if (focus === segLive) return true
-                KeyEvent.KEYCODE_DPAD_DOWN -> if (focus === searchBtn) return true
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (focus === searchBtn) { backToShelf(); return true }
             }
             if (focus != null && isInside(focus, rowsView)) {
                 val rowView = rowsView.findContainingItemView(focus)
