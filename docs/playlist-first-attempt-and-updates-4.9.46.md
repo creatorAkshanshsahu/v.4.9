@@ -1550,3 +1550,34 @@ for as long as a channel plays**. That is now what the app does.
 - The info block now stops at 372dp from the right so nothing hides behind the pane, and the top bar keeps
   the site's `no · name` reading (`1 · Nova News`), which `bindInfo` already produced.
 - The Sony-era comment in `play()` is gone with the code it described.
+
+## 64. The floating pane is gone, and the player the viewer knew is back — 5.4.9 (code 128)
+
+Two things in 5.4.7/5.4.8 were wrong for the person actually watching.
+
+**The channel pane was a floating box.** The reference draws its guide aside on a wide screen, but on the
+TV the app cannot afford a permanent card sitting over the picture — and it was not asked for. Removed:
+`buildLiveGuide`, the pane, its adapter, `focusLiveGuide`/`leaveLiveGuide`, and the Right-key mapping that
+fed it. Right opens the channel guide again as a deliberate drawer, and the chevrons stay as the quick
+switcher.
+
+The bottom block is now the site's `/live` block, with nothing else in it:
+
+- `NOW PLAYING` in amber, alone (the category chip is hidden);
+- the **programme** title as the big line, two lines allowed, with the channel named in the top bar
+  (`102 · Arena Sports`) as the site does — the channel name is the fallback when a channel has no schedule;
+- `Up next: …` under it;
+- then `20:00 ——— (red) ——— 21:00`: the programme start and end from the EPG, the bar tinted live red instead
+  of the channel accent;
+- the logo block, the description line and the key-hint line are hidden — none of them are on the site.
+
+The two glass chevrons moved into the block itself, stacked to the right of the title, exactly where the
+reference puts them.
+
+**The movie/series player is back to the 5.4.6 chrome.** `MoviePlayerActivity` and `MoviePlayerUiTest` are
+restored verbatim from before the 5.4.7 rewrite: media3's own controller, the glass back circle, the
+title/`SEASON n · EPISODE m` header, the single action row (`Change source`, `Audio & Subtitles`, `Episodes`,
+`Next episode`, `Auto next`, `Retry`, `Playback details`). The transport circles, the amber progress bar and
+the four new transport icons are deleted with it.
+
+If a player screen should change again, it changes in a build of its own.

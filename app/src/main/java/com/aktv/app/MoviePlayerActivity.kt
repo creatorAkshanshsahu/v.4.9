@@ -22,6 +22,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -34,6 +35,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
 import java.util.concurrent.Executors
@@ -42,11 +44,6 @@ import java.util.concurrent.Future
 /** Native TG Frost VOD. No Gecko session, browser URL scraping or live-TV DRM/token policy. */
 class MoviePlayerActivity : Activity() {
     companion object {
-        /** The keys that should reveal the controls rather than act on a player the viewer cannot see. */
-        val BROWSING_KEYS = setOf(
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT,
-            KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
-        )
         fun open(context: Context, title: Movies.Title, season: Int, episode: Int, episodes: List<Movies.Episode>) {
             context.startActivity(playbackIntent(context, title, season, episode, episodes))
         }
@@ -118,13 +115,6 @@ class MoviePlayerActivity : Activity() {
     private lateinit var sourcesButton: TextView
     private lateinit var episodesButton: TextView
     private lateinit var autoNextButton: TextView
-    private lateinit var playButton: TextView
-    private lateinit var transport: LinearLayout
-    private lateinit var progressHolder: FrameLayout
-    private lateinit var progressTrack: View
-    private lateinit var progressFill: View
-    private lateinit var actionsRow: LinearLayout
-    private var transportShowsPause = false
     private val actionButtons = mutableListOf<TextView>()
 
     override fun onCreate(saved: Bundle?) {
@@ -160,15 +150,23 @@ class MoviePlayerActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemUi()
         val root = FrameLayout(this).apply { setBackgroundColor(Accent.ABYSS) }
-        // No built-in controller. The site's watch screen has exactly one transport and one control row,
-        // so the media3 controller is off and everything below is drawn here in that shape.
         view = PlayerView(this).apply {
-            useController = false
+            useController = true
+            controllerShowTimeoutMs = 5200
+            controllerAutoShow = true
+            setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+            setShowSubtitleButton(true)
+            setShowNextButton(false); setShowPreviousButton(false)
+            setKeepContentOnPlayerReset(false)
             setShutterBackgroundColor(Accent.ABYSS)
             setDefaultArtwork(getDrawable(R.drawable.home_hero_cinematic))
             useArtwork = true
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
+        view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
+            setPlayedColor(Accent.AMBER); setScrubberColor(Accent.TEXT)
+            setBufferedColor(0x4DFFFFFF); setUnplayedColor(0x29FFFFFF)
+        }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
@@ -178,9 +176,9 @@ class MoviePlayerActivity : Activity() {
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
                 intArrayOf(0xF70E1014.toInt(), 0xC70E1014.toInt(), 0x330E1014, Color.TRANSPARENT))
-        }, FrameLayout.LayoutParams(-1, px(400), Gravity.BOTTOM))
+        }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
-        // Top bar: a glass back circle, the title, the S/E line underneath, the clock at the far end.
+        // Top bar: a glass back circle, the title, and the S/E line underneath — the site's watch header.
         val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
@@ -192,7 +190,7 @@ class MoviePlayerActivity : Activity() {
             setOnFocusChangeListener { v, focused ->
                 v.animate().scaleX(if (focused) 1.1f else 1f).scaleY(if (focused) 1.1f else 1f)
                     .setDuration(150).start()
-                if (focused) setOverlayVisible(true)
+                if (focused) { setOverlayVisible(true); if (!failed) view.showController() }
             }
         }
         actionButtons += back
@@ -229,149 +227,59 @@ class MoviePlayerActivity : Activity() {
             leftMargin = px(42); topMargin = px(28)
         })
 
-        // Centre transport, as on the watch screen: -10s, the one solid play button, +10s.
-        transport = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-        }
-        transport.addView(transportButton(R.drawable.ic_replay10, "Back 10 seconds") {
-            val owner = player ?: return@transportButton
-            owner.seekTo((owner.currentPosition - 10_000).coerceAtLeast(0))
-        })
-        playButton = transportButton(R.drawable.ic_play, "Play or pause", primary = true) {
-            val owner = player
-            if (owner == null) { desiredPlay = !desiredPlay } else { desiredPlay = !owner.playWhenReady; owner.playWhenReady = desiredPlay }
-            updateTransportIcon()
-        }
-        transport.addView(playButton, LinearLayout.LayoutParams(px(84), px(84)).apply {
-            marginStart = px(22); marginEnd = px(22)
-        })
-        transport.addView(transportButton(R.drawable.ic_forward10, "Forward 10 seconds") {
-            val owner = player ?: return@transportButton
-            owner.seekTo((owner.currentPosition + 10_000).coerceAtMost(if (owner.duration > 0) owner.duration else Long.MAX_VALUE))
-        })
-        overlay.addView(transport, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
-
-        // Bottom block: the message, elapsed/total with the bar under it, the extra controls, then the
-        // site's control row. Source, retry and details live on their own pill row above it.
-        val bottom = LinearLayout(this).apply {
+        val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 0, 0, px(30))
+            setPadding(0, 0, 0, px(8))
         }
+        // Elapsed over duration, the one piece of state the site keeps at the bottom of the watch screen.
+        timeLine = TextView(this).apply {
+            textSize = 14f; letterSpacing = 0.04f; setTextColor(Accent.TEXT); maxLines = 1
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        info.addView(timeLine, LinearLayout.LayoutParams(-1, -2))
         status = TextView(this).apply {
-            textSize = 12f; setTextColor(Accent.TEXT); maxLines = 2
+            textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
             background = GradientDrawable().apply {
                 cornerRadius = px(14).toFloat(); setColor(0xD005070C.toInt())
                 setStroke(px(1), 0x50F8F9FC)
             }
-            visibility = View.GONE
         }
-        bottom.addView(status, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(14) })
-        timeLine = TextView(this).apply {
-            textSize = 13f; letterSpacing = 0.04f; setTextColor(Accent.DIM); maxLines = 1
-            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
-        }
-        bottom.addView(timeLine, LinearLayout.LayoutParams(-1, -2))
-        progressHolder = FrameLayout(this)
-        progressTrack = View(this).apply { background = roundedBar(0x38FFFFFF) }
-        progressHolder.addView(progressTrack, FrameLayout.LayoutParams(-1, px(4), Gravity.CENTER_VERTICAL))
-        progressFill = View(this).apply { background = roundedBar(Accent.AMBER) }
-        progressHolder.addView(progressFill, FrameLayout.LayoutParams(px(0), px(4), Gravity.CENTER_VERTICAL or Gravity.START))
-        bottom.addView(progressHolder, LinearLayout.LayoutParams(-1, px(4)).apply { topMargin = px(12) })
+        info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
+        val maxInfoWidth = (resources.displayMetrics.widthPixels - px(90)).coerceAtLeast(px(260)).coerceAtMost(px(860))
+        overlay.addView(info, FrameLayout.LayoutParams(maxInfoWidth, -2, Gravity.BOTTOM or Gravity.START).apply {
+            leftMargin = px(42); bottomMargin = px(190)
+        })
 
-        val extras = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, px(16), 0, 0)
-        }
-        sourcesButton = button("Source") { showSources() }.also(extras::addView)
-        extras.addView(button("Retry") { desiredPlay = true; begin(provider) })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        sourcesButton = button("Change source") { showSources() }.also(row::addView)
+        row.addView(button("Audio & Subtitles") { showTracks() })
+        episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
+        nextButton = button("Next episode") { nextEpisode() }.also(row::addView)
         autoNextButton = button("") {
             prefs.edit().putBoolean("vod_auto_next", !prefs.getBoolean("vod_auto_next", true)).apply()
-            updateTitle(); updateTransportIcon()
-        }.also(extras::addView)
-        extras.addView(button("Playback details") { showDetails() })
-        bottom.addView(extras, LinearLayout.LayoutParams(-1, -2))
-
-        // The site's control row: Audio & Subtitles, Episodes, the filled Next, from the left.
-        actionsRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, px(12), 0, 0)
+            updateTitle()
+        }.also(row::addView)
+        row.addView(button("Retry") { desiredPlay = true; begin(provider) })
+        row.addView(button("Playback details") { showDetails() })
+        val scroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
         }
-        actionsRow.addView(button("Audio & Subtitles") { showTracks() })
-        episodesButton = button("Episodes") { showEpisodes() }.also(actionsRow::addView)
-        nextButton = button("Next episode") { nextEpisode() }.also(actionsRow::addView)
-        bottom.addView(actionsRow, LinearLayout.LayoutParams(-1, -2))
-
-        val maxWidth = (resources.displayMetrics.widthPixels - px(84)).coerceAtLeast(px(320))
-        overlay.addView(bottom, FrameLayout.LayoutParams(maxWidth, -2, Gravity.BOTTOM or Gravity.START).apply {
-            leftMargin = px(42); bottomMargin = px(30)
+        overlay.addView(scroll, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = px(36); rightMargin = px(36); bottomMargin = px(104)
         })
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         spinner = ProgressBar(this).apply {
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(Accent.AMBER_LIGHT)
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.AMBER_LIGHT else Accent.AMBER)
         }
         root.addView(spinner, FrameLayout.LayoutParams(px(48), px(48), Gravity.CENTER))
         setContentView(root)
+        view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
+            setOverlayVisible(visibility == View.VISIBLE || failed || spinner.visibility == View.VISIBLE || actionHasFocus())
+        })
         updateTitle()
-        updateTransportIcon()
-        // The player view stays focusable so focus has somewhere to go when the controls leave.
-        view.isFocusable = true
-        view.isFocusableInTouchMode = true
-        showOverlay()
-    }
-
-    /** A glass circle in the transport; [primary] is the filled one. */
-    private fun transportButton(icon: Int, label: String, primary: Boolean = false, click: () -> Unit): TextView {
-        val action = TextView(this).apply {
-            contentDescription = label
-            gravity = Gravity.CENTER
-            isFocusable = true; isClickable = true
-            setCompoundDrawablesWithIntrinsicBounds(icon, 0, 0, 0)
-            setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(if (primary) Accent.ABYSS else Accent.TEXT))
-            setOnClickListener { click(); setOverlayVisible(true) }
-            setOnFocusChangeListener { v, focused ->
-                styleTransport(v as TextView, focused, primary)
-                v.animate().scaleX(if (focused) 1.06f else 1f).scaleY(if (focused) 1.06f else 1f)
-                    .setDuration(220).setInterpolator(DecelerateInterpolator(1.6f)).start()
-                if (focused) setOverlayVisible(true)
-            }
-        }
-        styleTransport(action, false, primary)
-        actionButtons += action
-        return action
-    }
-
-    private fun styleTransport(b: TextView, focused: Boolean, primary: Boolean) {
-        val diameter = if (primary) px(84) else px(64)
-        b.layoutParams = LinearLayout.LayoutParams(diameter, diameter).apply {
-            marginStart = px(if (primary) 22 else 14); marginEnd = px(if (primary) 22 else 14)
-        }
-        b.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(if (primary) Accent.TEXT else if (focused) 0x59FFFFFF else 0x33FFFFFF)
-            // The site's focus ring: pure white, three pixels, right on the circle.
-            if (focused) setStroke(px(3).coerceAtLeast(2), 0xFFFFFFFF.toInt()) else setStroke(0, Color.TRANSPARENT)
-        }
-    }
-
-    private fun roundedBar(color: Int) = GradientDrawable().apply {
-        cornerRadius = px(2).toFloat(); setColor(color)
-    }
-
-    /** The play button shows pause while playing, exactly like the site. */
-    private fun updateTransportIcon() {
-        if (!::playButton.isInitialized) return
-        val owner = player
-        val playing = owner != null && owner.playWhenReady && owner.playbackState != Player.STATE_ENDED
-        if (playing == transportShowsPause) return
-        transportShowsPause = playing
-        playButton.setCompoundDrawablesWithIntrinsicBounds(if (playing) R.drawable.ic_pause else R.drawable.ic_play, 0, 0, 0)
-        playButton.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(Accent.ABYSS))
-    }
-
-    private fun showOverlay() {
-        setOverlayVisible(true)
-        if (!actionHasFocus() && ::playButton.isInitialized) playButton.requestFocus()
+        view.requestFocus()
     }
 
     private fun actionHasFocus() = actionButtons.any { it.isFocused && it.isShown }
@@ -379,30 +287,20 @@ class MoviePlayerActivity : Activity() {
     private fun setOverlayVisible(visible: Boolean) {
         val keepVisible = visible || actionHasFocus()
         overlay.animate().cancel()
-        ui.removeCallbacks(hideControls)
         if (keepVisible) {
             if (overlay.visibility != View.VISIBLE) {
                 overlay.alpha = 0f; overlay.translationY = px(12).toFloat(); overlay.visibility = View.VISIBLE
             }
             overlay.animate().alpha(1f).translationY(0f).setDuration(240)
                 .setInterpolator(DecelerateInterpolator(1.6f)).start()
-            // A television viewer expects the controls to leave again on their own; focus keeps them up.
-            ui.postDelayed(hideControls, 5_500)
         } else {
             overlay.animate().alpha(0f).translationY(px(10).toFloat()).setDuration(220)
                 .withEndAction {
                     if (!failed && spinner.visibility != View.VISIBLE && !actionHasFocus()) {
                         overlay.visibility = View.GONE; overlay.alpha = 1f; overlay.translationY = 0f
-                        // Focus has to leave the row too, or the next key press arrives at an invisible button.
-                        currentFocus?.clearFocus()
-                        view.requestFocus()
                     }
                 }.start()
         }
-    }
-
-    private val hideControls = Runnable {
-        if (!failed && spinner.visibility != View.VISIBLE && !actionHasFocus()) setOverlayVisible(false)
     }
 
     private fun px(value: Int) = (value * dp).toInt()
@@ -428,7 +326,10 @@ class MoviePlayerActivity : Activity() {
             setOnFocusChangeListener { v, focused ->
                 style(focused)
                 v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f).setDuration(150).start()
-                if (focused) setOverlayVisible(true)
+                if (focused) {
+                    setOverlayVisible(true)
+                    if (!failed) view.showController()
+                }
             }
             setOnClickListener { click() }
         }
@@ -451,14 +352,7 @@ class MoviePlayerActivity : Activity() {
         val duration = owner?.duration?.takeIf { it > 0 } ?: 0L
         val position = owner?.currentPosition?.coerceAtLeast(0) ?: 0L
         timeLine.text = if (duration > 0) watchTime(position, duration) else watchTime(position, lastDuration)
-        timeLine.visibility = if (failed) View.GONE else View.VISIBLE
-        val total = duration.takeIf { it > 0 } ?: lastDuration
-        val fraction = if (total > 0) (position.toFloat() / total).coerceIn(0f, 1f) else 0f
-        if (::progressHolder.isInitialized && ::progressFill.isInitialized && progressHolder.width > 0) {
-            progressFill.layoutParams = FrameLayout.LayoutParams(
-                (progressHolder.width * fraction).toInt().coerceAtLeast(0), px(4), Gravity.CENTER_VERTICAL or Gravity.START)
-        }
-        updateTransportIcon()
+        timeLine.visibility = if (failed || title.isSeries) View.GONE else View.VISIBLE
     }
 
     private fun updateTitle() {
@@ -477,6 +371,7 @@ class MoviePlayerActivity : Activity() {
         status.text = text
         spinner.visibility = if (loading) View.VISIBLE else View.GONE
         setOverlayVisible(true)
+        view.showController()
     }
 
     override fun onStart() {
@@ -922,10 +817,6 @@ class MoviePlayerActivity : Activity() {
         if (dialog?.isShowing == true) return super.dispatchKeyEvent(event)
         if (VodPlayerRemoteKeyPolicy.focusedActionOwns(event.keyCode, actionHasFocus()))
             return super.dispatchKeyEvent(event)
-        // With the built-in controller gone, one press brings the controls back instead of seeking blind.
-        if (overlay.visibility != View.VISIBLE || overlay.alpha < 0.5f) {
-            if (event.action == KeyEvent.ACTION_DOWN && event.keyCode in BROWSING_KEYS) { showOverlay(); return true }
-        }
         if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> { finish(); return true }
@@ -934,18 +825,17 @@ class MoviePlayerActivity : Activity() {
                 KeyEvent.KEYCODE_MEDIA_PLAY -> { desiredPlay = true; player?.play(); return true }
                 KeyEvent.KEYCODE_MEDIA_PAUSE -> { desiredPlay = false; player?.pause(); return true }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> {
-                    player?.let { it.playWhenReady = !it.playWhenReady }; showOverlay(); return true
+                    player?.let { it.playWhenReady = !it.playWhenReady }; view.showController(); return true
                 }
                 KeyEvent.KEYCODE_MEDIA_NEXT -> { if (title.isSeries) nextEpisode(); return true }
-                KeyEvent.KEYCODE_MEDIA_REWIND -> { player?.seekBack(); showOverlay(); return true }
-                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { player?.seekForward(); showOverlay(); return true }
-                // Seeking is still the arrow keys' job while nothing in the row holds focus.
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> if (!actionHasFocus()) {
+                KeyEvent.KEYCODE_MEDIA_REWIND -> { player?.seekBack(); view.showController(); return true }
+                KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { player?.seekForward(); view.showController(); return true }
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> if (!view.isControllerFullyVisible) {
                     if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) player?.seekBack() else player?.seekForward()
-                    showOverlay(); return true
+                    view.showController(); return true
                 }
-                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (!actionHasFocus()) {
-                    player?.let { it.playWhenReady = !it.playWhenReady }; updateTransportIcon(); return true
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> if (!view.isControllerFullyVisible) {
+                    player?.let { it.playWhenReady = !it.playWhenReady }; view.showController(); return true
                 }
             }
         }

@@ -62,20 +62,8 @@
                 android:includeFontPadding="false"/>
         </LinearLayout>
         <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="372dp"
+            android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"
             android:layout_marginBottom="28dp" android:orientation="vertical">
-            <!-- Channel up / down, the site's two glass chevrons beside the now/next block. -->
-            <LinearLayout android:id="@+id/zapRow" android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="end|center_vertical">
-                <TextView android:id="@+id/zapUp" android:layout_width="44dp" android:layout_height="44dp"
-                    android:gravity="center" android:focusable="true" android:clickable="true"
-                    android:contentDescription="Channel up" android:drawableStart="@drawable/ic_chevron_up"
-                    android:paddingStart="0dp"/>
-                <TextView android:id="@+id/zapDown" android:layout_width="44dp" android:layout_height="44dp"
-                    android:layout_marginStart="10dp" android:gravity="center" android:focusable="true"
-                    android:clickable="true" android:contentDescription="Channel down"
-                    android:drawableStart="@drawable/ic_chevron_down" android:paddingStart="0dp"/>
-            </LinearLayout>
             <LinearLayout android:id="@+id/infoActions" android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="center_vertical|end" android:visibility="gone">
                 <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>
@@ -86,7 +74,8 @@
             <LinearLayout android:id="@+id/infoCard" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical" android:minWidth="420dp" android:paddingStart="18dp" android:paddingEnd="24dp"
             android:paddingTop="16dp" android:paddingBottom="16dp" android:alpha="0">
-            <FrameLayout android:id="@+id/infoLogoBox" android:layout_width="64dp" android:layout_height="64dp">
+            <FrameLayout android:id="@+id/infoLogoBox" android:layout_width="64dp" android:layout_height="64dp"
+                android:visibility="gone">
                 <ImageView android:id="@+id/infoLogo" android:layout_width="42dp" android:layout_height="42dp"
                     android:layout_gravity="center" android:scaleType="fitCenter"/>
                 <TextView android:id="@+id/infoMono" android:layout_width="match_parent" android:layout_height="match_parent"
@@ -94,7 +83,7 @@
                     android:includeFontPadding="false" android:visibility="gone"/>
             </FrameLayout>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                android:layout_marginStart="18dp" android:orientation="vertical">
+                android:orientation="vertical">
                 <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:orientation="horizontal" android:gravity="center_vertical">
                     <!-- The site's eyebrow: "Now playing", amber, bold, widely tracked. No badge. -->
@@ -102,18 +91,16 @@
                         android:text="NOW PLAYING" android:textColor="@color/amber" android:textSize="11sp"
                         android:fontFamily="@font/sora_bold" android:letterSpacing="0.24" android:includeFontPadding="false"/>
                     <TextView android:id="@+id/infoCat" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:layout_marginStart="10dp" android:textColor="@color/text_dim" android:textSize="13sp"/>
+                        android:layout_marginStart="10dp" android:textColor="@color/text_dim" android:textSize="13sp"
+                        android:visibility="gone"/>
                 </LinearLayout>
                 <TextView android:id="@+id/infoName" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
+                    android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text" android:textSize="36sp" android:fontFamily="@font/sora_bold"
                     android:includeFontPadding="false"/>
                 <TextView android:id="@+id/infoNow" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="8dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text" android:textSize="15sp" android:visibility="gone"/>
-                <ProgressBar android:id="@+id/infoProgress" style="?android:attr/progressBarStyleHorizontal"
-                    android:layout_width="match_parent" android:layout_height="3dp" android:minHeight="3dp" android:maxHeight="3dp"
-                    android:layout_marginTop="7dp" android:max="1000" android:visibility="gone"/>
                 <TextView android:id="@+id/infoDesc" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text_dim" android:textSize="12sp" android:visibility="gone"/>
@@ -123,8 +110,34 @@
                 <TextView android:id="@+id/infoNext" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="4dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text_faint" android:textSize="11sp" android:visibility="gone"/>
+                <LinearLayout android:id="@+id/infoProgressRow" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:layout_marginTop="10dp"
+                    android:orientation="horizontal" android:gravity="center_vertical" android:visibility="gone">
+                    <TextView android:id="@+id/infoStart" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:minWidth="52dp" android:textColor="@color/text_dim" android:textSize="12sp"
+                        android:fontFamily="@font/sora_semibold" android:includeFontPadding="false"/>
+                    <ProgressBar android:id="@+id/infoProgress" style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="0dp" android:layout_height="4dp" android:layout_weight="1"
+                        android:layout_marginStart="14dp" android:layout_marginEnd="14dp"
+                        android:minHeight="4dp" android:maxHeight="4dp" android:max="1000"/>
+                    <TextView android:id="@+id/infoEnd" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/text_dim" android:textSize="12sp"
+                        android:fontFamily="@font/sora_semibold" android:includeFontPadding="false"/>
+                </LinearLayout>
                 <TextView android:id="@+id/infoHint" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:layout_marginTop="7dp" android:textColor="@color/text_faint" android:textSize="11sp"/>
+                    android:layout_marginTop="7dp" android:textColor="@color/text_faint" android:textSize="11sp"
+                    android:visibility="gone"/>
+            </LinearLayout>
+            <LinearLayout android:id="@+id/zapColumn" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="20dp" android:orientation="vertical" android:gravity="center_vertical">
+                <TextView android:id="@+id/zapUp" android:layout_width="46dp" android:layout_height="46dp"
+                    android:gravity="center" android:focusable="true" android:clickable="true"
+                    android:contentDescription="Channel up" android:drawableStart="@drawable/ic_chevron_up"
+                    android:paddingStart="0dp"/>
+                <TextView android:id="@+id/zapDown" android:layout_width="46dp" android:layout_height="46dp"
+                    android:layout_marginTop="12dp" android:gravity="center" android:focusable="true"
+                    android:clickable="true" android:contentDescription="Channel down"
+                    android:drawableStart="@drawable/ic_chevron_down" android:paddingStart="0dp"/>
             </LinearLayout>
             </LinearLayout>
         </LinearLayout>
