@@ -1605,3 +1605,16 @@ section said "Programme information unavailable" everywhere and the player showe
   both use it.
 - **The site guide endpoint is skipped for playlist channels** — it cannot know them, so asking it was a
   wasted request on every focus.
+
+## 66. The alias map was silently comparing names against backspaces (5.4.10 build 133)
+
+5.4.10 shipped the name-matched guide, but CI stopped on `ExternalEpgTest > a playlist
+channel is matched to the feed by its name when its id is different`. The feature was
+right; the regex was not.
+
+`Regex("\\b(hd|sd|uhd|4k)\\b")` is an *escaped* Kotlin string, so `\\b` is the Unicode
+backspace character, not a word boundary. The pattern therefore only matched an actual
+backspace byte inside a channel name, never the ` HD` suffix it was written for, so
+`Sony SAB HD` normalised to `sonysabhd` and never met the feed's `Sony SAB`. The fix is a
+raw string — `Regex("""\\b(hd|sd|uhd|4k)\\b""")` — plus a guard that a name normalising to
+nothing (a channel literally called `HD`) is not stored as an alias for the empty key.
