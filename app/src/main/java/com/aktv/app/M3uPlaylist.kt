@@ -91,9 +91,9 @@ internal object M3uPlaylist {
      */
     fun <T> sections(
         items: List<T>,
-        group: (T) -> String,
         limitGroups: Int = MAX_GROUPS,
-        limitPerRow: Int = MAX_PER_ROW
+        limitPerRow: Int = MAX_PER_ROW,
+        group: (T) -> String
     ): List<Pair<String, List<T>>> = items
         .groupBy { group(it).ifBlank { "Live" } }
         .entries
