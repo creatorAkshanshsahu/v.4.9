@@ -92,9 +92,12 @@ class MainActivity : AppCompatActivity() {
     }
     class Row(val title: String, var tiles: List<Tile>, val landscape: Boolean = false)
 
-    // movie & series shelves (filled the first time the tab opens)
+    // movie, series & OG Elfura shelves (filled the first time the tab opens)
     private val vodRows = arrayOf(listOf<Row>(), listOf<Row>()); private val vodLoading = booleanArrayOf(false, false)   // [0] Movies, [1] Series
     private val vodError = arrayOfNulls<String>(2)
+    private var ogRows = listOf<Row>()
+    private var ogLoading = false
+    private var ogError: String? = null
     private val RECENT = "Recently watched"; private val CONTINUE = "Continue watching"
     private lateinit var heroBackdrop: ImageView; private lateinit var heroPreview: View; private lateinit var previewPv: PlayerView
     private var previewPlayer: ExoPlayer? = null; private var previewToken = 0
@@ -254,15 +257,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
     private lateinit var segLive: TextView; private lateinit var segJio: TextView; private lateinit var segPortal: TextView
-    private lateinit var segSites: TextView; private lateinit var segSeries: TextView; private lateinit var segTag: TextView
-    // TV top bar: Live TV, JioTV, maxTV, Movies, Series
+    private lateinit var segSites: TextView; private lateinit var segSeries: TextView; private lateinit var segOg: TextView
+    // TV top bar: Live TV, JioTV, maxTV, Movies, Series, OG
     /** Visible sections in top-bar order. Internal tab ids are unchanged, so the screen code below is untouched. */
-    private val tabIds = intArrayOf(0, 2, 6, 7, 3, 4)
+    private val tabIds = intArrayOf(0, 2, 6, 3, 4, 8)
     private fun posOf(tabId: Int) = tabIds.indexOf(tabId).takeIf { it >= 0 } ?: 0
-    private val segs by lazy { listOf(segLive, segJio, segPortal, segTag, segSites, segSeries) }
+    private val segs by lazy { listOf(segLive, segJio, segPortal, segSites, segSeries, segOg) }
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
-    private val segBgs by lazy { List(7) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
-    private val phoneSegBgs by lazy { List(7) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
+    private val segBgs by lazy { List(segs.size) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
+    private val phoneSegBgs by lazy { List(phoneSegs.size + 1) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
@@ -350,10 +353,9 @@ class MainActivity : AppCompatActivity() {
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
         segLive = findViewById(R.id.segLive); segJio = findViewById(R.id.segJio); segPortal = findViewById(R.id.segPortal)
-        segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
-        segTag = findViewById(R.id.segTag)
+        segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries); segOg = findViewById(R.id.segOg)
         searchBtn = findViewById(R.id.searchBtn)
-        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneTag, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
+        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
         heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
@@ -476,7 +478,7 @@ class MainActivity : AppCompatActivity() {
             tv.setOnClickListener { switchTab(tabIds[i]) }
             tv.setOnFocusChangeListener { _, _ -> styleSegs() }
         }
-        phoneSearchBtn.background = phoneSegBgs[6]
+        phoneSearchBtn.background = phoneSegBgs[phoneSegs.size]
         phoneSearchBtn.setOnClickListener { openSearch() }
         phoneSearchBtn.setOnFocusChangeListener { _, _ -> styleSegs() }
 
@@ -726,10 +728,14 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.home).requestLayout()
     }
 
-    /** Tabs that show a channel list; 3 and 4 are the VOD shelves. Never index vodRows with anything else. */
+    /** Tabs that show a channel list; 3, 4 and 8 are the VOD shelves. Never index vodRows with anything else. */
     private val channelsTab get() = tab <= 2 || tab == 5 || tab == 6 || tab == 7
-    private val vodTab get() = tab == 3 || tab == 4
-    private fun vodRowsFor(t: Int) = if (t == 3 || t == 4) vodRows[t - 3] else emptyList<Row>()
+    private val vodTab get() = tab == 3 || tab == 4 || tab == 8
+    private fun vodRowsFor(t: Int) = when (t) {
+        3, 4 -> vodRows[t - 3]
+        8 -> ogRows
+        else -> emptyList<Row>()
+    }
 
     private fun sectionAccent() = if (tab == 1) Accent.BRAND_LIGHT else Accent.BRAND
 
@@ -780,22 +786,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun styleSegs() {
-        searchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
+        searchBtn.contentDescription = when (tab) {
+            3 -> "Search movies"; 4 -> "Search series"; 8 -> "Search OG catalogue"; else -> "Search channels"
+        }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tabIds[i] == tab) }
         roundStyle(searchBtn, searchBg)
         phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tabIds[i] == tab) }
-        phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
-        navStyle(phoneSearchBtn, phoneSegBgs[6], phoneSearchBtn.isFocused, false)
+        phoneSearchBtn.contentDescription = when (tab) {
+            3 -> "Search movies"; 4 -> "Search series"; 8 -> "Search OG catalogue"; else -> "Search channels"
+        }
+        navStyle(phoneSearchBtn, phoneSegBgs[phoneSegs.size], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
             0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; 6 -> "maxTV"
-            7 -> "TG TV"; else -> "Live TV"
+            8 -> "OG & Platforms"; else -> "Live TV"
         }
         findViewById<TextView>(R.id.sectionKicker).apply {
             text = when (tab) {
                 0 -> "LIVE, RIGHT NOW"
                 1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · NATIVE CLEARKEY"
                 3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"; 6 -> "MAXTV PORTAL · NATIVE PLAYBACK"
-                7 -> "TG TV PLAYLIST · NATIVE PLAYBACK"
+                8 -> "THEOGPIRATEBOT · NETFLIX · PRIME · HOTSTAR · ANIME"
                 else -> "TATA PLAYLIST · NATIVE CLEARKEY"
             }
             setTextColor(sectionAccent())
@@ -942,7 +952,12 @@ class MainActivity : AppCompatActivity() {
             tab == 5 && tataJio.isEmpty() -> tataMsg
             tab == 6 && allPortal.isEmpty() -> portalMsg
             tab == 7 && allPlaylist.isEmpty() -> playlistMsg
-            vodTab && vodRowsFor(tab).isEmpty() -> {
+            tab == 8 && ogRows.isEmpty() -> {
+                if (ogLoading) "Loading OG catalogue…"
+                else ogError?.let { "Couldn't load OG catalogue ($it). Select this tab again to retry." }
+                    ?: "Couldn't load OG catalogue. Select this tab again to retry."
+            }
+            (tab == 3 || tab == 4) && vodRowsFor(tab).isEmpty() -> {
                 val idx = tab - 3; val w = if (tab == 4) "series" else "movies"
                 if (vodLoading[idx]) "Loading $w…"
                 else vodError[idx]?.let { "Couldn't load $w ($it). Select this tab again to retry." }
@@ -958,6 +973,7 @@ class MainActivity : AppCompatActivity() {
         trendingLoading = true
         submit(io) {
             val loaded = try { Movies.shelf(Movies.MOVIE_SHELVES.first()).take(20) } catch (_: Exception) { emptyList() }
+                .ifEmpty { try { ElfuraClient.catalog(Movies.diskDir).movies.take(20) } catch (_: Exception) { emptyList() } }
             runOnUiThread {
                 trendingLoading = false
                 trendingFailed = loaded.isEmpty()
@@ -1339,8 +1355,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun continueRow(): List<Row> {
-        val type = if (tab == 4) "series" else "movie"
-        val l = Movies.recent(prefs).filter { it.type == type }.map { Tile.Mv(it) }
+        val recent = Movies.recent(prefs)
+        val l = when (tab) {
+            8 -> recent
+            4 -> recent.filter { it.type == "series" }
+            else -> recent.filter { it.type == "movie" }
+        }.map { Tile.Mv(it) }
         return if (l.isEmpty()) emptyList() else listOf(Row(CONTINUE, l))
     }
     /**
@@ -1359,7 +1379,91 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun loadOgCatalog(force: Boolean = false) {
+        if (ogLoading || (!force && ogRows.isNotEmpty())) return
+        ogLoading = true; ogError = null; updateStatus()
+        Thread {
+            val platformShelves = Movies.PLATFORM_SHELVES
+            val platformResults = arrayOfNulls<List<Movies.Title>>(platformShelves.size)
+            var elfuraCat: ElfuraClient.Catalog? = null
+            val firstError = java.util.concurrent.atomic.AtomicReference<String?>(null)
+            val lock = Any()
+
+            fun publishSnapshot(finished: Boolean) {
+                val snapshot = synchronized(lock) {
+                    buildList {
+                        elfuraCat?.let { cat ->
+                            if (cat.movies.isNotEmpty()) add(Row("Trending Movies · OG", cat.movies.map { Tile.Mv(it) }))
+                            if (cat.series.isNotEmpty()) add(Row("Trending Series · OG", cat.series.map { Tile.Mv(it) }))
+                            if (cat.anime.isNotEmpty()) add(Row("Anime · OG", cat.anime.map { Tile.Mv(it) }))
+                        }
+                        platformShelves.forEachIndexed { idx, shelf ->
+                            val titles = platformResults[idx].orEmpty()
+                            if (titles.isNotEmpty()) add(Row(shelf.title, titles.map { Tile.Mv(it) }))
+                        }
+                    }
+                }
+                runOnUiThread {
+                    if (finished) ogLoading = false
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    val hadRows = ogRows.isNotEmpty()
+                    if (snapshot.isNotEmpty() || finished) {
+                        ogRows = snapshot
+                    }
+                    if (finished && snapshot.isEmpty()) {
+                        ogError = firstError.get() ?: "empty"
+                    } else if (snapshot.isNotEmpty()) {
+                        ogError = null
+                    }
+                    if (tab == 8 && (snapshot.isNotEmpty() || finished)) {
+                        refreshRows()
+                        if (!hadRows && snapshot.isNotEmpty() && segs.none { it.isFocused } &&
+                            phoneSegs.none { it.isFocused } && !searchBtn.isFocused && !searchShown
+                        ) {
+                            rowsView.requestFocus()
+                        }
+                    }
+                    updateStatus()
+                }
+            }
+
+            val pool = Executors.newFixedThreadPool(3) { r ->
+                Thread(r, "aktv-og-shelf").apply { isDaemon = true }
+            }
+            try {
+                val tasks = ArrayList<java.util.concurrent.Future<*>>(platformShelves.size + 1)
+                tasks += pool.submit {
+                    try {
+                        val cat = ElfuraClient.catalog(Movies.diskDir, force = force)
+                        synchronized(lock) { elfuraCat = cat }
+                        if (!cat.isEmpty) publishSnapshot(finished = false)
+                    } catch (e: Exception) {
+                        firstError.compareAndSet(null, catalogFailureLabel(e))
+                    }
+                }
+                platformShelves.forEachIndexed { idx, shelf ->
+                    tasks += pool.submit {
+                        try {
+                            val items = Movies.shelf(shelf)
+                            synchronized(lock) { platformResults[idx] = items }
+                            if (idx < 3 && items.isNotEmpty()) publishSnapshot(finished = false)
+                        } catch (e: Exception) {
+                            firstError.compareAndSet(null, catalogFailureLabel(e))
+                        }
+                    }
+                }
+                for (task in tasks) {
+                    try { task.get(20, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { task.cancel(true) }
+                }
+            } finally {
+                pool.shutdownNow()
+                publishSnapshot(finished = true)
+            }
+        }.apply { isDaemon = true; name = "aktv-og-loader"; start() }
+    }
+
     private fun loadVod(t: Int) {
+        if (t == 8) { loadOgCatalog(); return }
         val idx = t - 3
         if (idx !in 0..1 || vodLoading[idx] || vodRows[idx].isNotEmpty()) return
         vodLoading[idx] = true; vodError[idx] = null; updateStatus()
@@ -1471,6 +1575,7 @@ class MainActivity : AppCompatActivity() {
     private fun switchTab(t: Int) {
         if (t == tab) {
             if ((t == 3 || t == 4) && vodRows[t - 3].isEmpty() && !vodLoading[t - 3]) loadVod(t)
+            if (t == 8 && ogRows.isEmpty() && !ogLoading) loadOgCatalog(force = true)
             // A section that failed while loading is retried by selecting it again.
             if (t == 2 && !jioCatalogLoaded && !jioInFlight) { jioRetried = false; loadJioChannels() }
             if (t == 5 && tataJio.isEmpty() && !tataLoaded) loadTataChannels()
@@ -1688,15 +1793,16 @@ class MainActivity : AppCompatActivity() {
                 ).joinToString(" · ")
                 heroChips.addView(chip("▶   Play", true).apply { setOnClickListener {
                     stopPreview()
+                    val preferred = if (tab == 8) FrostProvider.OG.id else null
                     // Play means play: a film starts on the first press, a series opens its episodes.
                     if (!t.m.isSeries && t.m.tmdb > 0) {
                         Movies.saveTitle(prefs, t.m)
-                        MoviePlayerActivity.open(this@MainActivity, t.m, 0, 0, emptyList())
+                        MoviePlayerActivity.open(this@MainActivity, t.m, 0, 0, emptyList(), provider = preferred)
                         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-                    } else DetailActivity.open(this@MainActivity, t.m)
+                    } else DetailActivity.open(this@MainActivity, t.m, provider = preferred)
                 } })
                 heroChips.addView(chip("More Info").apply { setOnClickListener {
-                    stopPreview(); DetailActivity.open(this@MainActivity, t.m)
+                    stopPreview(); DetailActivity.open(this@MainActivity, t.m, provider = if (tab == 8) FrostProvider.OG.id else null)
                 } })
                 heroMono.visibility = View.GONE; heroLogo.setImageDrawable(null); heroLogo.visibility = View.GONE
                 if (t.m.logo.isNotBlank()) {
@@ -3392,8 +3498,17 @@ class MainActivity : AppCompatActivity() {
     private val movieSearchRunnable = Runnable {
         val q = searchBuf.toString().trim(); val tok = ++movieSearchToken
         Thread {
-            val only = if (searchScope == SearchScope.SERIES) "series" else "movie"
-            val r = try { Movies.search(q, only).filter { it.type == only && it.poster.isNotEmpty() }.distinctBy { it.imdb }.take(40) } catch (_: Exception) { emptyList() }
+            val r = try {
+                when (searchScope) {
+                    SearchScope.OG -> {
+                        val ogHits = ElfuraClient.searchCatalog(q, Movies.diskDir)
+                        val tmdbHits = Movies.search(q, null)
+                        (ogHits + tmdbHits).filter { it.poster.isNotEmpty() }.distinctBy { it.imdb }.take(40)
+                    }
+                    SearchScope.SERIES -> Movies.search(q, "series").filter { it.type == "series" && it.poster.isNotEmpty() }.distinctBy { it.imdb }.take(40)
+                    else -> Movies.search(q, "movie").filter { it.type == "movie" && it.poster.isNotEmpty() }.distinctBy { it.imdb }.take(40)
+                }
+            } catch (_: Exception) { emptyList() }
             runOnUiThread {
                 if (tok != movieSearchToken || !searchShown) return@runOnUiThread
                 movieSearching = false
@@ -3406,9 +3521,15 @@ class MainActivity : AppCompatActivity() {
     }
     private fun renderCounts(q: String) {
         val m = movieResults.size
-        val vod = SearchScope.isVod(searchScope); val kind = if (searchScope == SearchScope.SERIES) "series" else "movies"
+        val vod = SearchScope.isVod(searchScope)
+        val kind = when (searchScope) {
+            SearchScope.SERIES -> "series"
+            SearchScope.OG -> "OG catalogue"
+            else -> "movies"
+        }
         searchCount.text = when {
             vod && q.isEmpty() -> "Search $kind"
+            vod && searchScope == SearchScope.OG -> "$m " + (if (m == 1) "title" else "titles")
             vod -> "$m " + (if (searchScope == SearchScope.SERIES) "series" else if (m == 1) "movie" else "movies")
             q.isEmpty() -> "Search ${all.size + allV2.size} channels"
             else -> "${results.size} channel" + (if (results.size == 1) "" else "s")
@@ -3417,6 +3538,7 @@ class MainActivity : AppCompatActivity() {
             q.isEmpty() -> when (searchScope) {
                 SearchScope.MOVIES -> "Type a movie name, like Inception or Dangal."
                 SearchScope.SERIES -> "Type a series name, like Friends or Money Heist."
+                SearchScope.OG -> "Type a movie, series or anime name, like Dune, Severance or One Piece."
                 else -> "Type a channel name, like Star Sports or Sony."
             }
             vod && m == 0 -> if (movieSearching) "Searching for \"$q\"…" else "Nothing matches \"$q\"."
@@ -4150,7 +4272,11 @@ class MainActivity : AppCompatActivity() {
                         v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
                         // The tile's crimson line is the kind, as on the site; year and rating stay in the
                         // accessibility label instead of competing with the eyebrow.
-                        v.findViewById<TextView>(R.id.posterMeta).text = if (t.m.isSeries) "SERIES" else "MOVIE"
+                        v.findViewById<TextView>(R.id.posterMeta).text = when {
+                            "Anime" in t.m.genres -> "ANIME"
+                            t.m.isSeries -> "SERIES"
+                            else -> "MOVIE"
+                        }
                         v.contentDescription =
                             (listOf(t.m.name, t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
                                 .filterNotNull()).joinToString(" · ")
@@ -4169,7 +4295,9 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     v.setOnClickListener {
-                        stopPreview(); DetailActivity.open(this@MainActivity, t.m)
+                        stopPreview()
+                        val preferred = if (tab == 8 || (searchShown && searchScope == SearchScope.OG)) FrostProvider.OG.id else null
+                        DetailActivity.open(this@MainActivity, t.m, provider = preferred)
                         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                     }
                 }

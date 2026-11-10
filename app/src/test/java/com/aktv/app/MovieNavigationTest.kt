@@ -38,4 +38,9 @@ class MovieNavigationTest {
         assertEquals(4000, intent.getIntArrayExtra("episodes")!!.size)
         assertEquals(setOf("tmdb", "type", "season", "episode", "name", "episodes"), intent.extras!!.keySet())
     }
+    @Test fun `explicit OG provider selection travels as an optional intent extra`() {
+        val intent = MoviePlayerActivity.playbackIntent(RuntimeEnvironment.getApplication(), title(false), 0, 0,
+            emptyList(), provider = FrostProvider.OG.id)
+        assertEquals("og", intent.getStringExtra("provider"))
+    }
 }

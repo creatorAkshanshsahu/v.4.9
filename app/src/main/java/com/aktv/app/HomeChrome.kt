@@ -73,13 +73,20 @@ internal object HomeChrome {
             layoutParams.width = px(38); layoutParams.height = px(38)
         }
         root.findViewById<TextView>(R.id.navVersion).visibility = View.GONE
-        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segSites, R.id.segSeries)) {
-            root.findViewById<TextView>(id).apply {
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg)) {
+            root.findViewById<TextView>(id)?.apply {
                 layoutParams.height = px(if (short) 34 else 36)
-                setPadding(px(if (m.compact) 12 else 16), 0, px(if (m.compact) 12 else 16), 0)
+                setPadding(px(if (m.compact) 11 else 14), 0, px(if (m.compact) 11 else 14), 0)
                 textSize = if (short) 11f else if (m.compact) 12f else 14f
                 includeFontPadding = false
                 typeface = androidx.core.content.res.ResourcesCompat.getFont(root.context, R.font.sora_semibold)
+            }
+        }
+        val narrowPhone = m.phone && screenWidth / dp < 680
+        for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneSearch)) {
+            root.findViewById<TextView>(id)?.apply {
+                setPadding(px(if (narrowPhone) 10 else 13), 0, px(if (narrowPhone) 10 else 13), 0)
+                textSize = if (narrowPhone) 10.5f else 11f
             }
         }
         root.findViewById<View>(R.id.navPills).apply {

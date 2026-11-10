@@ -326,13 +326,18 @@ internal class FrostResolver(
     private fun withSiteReferer(sources: List<FrostSource>, page: String): List<FrostSource> {
         if (sources.isEmpty()) return sources
         val origin = PageCrawl.origin(page) ?: FrostProtocol.SITE
-        return sources.map { source ->
-            if (source.headers.keys.any { it.equals("referer", true) }) source
-            else FrostSource(
-                source.provider, source.identity, source.url, source.format, source.quality, source.language,
-                source.hevc, source.headers + mapOf("referer" to page, "origin" to origin), source.subtitles,
-                source.credentialOrigin, source.scraperName
-            )
+        return sources.flatMap { source ->
+            when {
+                source.headers.keys.any { it.equals("referer", true) } -> listOf(source)
+                VidLinkClient.isMovieBoxCdn(source.url) -> VidLinkClient.movieBoxVariants(source)
+                else -> listOf(
+                    FrostSource(
+                        source.provider, source.identity, source.url, source.format, source.quality, source.language,
+                        source.hevc, source.headers + mapOf("referer" to page, "origin" to origin), source.subtitles,
+                        source.credentialOrigin, source.scraperName
+                    )
+                )
+            }
         }
     }
 

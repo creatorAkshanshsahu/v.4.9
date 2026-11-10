@@ -44,16 +44,31 @@ import java.util.concurrent.Future
 /** Native TG Frost VOD. No Gecko session, browser URL scraping or live-TV DRM/token policy. */
 class MoviePlayerActivity : Activity() {
     companion object {
-        fun open(context: Context, title: Movies.Title, season: Int, episode: Int, episodes: List<Movies.Episode>) {
-            context.startActivity(playbackIntent(context, title, season, episode, episodes))
+        fun open(
+            context: Context,
+            title: Movies.Title,
+            season: Int,
+            episode: Int,
+            episodes: List<Movies.Episode>,
+            provider: String? = null
+        ) {
+            context.startActivity(playbackIntent(context, title, season, episode, episodes, provider))
         }
-        internal fun playbackIntent(context: Context, title: Movies.Title, season: Int, episode: Int, episodes: List<Movies.Episode>) =
+        internal fun playbackIntent(
+            context: Context,
+            title: Movies.Title,
+            season: Int,
+            episode: Int,
+            episodes: List<Movies.Episode>,
+            provider: String? = null
+        ) =
             Intent(context, MoviePlayerActivity::class.java)
                 .putExtra("tmdb", title.tmdb).putExtra("type", if (title.isSeries) "tv" else "movie")
                 .putExtra("season", if (title.isSeries) season else 0).putExtra("episode", if (title.isSeries) episode else 0)
                 .putExtra("name", title.name)
                 .putExtra("episodes", (if (title.isSeries) episodes else emptyList()).take(2000)
                     .flatMap { listOf(it.season, it.episode) }.toIntArray())
+                .apply { if (!provider.isNullOrBlank()) putExtra("provider", provider) }
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -129,8 +144,10 @@ class MoviePlayerActivity : Activity() {
             CrashLog.record(this, bad); finish(); return
         }
         titleName = intent.getStringExtra("name").orEmpty().take(180)
-        provider = FrostProvider.values().firstOrNull { it.id == prefs.getString("vod_provider_${title.progressKey}", null) }
-            ?: FrostProvider.FROST
+        val explicitProvider = saved?.getString("provider") ?: intent.getStringExtra("provider")
+        provider = FrostProvider.values().firstOrNull {
+            it.id == (explicitProvider ?: prefs.getString("vod_provider_${title.progressKey}", null))
+        } ?: FrostProvider.FROST
         episodes = VodProgress.episodes(intent.getIntArrayExtra("episodes"))
         desiredPlay = saved?.getBoolean("play", true) ?: true
         restoreProgress()
@@ -264,7 +281,7 @@ class MoviePlayerActivity : Activity() {
             prefs.edit().putBoolean("vod_auto_next", !prefs.getBoolean("vod_auto_next", true)).apply()
             updateTitle()
         }.also(row::addView)
-        row.addView(button("Retry") { desiredPlay = true; begin(provider) })
+        row.addView(button("Retry") { desiredPlay = true; begin(provider, fresh = true) })
         row.addView(button("Playback details") { showDetails() })
         val scroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
@@ -386,12 +403,12 @@ class MoviePlayerActivity : Activity() {
         ui.post(tick)
     }
 
-    private fun begin(nextProvider: FrostProvider, selected: FrostSource? = null) {
+    private fun begin(nextProvider: FrostProvider, selected: FrostSource? = null, fresh: Boolean = false) {
         captureProgress()
         recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); probed.clear(); diagnostics = PlaybackDiagnostics()
         failed = false; lastFailure = ""; compatible = false; startupAt = SystemClock.elapsedRealtime()
         containerRetried.clear()
-        if (selected == null) resolve(nextProvider)
+        if (selected == null) resolve(nextProvider, fresh = fresh)
         else {
             generation++; lookup?.cancel(true); resolver.cancel()
             provider = nextProvider; recovery.visit(provider)
@@ -400,7 +417,12 @@ class MoviePlayerActivity : Activity() {
         }
     }
 
-    private fun resolve(nextProvider: FrostProvider, preferred: String? = null, avoidIdentity: String? = null) {
+    private fun resolve(
+        nextProvider: FrostProvider,
+        preferred: String? = null,
+        avoidIdentity: String? = null,
+        fresh: Boolean = false
+    ) {
         captureProgress(); releasePlayer(); dialog?.dismiss()
         provider = nextProvider; recovery.visit(provider); currentSource = null
         val request = title
@@ -409,7 +431,7 @@ class MoviePlayerActivity : Activity() {
         diagnostics.resolving(if (provider == FrostProvider.FROST) PlaybackDiagnostics.Provider.FROST else PlaybackDiagnostics.Provider.OUT)
         message("Resolving ${provider.label} · native movie sources…", true)
         lookup = io.submit {
-            val result = try { Result.success(resolver.resolve(request, nextProvider)) } catch (error: Exception) { Result.failure(error) }
+            val result = try { Result.success(resolver.resolve(request, nextProvider, fresh)) } catch (error: Exception) { Result.failure(error) }
             ui.post {
                 if (!foreground || token != generation || request != title) return@post
                 result.fold(onSuccess = { list ->
@@ -445,7 +467,7 @@ class MoviePlayerActivity : Activity() {
                         if (nextProvider == FrostProvider.OG) "\nOG servers: ${OgNative.lastOutcome()}" else ""
                     when {
                         problem?.status == 429 -> fail(lastFailure)
-                        sourceRecovery.retryMetadata(nextProvider, problem?.status, problem?.kind) -> resolve(nextProvider)
+                        sourceRecovery.retryMetadata(nextProvider, problem?.status, problem?.kind) -> resolve(nextProvider, fresh = true)
                         else -> recovery.alternative()?.let { resolve(it) } ?: fail(lastFailure)
                     }
                 })
@@ -602,8 +624,8 @@ class MoviePlayerActivity : Activity() {
                 when {
                     problem.family == PlaybackDiagnostics.Family.DECODER && retrySoftware(source) -> Unit
                     sourceRecovery.refreshNotFound(source.provider, problem.http) ->
-                        resolve(source.provider, avoidIdentity = source.identity)
-                    recovery.refresh(source.provider, problem.http) -> resolve(source.provider, preferred = source.identity)
+                        resolve(source.provider, avoidIdentity = source.identity, fresh = true)
+                    recovery.refresh(source.provider, problem.http) -> resolve(source.provider, preferred = source.identity, fresh = true)
                     else -> nextSource()
                 }
             }
@@ -702,7 +724,10 @@ class MoviePlayerActivity : Activity() {
         val id = title.id
         episodesLoading = true
         episodeLookup = io.submit {
-            val list = try { Movies.details("series", id).second.map { it.season to it.episode } } catch (_: Exception) { emptyList() }
+            val tmdbEps = try { Movies.details("series", id).second.map { it.season to it.episode } } catch (_: Exception) { emptyList() }
+            val list = tmdbEps.ifEmpty {
+                try { ElfuraClient.episodes(id).map { it.season to it.episode } } catch (_: Exception) { emptyList() }
+            }
             ui.post {
                 episodesLoading = false
                 if (!foreground || isDestroyed || title.id != id) return@post
@@ -733,8 +758,11 @@ class MoviePlayerActivity : Activity() {
         }.setNegativeButton("Close", null).create())
     }
     private fun showSources() {
-        val labels = mutableListOf("Reload TG FROST (native)", "Try TG OUT (native)",
-            "Reload OG servers (native · Vidstuck / Vidfast / Vidlink)")
+        val labels = mutableListOf(
+            "Reload OG · Elfura (native · embed.theogpiratebot.online)",
+            "Try TG FROST (native)",
+            "Try TG OUT (native)"
+        )
         // The OG sources this title already produced stay listable: picking another provider used to replace
         // the list, so the only OG entry disappeared exactly when it was needed again.
         val ogFound = (ogCache.ifEmpty { OgNative.cached(title) }).distinctBy { it.identity }
@@ -751,9 +779,9 @@ class MoviePlayerActivity : Activity() {
                 if (title != request) return@setItems
                 desiredPlay = true
                 when {
-                    index == 0 -> begin(FrostProvider.FROST)
-                    index == 1 -> begin(FrostProvider.OUT)
-                    index == 2 -> begin(FrostProvider.OG)
+                    index == 0 -> begin(FrostProvider.OG, fresh = true)
+                    index == 1 -> begin(FrostProvider.FROST, fresh = true)
+                    index == 2 -> begin(FrostProvider.OUT, fresh = true)
                     index >= firstSource -> listed.getOrNull(index - firstSource)?.let { begin(it.provider, it) }
                     else -> ogFound.getOrNull(index - firstFound)?.let { begin(it.provider, it) }
                 }
@@ -849,7 +877,7 @@ class MoviePlayerActivity : Activity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) hideSystemUi() }
     override fun onSaveInstanceState(out: Bundle) {
         if (initialized) { captureProgress(); out.putInt("season", title.season); out.putInt("episode", title.episode)
-            out.putLong("position", lastPosition); out.putBoolean("play", desiredPlay) }
+            out.putLong("position", lastPosition); out.putBoolean("play", desiredPlay); out.putString("provider", provider.id) }
         super.onSaveInstanceState(out)
     }
     override fun finish() {

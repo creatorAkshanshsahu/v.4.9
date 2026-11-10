@@ -87,15 +87,28 @@ internal object OgNative {
         memo[memoKey(title)]?.takeIf { it.until > System.currentTimeMillis() }?.sources
     } ?: emptyList()
 
-    /** Every server, in the site's order: the player's own preflight drops the ones that do not answer. */
+    /** Every server, in the site's order: Elfura (`embed.theogpiratebot.online`) + native VidLink first, then fallbacks. */
     fun resolve(title: FrostTitle, fresh: Boolean = false): List<FrostSource> {
         // A stream found for this title a moment ago is reused: starting a film must not cost another search.
         cached(title).takeIf { !fresh && it.isNotEmpty() }?.let { return it }
         val found = LinkedHashSet<FrostSource>()
         val notes = mutableListOf<String>()
-        // This site's own player is TG underneath - its PLAYERS menu offers TG FROST and TG OUT for the same
-        // title id - so TG's own endpoint is asked first. That is headless (no browser engine, so it also
-        // works on a television), and it is the stream the site itself would play.
+        // 1. Native Elfura v1 session + playback API on embed.theogpiratebot.online (/api/v1/session + /api/v1/playback).
+        val elfuraRaw = runCatching { ElfuraClient.resolve(title) }.getOrDefault(emptyList())
+        val elfura = FrostPreflight.keep(elfuraRaw)
+        notes += "Elfura ($ELFURA): " + if (elfura.isEmpty()) "no source" else "${elfura.size} source(s)"
+        // 2. Native VidLink API (vidlink.pro/api/b/...) — powers OG movies & series even when Elfura lanes are empty.
+        val vidlinkRaw = runCatching { VidLinkClient.resolveDefault(title) }.getOrDefault(emptyList())
+        val vidlink = FrostPreflight.keep(vidlinkRaw)
+        notes += "Vidlink (${VidLinkClient.SITE}): " + if (vidlink.isEmpty()) "no source" else "${vidlink.size} source(s)"
+        val ogDirect = (elfura + vidlink).distinctBy { "${it.url}|${it.headers["referer"].orEmpty()}" }
+        if (ogDirect.isNotEmpty()) {
+            report = notes.joinToString("\n")
+            outcome = notes.joinToString(" · ").take(320)
+            synchronized(memo) { memo[memoKey(title)] = Memo(System.currentTimeMillis() + 10 * 60_000L, ogDirect) }
+            return ogDirect
+        }
+        // Fallback when Elfura and VidLink have no stream for this title: TG endpoints and third-party server pages.
         for (provider in listOf(FrostProvider.FROST, FrostProvider.OUT)) {
             val viaTg = runCatching { TgNative.resolve(title, provider) }.getOrDefault(emptyList())
             notes += "${provider.label} (the site's own player): " + if (viaTg.isEmpty()) "no source" else "${viaTg.size} source(s)"
@@ -231,7 +244,7 @@ internal object OgNative {
     /** Every name worth asking, the one that worked last time first. */
     private fun serverKeys(): List<String> = (listOfNotNull(preferredServer) + SITE_SERVERS).distinct()
 
-    fun cancel() { client.dispatcher.cancelAll() }
+    fun cancel() { client.dispatcher.cancelAll(); ElfuraClient.cancel(); VidLinkClient.cancel() }
 
     private fun fetch(url: String): String? = try {
         val request = Request.Builder().url(url)

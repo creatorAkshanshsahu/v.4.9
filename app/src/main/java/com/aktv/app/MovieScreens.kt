@@ -1,6 +1,7 @@
 package com.aktv.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -12,7 +13,6 @@ import android.os.Looper
 import android.view.*
 import android.view.animation.DecelerateInterpolator
 import android.widget.*
-import androidx.appcompat.app.AlertDialog
 import androidx.core.content.res.ResourcesCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -23,12 +23,13 @@ import java.util.concurrent.Executors
 /** Netflix / Apple TV style details page: backdrop, logo, facts, Play, and for series the seasons and episodes. */
 class DetailActivity : Activity() {
     companion object {
-        fun open(c: Context, t: Movies.Title) {
+        fun open(c: Context, t: Movies.Title, provider: String? = null) {
             c.startActivity(Intent(c, DetailActivity::class.java).putExtra("type", t.type).putExtra("imdb", t.imdb)
                 .putExtra("tmdb", t.tmdb).putExtra("name", t.name).putExtra("poster", t.poster).putExtra("bg", t.background)
                 .putExtra("logo", t.logo).putExtra("year", t.year).putExtra("rating", t.rating).putExtra("runtime", t.runtime)
                 .putExtra("desc", t.description).putExtra("genres", t.genres.joinToString("|"))
-                .putExtra("cast", t.cast.joinToString("|").take(900)).putExtra("trailerKey", t.trailerKey))
+                .putExtra("cast", t.cast.joinToString("|").take(900)).putExtra("trailerKey", t.trailerKey)
+                .apply { if (!provider.isNullOrBlank()) putExtra("provider", provider) })
         }
     }
 
@@ -50,11 +51,13 @@ class DetailActivity : Activity() {
     private lateinit var seasonRow: LinearLayout; private lateinit var epList: RecyclerView; private lateinit var body: LinearLayout
     private lateinit var loading: ProgressBar
     private var selectedEpisode: Pair<Int, Int>? = null
+    private var preferredProvider: String? = null
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         ImmersiveUi.hide(window)
         val i = intent
+        preferredProvider = i.getStringExtra("provider")
         title = Movies.Title(i.getStringExtra("imdb") ?: "", i.getIntExtra("tmdb", 0), i.getStringExtra("type") ?: "movie",
             i.getStringExtra("name") ?: "", i.getStringExtra("poster") ?: "", i.getStringExtra("bg") ?: "", i.getStringExtra("logo") ?: "",
             i.getStringExtra("year") ?: "", i.getStringExtra("rating") ?: "",
@@ -64,11 +67,25 @@ class DetailActivity : Activity() {
         selectedEpisode = lastEpisode()
         build(); bind()
         io.execute {
-            val (t, eps) = try { Movies.details(title.type, title.tmdb) } catch (_: Exception) { null to emptyList() }
+            var (t, eps) = try { Movies.details(title.type, title.tmdb) } catch (_: Exception) { null to emptyList() }
+            if (t == null && title.isSeries && title.tmdb > 0 && "Anime" in title.genres) {
+                val asMovie = try { Movies.details("movie", title.tmdb) } catch (_: Exception) { null to emptyList() }
+                if (asMovie.first != null) {
+                    t = asMovie.first
+                    eps = emptyList()
+                }
+            }
+            val resolvedSeries = (t ?: title).isSeries
+            if (resolvedSeries && eps.isEmpty() && title.tmdb > 0) {
+                eps = try { ElfuraClient.episodes(title.tmdb) } catch (_: Exception) { emptyList() }
+            }
             ui.post {
                 if (isFinishing || isDestroyed) return@post
                 loading.visibility = View.GONE
-                if (t != null) title = t.copy(tmdb = if (t.tmdb > 0) t.tmdb else title.tmdb)
+                if (t != null) title = t.copy(
+                    tmdb = if (t.tmdb > 0) t.tmdb else title.tmdb,
+                    genres = if ("Anime" in title.genres && "Anime" !in t.genres) listOf("Anime") + t.genres else t.genres
+                )
                 episodes = eps; seasons = eps.map { it.season }.distinct().sorted()
                 val last = prefs.getInt("last_season_${title.imdb}", seasons.firstOrNull() ?: 1)
                 season = if (last in seasons) last else seasons.firstOrNull() ?: 1
@@ -119,6 +136,8 @@ class DetailActivity : Activity() {
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         playBtn = button("▶  Play", primary = true) { playCurrent() }
         buttons.addView(playBtn)
+        val serverBtn = button("Servers", primary = false) { showServerPicker() }
+        buttons.addView(serverBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
         loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(pageAccent) }
         buttons.addView(loading, LinearLayout.LayoutParams((28 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (16 * dp).toInt() })
         body.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (26 * dp).toInt() })
@@ -285,15 +304,35 @@ class DetailActivity : Activity() {
         }
     }
 
-    private fun playCurrent() {
-        if (title.isSeries) { val (s, e) = lastEpisode(); play(s, e) } else play(0, 0)
+    private fun showServerPicker() {
+        val options = arrayOf(
+            "TG FROST (Default)",
+            "OG · TheOGPirateBot (Elfura / VidLink)",
+            "TG OUT"
+        )
+        val providerIds = arrayOf(FrostProvider.FROST.id, FrostProvider.OG.id, FrostProvider.OUT.id)
+        AlertDialog.Builder(this)
+            .setTitle("Play with server")
+            .setItems(options) { _, which ->
+                val chosen = providerIds.getOrNull(which)
+                playCurrent(chosen)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
-    private fun play(s: Int, e: Int) {
+    private fun playCurrent(providerOverride: String? = preferredProvider) {
+        if (title.isSeries) {
+            val (s, e) = selectedEpisode ?: lastEpisode()
+            play(s, e, providerOverride)
+        } else play(0, 0, providerOverride)
+    }
+
+    private fun play(s: Int, e: Int, providerOverride: String? = preferredProvider) {
         if (title.tmdb <= 0) { Toast.makeText(this, "This title can't be played right now", Toast.LENGTH_SHORT).show(); return }
         Movies.saveTitle(prefs, title)
         if (title.isSeries) prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
-        MoviePlayerActivity.open(this, title, s, e, episodes)
+        MoviePlayerActivity.open(this, title, s, e, episodes, provider = providerOverride)
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
