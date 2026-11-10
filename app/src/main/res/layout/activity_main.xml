@@ -90,7 +90,7 @@
                     android:orientation="horizontal" android:gravity="center_vertical">
                     <!-- The site's eyebrow: "Now playing", brand crimson, bold, widely tracked. No badge. -->
                     <TextView android:id="@+id/infoKicker" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="NOW PLAYING" android:textColor="@color/brand" android:textSize="11sp"
+                        android:text="NOW PLAYING" android:textColor="@color/brand_light" android:textSize="11sp"
                         android:fontFamily="@font/sora_bold" android:letterSpacing="0.24" android:includeFontPadding="false"/>
                     <TextView android:id="@+id/infoCat" android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:layout_marginStart="10dp" android:textColor="@color/text_dim" android:textSize="13sp"

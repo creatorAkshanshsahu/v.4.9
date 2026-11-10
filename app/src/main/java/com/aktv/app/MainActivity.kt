@@ -1541,7 +1541,7 @@ class MainActivity : AppCompatActivity() {
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.text = if (t.c.v2) "24/7" else "LIVE NOW"
                 heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.BRAND_LIGHT else Accent.BRAND)
-                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.BRAND_LIGHT else Accent.BRAND)
+                (heroDot as? TextView)?.setTextColor(Accent.BRAND_LIGHT)   // over artwork: brighter stop
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
                 heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
@@ -1572,7 +1572,7 @@ class MainActivity : AppCompatActivity() {
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.apply {
                     text = if (t.m.isSeries) "SERIES" else "ORIGINAL FILM"
-                    setTextColor(Accent.BRAND); backgroundTintList = ColorStateList.valueOf(Accent.BRAND)
+                    setTextColor(Accent.BRAND_LIGHT); backgroundTintList = ColorStateList.valueOf(Accent.BRAND_LIGHT)
                 }
                 heroTitle.text = t.m.name
                 showHeroArtwork(t.m)

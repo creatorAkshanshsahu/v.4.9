@@ -100,7 +100,7 @@ class DetailActivity : Activity() {
         val inset = (if (compact) 28 else 48) * dp
         val textWidth = (resources.displayMetrics.widthPixels * if (compact) 0.73f else 0.62f).toInt()
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(inset.toInt(), ((if (compact) 96 else 112) * dp).toInt(), inset.toInt(), (32 * dp).toInt()) }
-        body.addView(tv(if (compact) 9f else 11f, Accent.BRAND, fSemi).apply {
+        body.addView(tv(if (compact) 9f else 11f, Accent.BRAND_LIGHT, fSemi).apply {
             text = if (title.isSeries) "SERIES" else "ORIGINAL FILM"; letterSpacing = 0.28f
         },
             LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (12 * dp).toInt() })

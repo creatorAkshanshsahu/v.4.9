@@ -1782,6 +1782,8 @@ channel says so ("maxTV lists no English or Hindi channels") instead of sitting 
   accent, one brighter `#E5383B` for LIVE and progress. `AMBER`, `AMBER_LIGHT`, `AMBER_DEEP` became
   `BRAND`, `BRAND_LIGHT`, `BRAND_DEEP` at every call site — a colour named amber cannot be crimson.
 * **Wordmark.** `Accent.WORDMARK_STOPS` is `#A8101A → #E0243A`, and the header paints the glyphs with it.
+  (5.4.20: small uppercase labels drawn over artwork — hero eyebrow, "NOW PLAYING", poster kind tags —
+  take the bright stop `#E0243A` so they read against a picture; fills and pills keep `#C4161C`.)
 * **The tile wall stays one family.** `projectHue` used to fold every hue onto an amber arc (24..46); it now
   folds onto the crimson arc, `ARC_START = 344`, `ARC_SPAN = 32`, wrapping through 360, and `fromName` picks
   its stable hue inside the same arc. Without that, brand crimson next to amber channel tiles would have
@@ -1797,3 +1799,10 @@ channel says so ("maxTV lists no English or Hindi channels") instead of sitting 
 * `AccentIdentityTest` is rewritten for the crimson band: brand family, LIVE brighter than the brand fill,
   the projection covering the full wheel without leaving the arc, stable nameless tints, and the wordmark
   stops and primary tokens pinned.
+
+## 76. Labels over artwork take the brighter stop (5.4.20)
+
+The v3 accent `#C4161C` is right for fills and pills, but as small uppercase type drawn straight on
+artwork — the home eyebrow, "NOW PLAYING" in the player, the MOVIE/SERIES tag on a poster — it sat too
+close to the ground to read. Those labels now use `#E0243A`, the bright end of the same brand gradient;
+fills, focus rings, progress and the profile dot keep the primary crimson. One identity, two stops.

@@ -155,7 +155,8 @@ internal object HomeChrome {
         }
         root.findViewById<TextView>(R.id.heroDot).apply {
             textSize = if (m.compact) 9f else 11f
-            setTextColor(Accent.BRAND)
+            // Situated over artwork, so the eyebrow takes the brighter stop of the brand gradient.
+            setTextColor(Accent.BRAND_LIGHT)
         }
         root.findViewById<View>(R.id.heroChips).let {
             (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 12 else 20)
