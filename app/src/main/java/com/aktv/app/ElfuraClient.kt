@@ -666,6 +666,7 @@ internal object ElfuraClient {
                     name = name,
                     poster = poster,
                     background = backdrop,
+                    logo = "",
                     year = year,
                     rating = rating,
                     genres = extraGenres,
