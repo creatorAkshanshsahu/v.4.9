@@ -1083,8 +1083,10 @@ class MainActivity : AppCompatActivity() {
         submit(io) {
             try {
                 val account = stalkerAccount()
-                val portal = StalkerPortal(account)
+                val portal = newPortal()
                 val listed = portal.channels()
+                // Remember the address that answered, so the next launch does not rediscover it.
+                rememberPortalEndpoint(portal)
                 val genres = runCatching { portal.genres() }.getOrDefault(emptyMap())
                 val channels = listed.map { c ->
                     Channel(
@@ -1127,6 +1129,17 @@ class MainActivity : AppCompatActivity() {
         add(Row(FAV, favTiles()))
         addAll(recentRow())
         addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+    }
+
+    /** A portal client that starts from the address that last answered, when there is one. */
+    private fun newPortal() = StalkerPortal(
+        stalkerAccount(),
+        knownEndpoint = prefs.getString("portal_endpoint", null)
+    )
+
+    private fun rememberPortalEndpoint(portal: StalkerPortal) {
+        val endpoint = portal.workingEndpoint ?: return
+        if (prefs.getString("portal_endpoint", null) != endpoint) prefs.edit().putString("portal_endpoint", endpoint).apply()
     }
 
     /** The portal address and device identity, with the viewer's own values overriding the shipped defaults. */
@@ -1891,7 +1904,9 @@ class MainActivity : AppCompatActivity() {
         playMsg(null)
         resolveJob = playbackIo.submit {
             try {
-                val url = StalkerPortal(stalkerAccount()).link(ch.cmd)
+                val portal = newPortal()
+                val url = portal.link(ch.cmd)
+                rememberPortalEndpoint(portal)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                     nativeSources = listOf(portalStream(url))

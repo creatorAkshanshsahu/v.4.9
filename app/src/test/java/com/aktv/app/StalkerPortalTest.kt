@@ -93,6 +93,58 @@ class StalkerPortalTest {
     }
 
     @Test
+    fun `the api is found one level up when the client path has none`() {
+        // Exactly what a real panel does: http://host/stalker_portal/c/ has no server/load.php in it.
+        val http = FakeHttp { url ->
+            when {
+                "action=handshake" in url && url.startsWith("http://portal.example/stalker_portal/server/load.php?") ->
+                    200 to """{"js":{"token":"T1"}}"""
+                "action=handshake" in url -> 404 to ""
+                "action=get_profile" in url -> 200 to """{"js":{"id":"1"}}"""
+                "action=get_all_channels" in url -> 200 to catalogue
+                else -> 404 to ""
+            }
+        }
+        val portal = StalkerPortal(account, http)
+
+        assertEquals(2, portal.channels().size)
+        assertEquals("http://portal.example/stalker_portal/server/load.php", portal.workingEndpoint)
+        assertEquals("the nested guess is tried once, then left alone", 1,
+            http.urls.count { it.contains("/stalker_portal/c/server/load.php") })
+    }
+
+    @Test
+    fun `a remembered address is used without rediscovering the portal`() {
+        val remembered = "http://portal.example/stalker_portal/server/load.php"
+        val http = FakeHttp { url ->
+            when {
+                "action=handshake" in url -> 200 to """{"js":{"token":"T1"}}"""
+                "action=get_profile" in url -> 200 to """{"js":{"id":"1"}}"""
+                "action=get_all_channels" in url -> 200 to catalogue
+                else -> 404 to ""
+            }
+        }
+        val portal = StalkerPortal(account, http, knownEndpoint = remembered)
+
+        portal.channels()
+        assertTrue("every call goes to the remembered address: ${http.urls}",
+            http.urls.all { it.startsWith("$remembered?") })
+    }
+
+    @Test
+    fun `a portal that refuses in words is reported in those words`() {
+        val http = FakeHttp { url ->
+            if ("action=handshake" in url) 200 to """{"js":{"error":"Device is blocked"}}""" else 404 to ""
+        }
+        try {
+            StalkerPortal(account, http).channels()
+            fail("a blocked device must not look like an empty section")
+        } catch (e: StalkerException) {
+            assertEquals("Device is blocked", e.portalDetail)
+        }
+    }
+
+    @Test
     fun `a refusal is reported in the portal's own words`() {
         val http = FakeHttp { url ->
             when {

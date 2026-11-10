@@ -1681,3 +1681,20 @@ channel is opened does it trade that channel's handle for a short-lived link wit
   portal's own words instead of trying TG, and the guide is skipped because no schedule is published.
 * The live player's channel drawer follows the playing section, so the guide beside a portal channel lists
   portal channels instead of the site's.
+
+## 70. The portal's API is not under its client path (5.4.14)
+
+The maxTV section came back as `maxTV didn't load (HTTP 404)`. The client was right; the address was
+wrong. A portal address is the *web client* path — `http://new.maxtv.be/stalker_portal/c/` — and most
+panels keep their API one level up, at `…/stalker_portal/server/load.php`, answering 404 for
+`…/c/server/load.php`. Only the configured address plus `/server/load.php` was ever tried, so a panel
+laid out the usual way could never be reached.
+
+`StalkerEndpoints` now lists the addresses a portal may answer at, in cost order: the configured path
+(one request when it is right), then the same path without `/c/`, then `portal.php`, then the bare host,
+then the TLS variant. The first handshake doubles as discovery and the winning address is stored in
+`portal_endpoint`, so later launches and every later tune skip the search; `StalkerPortalTest` covers the
+nested-404 panel, the remembered address, and a portal that refuses in words.
+
+A portal that *does* answer with a refusal (an expired MAC, a connection limit) is now surfaced in its own
+words instead of as a bare HTTP code, because that text is the diagnosis.
