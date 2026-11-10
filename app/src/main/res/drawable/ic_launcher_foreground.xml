@@ -1,5 +1,5 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- The mark fills the 108dp canvas: its own crimson corners tuck under the launcher mask, so any
-         mask shape — circle, squircle, rounded square — shows the white ribbon on crimson. -->
+    <!-- 108dp canvas, 72dp safe zone: the tile keeps a margin on every side so its own rounded corners
+         stay visible under the launcher mask. -->
     <item android:drawable="@drawable/streamr_icon_fg"/>
 </layer-list>

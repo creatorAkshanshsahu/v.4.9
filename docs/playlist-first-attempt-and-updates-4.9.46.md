@@ -1806,3 +1806,21 @@ The v3 accent `#C4161C` is right for fills and pills, but as small uppercase typ
 artwork — the home eyebrow, "NOW PLAYING" in the player, the MOVIE/SERIES tag on a poster — it sat too
 close to the ground to read. Those labels now use `#E0243A`, the bright end of the same brand gradient;
 fills, focus rings, progress and the profile dot keep the primary crimson. One identity, two stops.
+
+## 77. The logo the device was never showing (5.4.21)
+
+"I wanted this as my app logo."
+
+The brand files were in place in 5.4.19 and the icon still looked wrong on the device, for two reasons:
+
+* **A shadowed resource.** `drawable-nodpi/ic_launcher_foreground.png` — the old "AK" wordmark — sat beside
+  `drawable/ic_launcher_foreground.xml`. Android does not merge those; it prefers the density-qualified
+  file, so the launcher foreground stayed the old art and the crimson tile layer was never drawn. The PNG is
+  deleted, and `ResourceShadowingTest` now fails the build if any drawable name is defined in two folders.
+* **The TV banner.** The Android TV home screen shows `android:banner`, not the icon, and that banner was
+  still the amber *STREAMR* lockup from before the rebuild. `banner_img.png` is re-rendered at 640×360 from
+  the supplied tile and Sora Bold: crimson mark, `#C4161C → #E5383B` wordmark, on the v3 ground.
+* **The icon keeps its shape.** The adaptive foreground is now the tile inside the 72dp safe zone on the
+  `night` ground instead of a full-bleed copy, so a circular, squircle or rounded-square launcher mask all
+  show the complete crimson rounded square with its white ribbon — the supplied file, uncropped.
+* Nine unused AK-era bitmaps (marks, launcher art, intro and logo plates, ~1.2 MB) are gone from the APK.
