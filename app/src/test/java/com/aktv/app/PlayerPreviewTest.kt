@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -83,11 +82,9 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
-            // The same crimson glass the player paints in production (surface into ground, brand hairline).
-            card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF01B1E26.toInt(), 0xE00F1117.toInt())).apply {
-                cornerRadius = 16f; setStroke(1, 0x59C4161C)
-            }
+            // Production floats the channel text straight on the picture — no panel, no border, no card.
+            // The preview paints exactly that, so the render cannot promise a box the app never draws.
+            card.background = null
             layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.streamr_mark)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
             layer.findViewById<TextView>(R.id.infoName).text = "AK Sport HD"
