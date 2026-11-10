@@ -1096,11 +1096,13 @@ class MainActivity : AppCompatActivity() {
                         logo = if (c.logo.startsWith("/")) account.origin + c.logo else c.logo,
                         portal = true, cmd = c.cmd
                     )
-                }
+                }.filter { PortalLanguages.keeps(it.name, it.category) }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     portalInFlight = false; portalLoaded = true
                     portalGenres = genres
+                    // An empty shelf must say why: every genre the filter saw was a regional one.
+                    portalMsg = if (channels.isEmpty()) "maxTV lists no English or Hindi channels." else portalMsg
                     applyPortal(channels)
                 }
             } catch (e: Exception) {
@@ -3209,7 +3211,7 @@ class MainActivity : AppCompatActivity() {
             .sortedWith(compareBy({ score(it) }, { it.v2 }, { it.name.lowercase() })).take(120)
     }
     private var movieResults = listOf<Tile>(); private var movieSearchToken = 0; private var movieSearching = false
-    private var searchScope = 0   // tab the search was opened from: 0/1 = channels, 2 = movies, 3 = series
+    private var searchScope = SearchScope.CHANNELS   // what the search looks in, from SearchScope.of(tab)
     private val movieRow = Row("Results", emptyList())
     private val movieSearchAdapter by lazy { TileAdapter(movieRow) }
     private val movieSearchList by lazy {
@@ -3225,7 +3227,7 @@ class MainActivity : AppCompatActivity() {
     private val movieSearchRunnable = Runnable {
         val q = searchBuf.toString().trim(); val tok = ++movieSearchToken
         Thread {
-            val only = if (searchScope == 3) "series" else "movie"
+            val only = if (searchScope == SearchScope.SERIES) "series" else "movie"
             val r = try { Movies.search(q, only).filter { it.type == only && it.poster.isNotEmpty() }.distinctBy { it.imdb }.take(40) } catch (_: Exception) { emptyList() }
             runOnUiThread {
                 if (tok != movieSearchToken || !searchShown) return@runOnUiThread
@@ -3239,15 +3241,19 @@ class MainActivity : AppCompatActivity() {
     }
     private fun renderCounts(q: String) {
         val m = movieResults.size
-        val vod = searchScope >= 2; val kind = if (searchScope == 3) "series" else "movies"
+        val vod = SearchScope.isVod(searchScope); val kind = if (searchScope == SearchScope.SERIES) "series" else "movies"
         searchCount.text = when {
             vod && q.isEmpty() -> "Search $kind"
-            vod -> "$m " + (if (searchScope == 3) "series" else if (m == 1) "movie" else "movies")
+            vod -> "$m " + (if (searchScope == SearchScope.SERIES) "series" else if (m == 1) "movie" else "movies")
             q.isEmpty() -> "Search ${all.size + allV2.size} channels"
             else -> "${results.size} channel" + (if (results.size == 1) "" else "s")
         }
         searchEmpty.text = when {
-            q.isEmpty() -> when (searchScope) { 2 -> "Type a movie name, like Inception or Dangal."; 3 -> "Type a series name, like Friends or Money Heist."; else -> "Type a channel name, like Star Sports or Sony." }
+            q.isEmpty() -> when (searchScope) {
+                SearchScope.MOVIES -> "Type a movie name, like Inception or Dangal."
+                SearchScope.SERIES -> "Type a series name, like Friends or Money Heist."
+                else -> "Type a channel name, like Star Sports or Sony."
+            }
             vod && m == 0 -> if (movieSearching) "Searching for \"$q\"…" else "Nothing matches \"$q\"."
             !vod && results.isEmpty() -> "Nothing matches \"$q\"."
             else -> ""
@@ -3259,7 +3265,7 @@ class MainActivity : AppCompatActivity() {
         ui.removeCallbacks(movieSearchRunnable); movieSearchToken++
         movieResults = emptyList(); movieRow.tiles = movieResults; movieSearchAdapter.notifyDataSetChanged()
         movieSearchList.visibility = View.GONE
-        val vod = searchScope >= 2
+        val vod = SearchScope.isVod(searchScope)
         movieSearching = vod && q0.length >= 2
         if (movieSearching) ui.postDelayed(movieSearchRunnable, 350)
         val q = q0
@@ -3472,7 +3478,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun openSearch() {
         if (searchShown || layer.visibility == View.VISIBLE || intro.visibility == View.VISIBLE) return
-        searchShown = true; searchScope = tab; searchBuf.setLength(0); renderQuery(); updateResults()
+        searchShown = true; searchScope = SearchScope.of(tab)
+        searchBuf.setLength(0); renderQuery(); updateResults()
         if (home.descendantFocusability != ViewGroup.FOCUS_BLOCK_DESCENDANTS) {
             lastHomeFocus = currentFocus; home.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         }

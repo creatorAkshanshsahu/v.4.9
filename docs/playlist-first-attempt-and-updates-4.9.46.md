@@ -1711,3 +1711,23 @@ megabytes.
 unchanged, and `StalkerPortal` asks for 24 MB (`MAX_CATALOGUE_BYTES`). The call timeout still bounds a
 wrong address that streams indefinitely, and the parsed result is held as compact `StalkerChannel` rows,
 so the document itself is released as soon as the list exists.
+
+## 72. The search follows its section, and maxTV keeps English and Hindi (5.4.16)
+
+Two reports, one cause each.
+
+*Search opened the wrong catalogue.* `openSearch()` did `searchScope = tab`, but the search's own numbering
+(0 channels, 2 movies, 3 series) is not the tab numbering (0 Live TV, 2 JioTV, 3 Movies, 4 Series,
+6 maxTV). So maxTV — tab 6 — was `>= 2` and searched movies, and Movies — tab 3 — was read as "series".
+The translation now lives in `SearchScope.of(tab)` and every `searchScope == 3` in the screen code
+compares against `SearchScope.SERIES`, so the two numberings cannot be confused again. `SearchScopeTest`
+pins the mapping.
+
+*maxTV carried every regional feed the subscription sells.* `PortalLanguages` keeps a channel when its name
+or genre carries an explicit English/Hindi marker, drops it when another language is named (Tamil, Telugu,
+Malayalam, Kannada, Marathi, Bengali, Punjabi, Gujarati, Bhojpuri, Urdu and the non-Indian list), and
+keeps a channel that names no language at all — sport, movies, news, knowledge — because those are the
+rows worth having. Matching is on whole words, so "Sun TV" is not caught by a substring. The filter runs
+between the catalogue and the rows, so the genre rows shrink to what is left, and a shelf that loses every
+channel says so ("maxTV lists no English or Hindi channels") instead of sitting on "Loading…".
+`PortalLanguagesTest` covers the keep/drop cases.

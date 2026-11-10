@@ -11,7 +11,7 @@ val updateStorePassword = providers.gradleProperty("aktvUpdateStorePassword").or
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 134; versionName = "5.4.15"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 135; versionName = "5.4.16"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
     }
     signingConfigs {
