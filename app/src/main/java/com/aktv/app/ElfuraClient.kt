@@ -23,7 +23,7 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Native client for the Elfura backend at `embed.theogpiratebot.online` (`/api/v1/*`).
+ * Native client for the Elfura backend at `embed.theogpiratebot.online` (`/api/v1/...`).
  *
  * The embed page (`/embed/movie/{id}` or `/embed/tv/{id}/{s}/{e}`) is a static UI shell; real playback
  * mints a short-lived session (`pltoken` + `nonce`) via `POST /api/v1/session` (or inline
