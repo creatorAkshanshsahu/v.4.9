@@ -13,6 +13,12 @@ internal object HeroRotation {
     /** Long enough to read a title, short enough that the screen feels alive. */
     const val PERIOD_MS = 7_000L
 
+    /**
+     * Whether a channel card may take the hero. Only on the channel sections — the home hero belongs to the
+     * films, so browsing the live rows there keeps the carousel turning instead of swapping in a channel.
+     */
+    fun channelHero(tab: Int): Boolean = tab != HOME
+
     /** The film after this one, wrapping at the end of the shelf. */
     fun next(spot: Int, size: Int): Int = if (size <= 0) 0 else (spot + 1) % size
 

@@ -32,6 +32,13 @@ class HeroRotationTest {
     }
 
     @Test
+    fun `only the channel sections give the hero to a channel`() {
+        assertFalse("home keeps the films", HeroRotation.channelHero(HeroRotation.HOME))
+        assertTrue(HeroRotation.channelHero(1))
+        assertTrue(HeroRotation.channelHero(6))
+    }
+
+    @Test
     fun `nothing turns over when the viewer is doing something`() {
         assertFalse("another section owns its own hero", allowed(tab = 2))
         assertFalse("one film is not a carousel", allowed(films = 1))

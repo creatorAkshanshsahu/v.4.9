@@ -1749,3 +1749,21 @@ channel says so ("maxTV lists no English or Hindi channels") instead of sitting 
 * `loadHomeTrending()` installs the films the moment they arrive: the shelf may already be painted on its
   fallback hero, and the cards still win if the viewer got there first.
 * `HeroRotationTest` pins the wrap, the pacing window and every condition that must stop it.
+
+## 74. The home hero is the films' own (5.4.18)
+
+"Hero should show trending movies, continue — don't focus hero on channels now."
+
+* The home hero no longer falls back to a live channel. `openingHeroTile()` returns a trending film or
+  nothing; while TMDB is still answering, home paints the brand treatment (the cinematic still, "STREAMR")
+  rather than borrowing a channel, and `loadHomeTrending()` swaps the first film in as soon as it lands.
+* `HeroRotation.channelHero(tab)` states the rule in one place: a channel card may take the hero on the
+  channel sections only, never on home. `setHero()` enforces it at the single choke point, so no row, card
+  or refresh path can slip a channel poster back in.
+* Focusing a channel card on home no longer touches the hero — it still warms the source and fetches the
+  programme guide for the card's own caption, but the hero keeps its film and the carousel keeps turning.
+* `browsingShelf` narrowed to what it was always meant to mean: a **film** card under the remote owns the
+  hero (`heroFilmFocus`, plus focus inside the rows). Focusing a chip, a live card or the tab bar no longer
+  pauses the rotation, so the seven-second turn is unbroken while the viewer moves through home.
+* `HeroRotationTest` adds the section rule (home false, Live/JioTV/maxTV true) alongside the wrap, pacing
+  and stop conditions.

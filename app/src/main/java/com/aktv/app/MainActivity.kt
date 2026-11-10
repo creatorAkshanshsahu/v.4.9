@@ -1399,11 +1399,19 @@ class MainActivity : AppCompatActivity() {
     private var heroSpot = 0
     private val heroRotate = Runnable { rotateHero() }
     private var heroCollapsed = false
+    // True while a film card holds the hero. A focused channel card does not: home keeps turning its films.
+    private var heroFilmFocus = false
+
+    /** The film card under the remote owns the hero; a channel card never does. */
+    private fun filmCardHoldsHero(): Boolean {
+        val f = currentFocus ?: return false
+        return heroFilmFocus && isInside(f, rowsView)
+    }
 
     private fun scheduleHeroRotation(reset: Boolean = false) {
         ui.removeCallbacks(heroRotate)
         if (reset) heroSpot = 0
-        if (HeroRotation.allowed(tab, trendingTitles.size, heroCollapsed, browsingShelf = false,
+        if (HeroRotation.allowed(tab, trendingTitles.size, heroCollapsed, browsingShelf = filmCardHoldsHero(),
                 playing = layer.visibility == View.VISIBLE, searching = searchShown)) {
             ui.postDelayed(heroRotate, HeroRotation.PERIOD_MS)
         }
@@ -1411,8 +1419,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun rotateHero() {
         if (isFinishing || isDestroyed) return
-        val focus = currentFocus
-        val browsing = focus != null && isInside(focus, rowsView)
+        val browsing = filmCardHoldsHero()
         if (!HeroRotation.allowed(tab, trendingTitles.size, heroCollapsed, browsing,
                 playing = layer.visibility == View.VISIBLE, searching = searchShown)) {
             // Browsing takes the hero over for as long as it lasts; keep the timer alive so it resumes.
@@ -1426,9 +1433,12 @@ class MainActivity : AppCompatActivity() {
         ui.postDelayed(heroRotate, HeroRotation.PERIOD_MS)
     }
 
-    /** A trending film on the home section, or the first channel tile when no films are known yet. */
+    /**
+     * A trending film on the home section, the first channel on the channel sections. Home never opens on a
+     * channel: until the films land it shows the brand treatment, then the first film replaces it.
+     */
     private fun openingHeroTile(): Tile? = when (tab) {
-        0 -> trendingTitles.firstOrNull()?.let { Tile.Mv(it) } ?: featuredChannels(all).firstOrNull()?.let { Tile.Ch(it) }
+        0 -> trendingTitles.firstOrNull()?.let { Tile.Mv(it) }
         1, 2, 6 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
         else -> rows.firstOrNull()?.tiles?.firstOrNull()
     }
@@ -1454,6 +1464,8 @@ class MainActivity : AppCompatActivity() {
         imageLoader.enqueue(ImageRequest.Builder(this).data(url).build())
     }
     private fun setHero(t: Tile?, immediate: Boolean = false) {
+        // Home keeps the films: no card, no row, no channel can put a channel on its hero.
+        if (t is Tile.Ch && !HeroRotation.channelHero(tab)) return
         heroTile = t; ui.removeCallbacks(heroRunnable)
         if (heroCollapsed && !immediate) return                 // hero is folded away: nothing to redraw while scrolling down
         if (immediate) fillHero(t) else ui.postDelayed(heroRunnable, 130)   // debounce fast scrolling
@@ -3998,7 +4010,8 @@ class MainActivity : AppCompatActivity() {
                     v.setOnFocusChangeListener { x, f ->
                         focusAnim(x, f)
                         if (f) {
-                            setHero(t)
+                            heroFilmFocus = false
+                            setHero(t)                          // ignored on home, which keeps its films
                             if (channelsTab) scheduleSourceWarmup(t.c)
                             fetchGuide(t.c) { guide ->
                                 if (nowCaption.tag == t.c.key) nowCaption.text = if (t.c.v2) "Always-on · no schedule feed" else guide?.now?.title ?: "Programme information unavailable"
@@ -4040,6 +4053,7 @@ class MainActivity : AppCompatActivity() {
                     v.setOnFocusChangeListener { x, f ->
                         focusAnim(x, f)
                         if (f) {
+                            heroFilmFocus = true
                             setHero(t)
                             val p = h.bindingAdapterPosition
                             for (d in 1..3) (row.tiles.getOrNull(p + d) as? Tile.Mv)?.let { prefetch(it.m.background) }
