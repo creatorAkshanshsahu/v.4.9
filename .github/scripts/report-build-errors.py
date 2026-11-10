@@ -19,8 +19,19 @@ if log.exists():
     for i, line in enumerate(lines):
         if markers.search(line):
             selected.update(range(max(0, i - 1), min(len(lines), i + 9)))
-    details = "\n".join(lines[i] for i in sorted(selected)) if selected else "\n".join(lines[-50:])
-    annotation("Android build failure", details)
+    # One annotation per compiler/error line: GitHub keeps the message of a single annotation, and a
+    # 12 kB blob of Gradle context loses the one line that says what is wrong.
+    reported = 0
+    for line in lines:
+        text = line.strip()
+        if reported >= 20:
+            break
+        if re.match(r"^e: ", text) or "error:" in text.lower():
+            annotation("Android build failure", text[:900])
+            reported += 1
+    if not reported:
+        details = "\n".join(lines[i] for i in sorted(selected)) if selected else "\n".join(lines[-50:])
+        annotation("Android build failure", details)
 
 for report in Path("app/build/test-results").glob("*/TEST-*.xml"):
     try:

@@ -30,10 +30,11 @@ internal class TgHttp(
      * The largest body this transport will read. Site player responses are small; a Stalker portal's
      * catalogue is not, because it lists every channel the subscription carries in one document.
      */
-    private val maxBodyBytes: Int = TgProtocol.MAX_BODY
+    maxBodyBytes: Int = TgProtocol.MAX_BODY
 ) : TgTransport {
+    private val limit: Int = maxBodyBytes
     private val client: OkHttpClient =
-        if (readTimeoutSeconds == 6L && callTimeoutSeconds == 12L && maxBodyBytes == TgProtocol.MAX_BODY) shared else
+        if (readTimeoutSeconds == 6L && callTimeoutSeconds == 12L && limit == TgProtocol.MAX_BODY) shared else
         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
             .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS).build()
 
@@ -52,7 +53,7 @@ internal class TgHttp(
                     checkInterrupted()
                     val count = input.read(buffer)
                     if (count < 0) break
-                    if (output.size() + count > maxBodyBytes) throw IOException("Player response too large")
+                    if (output.size() + count > limit) throw IOException("Player response too large")
                     output.write(buffer, 0, count)
                 }
                 output.toByteArray()
