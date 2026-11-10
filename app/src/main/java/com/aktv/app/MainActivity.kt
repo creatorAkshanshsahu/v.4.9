@@ -947,7 +947,16 @@ class MainActivity : AppCompatActivity() {
                 trendingFailed = loaded.isEmpty()
                 if (!isFinishing && !isDestroyed) {
                     if (loaded.isNotEmpty()) trendingTitles = loaded
-                    if (tab == 0) refreshRowsKeepFocus(requestFocus = false)
+                    if (tab == 0) {
+                        refreshRowsKeepFocus(requestFocus = false)
+                        // The shelf painted on a fallback hero; the films replace it as soon as they exist,
+                        // unless a card already owns the hero because the viewer is browsing.
+                        val focus = currentFocus
+                        if (loaded.isNotEmpty() && !heroCollapsed && (focus == null || !isInside(focus, rowsView))) {
+                            setHero(Tile.Mv(loaded.first()), immediate = true)
+                        }
+                        scheduleHeroRotation(reset = true)
+                    }
                 }
             }
         }
@@ -1339,11 +1348,8 @@ class MainActivity : AppCompatActivity() {
         setHeroCollapsed(false)
         inner.clear()
         rowAdapter.notifyDataSetChanged()
-        val first: Tile? = when (tab) {
-            0, 1, 2, 6 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
-            else -> rows.firstOrNull()?.tiles?.firstOrNull()
-        }
-        setHero(first, immediate = true)
+        setHero(openingHeroTile(), immediate = true)
+        scheduleHeroRotation(reset = true)
         updateStatus(); styleSegs()
     }
 
@@ -1375,6 +1381,7 @@ class MainActivity : AppCompatActivity() {
         if (t == 5 && tataJio.isEmpty()) loadTataChannels()
         if (t == 6 && !portalLoaded) loadPortalChannels()
         val dir = if (t > tab) 1 else -1
+        ui.removeCallbacks(heroRotate)
         tab = t; layoutHero(); styleSegs(); stopPreview()
         val shift = 28 * dp * dir
         rowsView.animate().cancel()
@@ -1387,7 +1394,44 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- hero ----------
     private val heroRunnable = Runnable { applyHero(heroTile) }
+
+    // Home turns its hero over through the trending shelf; the decision lives in HeroRotation.
+    private var heroSpot = 0
+    private val heroRotate = Runnable { rotateHero() }
     private var heroCollapsed = false
+
+    private fun scheduleHeroRotation(reset: Boolean = false) {
+        ui.removeCallbacks(heroRotate)
+        if (reset) heroSpot = 0
+        if (HeroRotation.allowed(tab, trendingTitles.size, heroCollapsed, browsingShelf = false,
+                playing = layer.visibility == View.VISIBLE, searching = searchShown)) {
+            ui.postDelayed(heroRotate, HeroRotation.PERIOD_MS)
+        }
+    }
+
+    private fun rotateHero() {
+        if (isFinishing || isDestroyed) return
+        val focus = currentFocus
+        val browsing = focus != null && isInside(focus, rowsView)
+        if (!HeroRotation.allowed(tab, trendingTitles.size, heroCollapsed, browsing,
+                playing = layer.visibility == View.VISIBLE, searching = searchShown)) {
+            // Browsing takes the hero over for as long as it lasts; keep the timer alive so it resumes.
+            if (!heroCollapsed && tab == HeroRotation.HOME && !searchShown && layer.visibility != View.VISIBLE) {
+                ui.postDelayed(heroRotate, HeroRotation.PERIOD_MS)
+            } else heroSpot = 0
+            return
+        }
+        heroSpot = HeroRotation.next(heroSpot, trendingTitles.size)
+        setHero(Tile.Mv(trendingTitles[heroSpot]))
+        ui.postDelayed(heroRotate, HeroRotation.PERIOD_MS)
+    }
+
+    /** A trending film on the home section, or the first channel tile when no films are known yet. */
+    private fun openingHeroTile(): Tile? = when (tab) {
+        0 -> trendingTitles.firstOrNull()?.let { Tile.Mv(it) } ?: featuredChannels(all).firstOrNull()?.let { Tile.Ch(it) }
+        1, 2, 6 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
+        else -> rows.firstOrNull()?.tiles?.firstOrNull()
+    }
     /** Folds the hero (preview + text) away once you go below the first row, and brings it back on the first row. */
     private fun setHeroCollapsed(c: Boolean) {
         if (c == heroCollapsed) return
@@ -1395,13 +1439,14 @@ class MainActivity : AppCompatActivity() {
         val media = findViewById<View>(R.id.heroMedia); val area = findViewById<View>(R.id.heroArea)
         media.animate().cancel(); area.animate().cancel()
         if (c) {
-            stopPreview(); ui.removeCallbacks(heroRunnable); ui.removeCallbacks(heroGuideRunnable)
+            stopPreview(); ui.removeCallbacks(heroRunnable); ui.removeCallbacks(heroGuideRunnable); ui.removeCallbacks(heroRotate)
             media.animate().alpha(0f).setDuration(140).start()
             area.animate().alpha(0f).setDuration(140).withEndAction { if (heroCollapsed) area.visibility = View.GONE }.start()
         } else {
             area.visibility = View.VISIBLE
             area.animate().alpha(1f).setDuration(220).start(); media.animate().alpha(1f).setDuration(220).start()
             fillHero(heroTile)
+            scheduleHeroRotation()
         }
     }
     private fun prefetch(url: String) {
@@ -1835,7 +1880,7 @@ class MainActivity : AppCompatActivity() {
         playerSession = true
         home.visibility = View.INVISIBLE
         heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
-        ui.removeCallbacks(heroRunnable); ui.removeCallbacks(heroGuideRunnable)
+        ui.removeCallbacks(heroRunnable); ui.removeCallbacks(heroGuideRunnable); ui.removeCallbacks(heroRotate)
         nativeSources = emptyList(); serverIdx = 0
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); layer.keepScreenOn = true
         if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
@@ -2945,7 +2990,7 @@ class MainActivity : AppCompatActivity() {
         home.post { if (layer.visibility != View.VISIBLE && !searchShown) {
             if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
         } }
-        if (channelsTab) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true) }
+        if (channelsTab) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true); scheduleHeroRotation() }
     }
 
     private fun shortOk() {
@@ -3142,6 +3187,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onStop() {
         if (crashScreen) { super.onStop(); return }
+        ui.removeCallbacks(heroRotate)
         abortChannelHealthScanForLifecycle()
         sourceMenu?.dismiss(); diagnosticsDialog?.dismiss()
         super.onStop(); ui.removeCallbacks(autoRefresh); stopPreview(); window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); endNativeSession(); playToken++; resolveJob?.cancel(true); releasePlayer(); nativeSources = emptyList(); layer.visibility = View.GONE; home.visibility = View.VISIBLE; ImmersiveUi.show(window); layer.keepScreenOn = false; resetGuide(); resetProgrammeGuide()
@@ -3479,6 +3525,7 @@ class MainActivity : AppCompatActivity() {
     private fun openSearch() {
         if (searchShown || layer.visibility == View.VISIBLE || intro.visibility == View.VISIBLE) return
         searchShown = true; searchScope = SearchScope.of(tab)
+        ui.removeCallbacks(heroRotate)
         searchBuf.setLength(0); renderQuery(); updateResults()
         if (home.descendantFocusability != ViewGroup.FOCUS_BLOCK_DESCENDANTS) {
             lastHomeFocus = currentFocus; home.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
@@ -3500,6 +3547,7 @@ class MainActivity : AppCompatActivity() {
             val back = lastHomeFocus; lastHomeFocus = null
             if (back?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) searchBtn.requestFocus()
         }
+        scheduleHeroRotation()
     }
     private fun searchKey(e: KeyEvent): Boolean {
         if (e.action != KeyEvent.ACTION_DOWN) return false

@@ -1731,3 +1731,21 @@ rows worth having. Matching is on whole words, so "Sun TV" is not caught by a su
 between the catalogue and the rows, so the genre rows shrink to what is left, and a shelf that loses every
 channel says so ("maxTV lists no English or Hindi channels") instead of sitting on "Loading…".
 `PortalLanguagesTest` covers the keep/drop cases.
+
+## 73. The home hero is a carousel of trending films (5.4.17)
+
+"Home screen hero to show trending movies and it should change in seconds like every other OTT app."
+
+* The home section now opens on the first film of the trending shelf (`openingHeroTile()`) instead of a live
+  channel, and falls back to the first channel tile only when no films are known yet — the fallback also
+  covers a failed TMDB lookup, so the screen is never empty.
+* `HeroRotation` turns it over: `next()` walks the shelf and wraps, `PERIOD_MS` is seven seconds — long
+  enough to read a title, short enough to feel alive — and `allowed()` states when the hero may move at
+  all. It may not on another section, with fewer than two films, while the hero is folded away, while the
+  player or the search screen is up, and **not while the viewer is browsing the shelf**: focusing a card
+  already sets the hero to that card, so rotation waits and resumes when the remote leaves the rows.
+* The timer is cancelled when the player opens, the search opens, a tab switches, the hero folds away or
+  the app stops, and re-armed on the way back (hero unfolded, search closed, player closed).
+* `loadHomeTrending()` installs the films the moment they arrive: the shelf may already be painted on its
+  fallback hero, and the cards still win if the viewer got there first.
+* `HeroRotationTest` pins the wrap, the pacing window and every condition that must stop it.
