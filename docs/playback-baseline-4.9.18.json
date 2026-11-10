@@ -174,6 +174,13 @@
       "from": "c3121f4ea4edcd7715e87961013eea32ba4859fa2159fc5604342e18290c2afa",
       "to": "c3121f4ea4edcd7715e87961013eea32ba4859fa2159fc5604342e18290c2afa",
       "unchanged": "Nothing else in the file changed in this release."
+    },
+    {
+      "change": "TgHttp gains an optional maxBodyBytes so a Stalker portal's catalogue (its whole subscription in one document) can be read; the default keeps the 4 MB player budget and the shared client for every existing caller.",
+      "file": "app/src/main/java/com/aktv/app/TgResolver.kt",
+      "from": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
+      "to": "03d030fe882168e6823eb2bba8e72e31c8d5e77f28c09e034658a61328b96009",
+      "unchanged": "Request building, headers, redirect/final-url reporting, the bounded body read and the default 5/6/12 s client are unchanged; only the ceiling became a parameter."
     }
   ],
   "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -193,7 +200,7 @@
     "app/src/main/java/com/aktv/app/Streams.kt": "3712561029181d7ca91ba3cd7f923638d73b998f150ebc3b6da8b214c5b370c2",
     "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
     "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
-    "app/src/main/java/com/aktv/app/TgResolver.kt": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
+    "app/src/main/java/com/aktv/app/TgResolver.kt": "03d030fe882168e6823eb2bba8e72e31c8d5e77f28c09e034658a61328b96009",
     "app/src/main/java/com/aktv/app/TgServers.kt": "7b85a473ef9f1da1717076b14c9df5523b84967ec54ce7e82fb102a46ea49274"
   },
   "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"

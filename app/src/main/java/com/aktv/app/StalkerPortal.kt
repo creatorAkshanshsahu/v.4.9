@@ -76,6 +76,13 @@ internal object StalkerEndpoints {
     }
 }
 
+/**
+ * A portal answers `get_all_channels` with its whole catalogue in one document - every channel, its
+ * command and its logo path. Four megabytes is a website player's budget, not a portal's: the first real
+ * catalogue this app asked for was refused with "Player response too large".
+ */
+internal const val STALKER_CATALOGUE_BYTES = 24 * 1024 * 1024
+
 /** The portal answered, but not with something this app can use. */
 class StalkerException(val status: Int? = null, val portalDetail: String = "") : IOException(
     when {
@@ -96,17 +103,17 @@ class StalkerException(val status: Int? = null, val portalDetail: String = "") :
  */
 internal class StalkerPortal(
     private val account: StalkerAccount = StalkerAccount.DEFAULT,
-    private val http: TgTransport = TgHttp(readTimeoutSeconds = 20, callTimeoutSeconds = 30, maxBodyBytes = MAX_CATALOGUE_BYTES),
+    private val http: TgTransport = TgHttp(
+        readTimeoutSeconds = 20,
+        callTimeoutSeconds = 30,
+        maxBodyBytes = STALKER_CATALOGUE_BYTES
+    ),
     /** An address that already answered for this portal, usually from the last launch. */
     knownEndpoint: String? = null
 ) {
     companion object {
-        /**
-         * A portal answers `get_all_channels` with its whole catalogue in one document - every channel,
-         * its command and its logo path. Four megabytes is a website's budget, not a portal's: the first
-         * real catalogue this app asked for was refused with "Player response too large".
-         */
-        const val MAX_CATALOGUE_BYTES = 24 * 1024 * 1024
+        /** The ceiling the portal transport is built with, exposed so a test can pin it. */
+        const val MAX_CATALOGUE_BYTES = STALKER_CATALOGUE_BYTES
     }
 
     private var token: String? = null
