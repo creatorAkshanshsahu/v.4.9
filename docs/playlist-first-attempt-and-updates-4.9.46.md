@@ -1824,3 +1824,28 @@ The brand files were in place in 5.4.19 and the icon still looked wrong on the d
   `night` ground instead of a full-bleed copy, so a circular, squircle or rounded-square launcher mask all
   show the complete crimson rounded square with its white ribbon — the supplied file, uncropped.
 * Nine unused AK-era bitmaps (marks, launcher art, intro and logo plates, ~1.2 MB) are gone from the APK.
+
+## 78. TG TV: a plain M3U playlist gets its own section (5.4.22)
+
+"`https://livetgtv.lovable.app/api/public/playlist.m3u` — this one live TV section, not in the JioTV section."
+
+* **Its own tab.** `tabIds` is now `[0, 2, 6, 7, 3, 4]` — Live TV, JioTV, maxTV, **TG TV**, Movies, Series — with a
+  `segTag` pill in the nav (and a `phoneTag` pill on phones). Tab 7 is in `channelsTab`, so it is a channel
+  section for search, favourites, recents, the guide and the hero, and `vodTab` never sees it.
+* **One fetch, no resolver.** `loadPlaylistChannels()` pulls the file the first time the tab opens — never at
+  launch — and `M3uPlaylist` turns it into channels in one pass. Nothing is exchanged at tune time: a playlist
+  entry already carries its address, so `playPlaylistChannel()` hands `playlistStream(url)` straight to the
+  native player (hls by default, dash/mp4 by extension, player user agent, no Origin, no Referer).
+* **The parser is the feature.** `M3uPlaylist` reads quoted `#EXTINF` attributes, the display name after the
+  **last** quoted attribute (so `group-title="Movies, Classic"` cannot eat the name), `#EXTGRP` as a fallback
+  group, and the first non-`#` line as the address. Player hints (`#EXTVLCOPT`, `#KODIPROP`, `#EXT-X-…`) are
+  skipped. Entries with no address, a scheme the native player cannot open (rtmp/udp) or a repeated address are
+  dropped, ids are derived from the address so a favourite survives a reload, and the file is capped at 16 MB /
+  6000 entries.
+* **Rows that stay browsable.** `sections()` orders groups biggest first, then alphabetically, keeps 24 rows and
+  at most 200 tiles per row — a 1200-channel file cannot collapse into one endless rail.
+* **No provider machinery.** These channels are excluded from `scheduleSourceWarmup`, `fetchGuide` and the
+  provider order, so a playlist URL can never be handed to the TG resolver — the same rule the portal section
+  follows. The player says "TG TV playlist · programme schedule unavailable" instead of waiting for a guide.
+* `M3uPlaylistTest` pins the attribute/name split, the `#EXTGRP` fallback, the three drop rules, the empty-file
+  case, the id derivation and the row caps.

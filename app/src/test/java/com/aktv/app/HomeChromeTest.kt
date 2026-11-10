@@ -51,7 +51,7 @@ class HomeChromeTest {
         assertEquals("search is a round glyph button", search.width, search.height)
         assertEquals("", search.text.toString())
         assertEquals("the profile chip is round", 38, root.findViewById<View>(R.id.profileAvatar).height)
-        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segTag, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
             assertEquals("$id must lead down into the rows", R.id.rows, view.nextFocusDownId)

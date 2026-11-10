@@ -85,13 +85,13 @@ class HomePreviewTest {
                     background = Ui.pill(1f, if (index == 0) Color.WHITE else 0x33FFFFFF, 22f)
                 }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 12 })
             }
-            for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+            for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segTag, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
                 view.background = Ui.pill(1f, if (selected) Accent.TEXT else Color.TRANSPARENT, 18f)
                 view.setTextColor(if (selected) Accent.ABYSS else Accent.DIM)
             }
-            for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
+            for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phoneTag, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
                 view.background = Ui.pill(1f, if (selected) Accent.TEXT else 0x33FFFFFF, 22f).apply {
