@@ -79,6 +79,13 @@ class StalkerPortalTest {
     }
 
     @Test
+    fun `a portal catalogue is allowed a bigger body than a website player response`() {
+        // get_all_channels is the whole subscription in one document; the 4 MB player budget refused it.
+        assertTrue("portal budget ${StalkerPortal.MAX_CATALOGUE_BYTES} vs player ${TgProtocol.MAX_BODY}",
+            StalkerPortal.MAX_CATALOGUE_BYTES > TgProtocol.MAX_BODY)
+    }
+
+    @Test
     fun `create_link turns a channel handle into a playable url`() {
         val http = FakeHttp { url ->
             when {

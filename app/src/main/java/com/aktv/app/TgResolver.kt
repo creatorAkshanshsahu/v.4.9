@@ -25,9 +25,15 @@ internal fun interface TgTransport { fun get(url: String, headers: Map<String, S
 internal class TgHttp(
     /** A playlist on a slow TV link needs far longer than a channel lookup, so the caller sets this. */
     readTimeoutSeconds: Long = 6,
-    callTimeoutSeconds: Long = 12
+    callTimeoutSeconds: Long = 12,
+    /**
+     * The largest body this transport will read. Site player responses are small; a Stalker portal's
+     * catalogue is not, because it lists every channel the subscription carries in one document.
+     */
+    private val maxBodyBytes: Int = TgProtocol.MAX_BODY
 ) : TgTransport {
-    private val client: OkHttpClient = if (readTimeoutSeconds == 6L && callTimeoutSeconds == 12L) shared else
+    private val client: OkHttpClient =
+        if (readTimeoutSeconds == 6L && callTimeoutSeconds == 12L && maxBodyBytes == TgProtocol.MAX_BODY) shared else
         OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
             .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS).build()
 
@@ -46,7 +52,7 @@ internal class TgHttp(
                     checkInterrupted()
                     val count = input.read(buffer)
                     if (count < 0) break
-                    if (output.size() + count > TgProtocol.MAX_BODY) throw IOException("Player response too large")
+                    if (output.size() + count > maxBodyBytes) throw IOException("Player response too large")
                     output.write(buffer, 0, count)
                 }
                 output.toByteArray()

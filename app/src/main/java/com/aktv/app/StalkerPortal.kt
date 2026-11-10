@@ -96,10 +96,19 @@ class StalkerException(val status: Int? = null, val portalDetail: String = "") :
  */
 internal class StalkerPortal(
     private val account: StalkerAccount = StalkerAccount.DEFAULT,
-    private val http: TgTransport = TgHttp(readTimeoutSeconds = 20, callTimeoutSeconds = 30),
+    private val http: TgTransport = TgHttp(readTimeoutSeconds = 20, callTimeoutSeconds = 30, maxBodyBytes = MAX_CATALOGUE_BYTES),
     /** An address that already answered for this portal, usually from the last launch. */
     knownEndpoint: String? = null
 ) {
+    companion object {
+        /**
+         * A portal answers `get_all_channels` with its whole catalogue in one document - every channel,
+         * its command and its logo path. Four megabytes is a website's budget, not a portal's: the first
+         * real catalogue this app asked for was refused with "Player response too large".
+         */
+        const val MAX_CATALOGUE_BYTES = 24 * 1024 * 1024
+    }
+
     private var token: String? = null
     private var profiled = false
     private var endpoint: String? = knownEndpoint?.takeIf { it.startsWith("http") }

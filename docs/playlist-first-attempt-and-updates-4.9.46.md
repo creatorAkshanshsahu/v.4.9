@@ -1698,3 +1698,16 @@ nested-404 panel, the remembered address, and a portal that refuses in words.
 
 A portal that *does* answer with a refusal (an expired MAC, a connection limit) is now surfaced in its own
 words instead of as a bare HTTP code, because that text is the diagnosis.
+
+## 71. A portal's catalogue is bigger than a player response (5.4.15)
+
+With the API address fixed the section answered `maxTV didn't load (Player response too large)` - the
+transport refusing the body. That message is `TgHttp`'s, and its 4 MB ceiling (`TgProtocol.MAX_BODY`) is a
+*website player response* budget. `get_all_channels` is not that: a portal sends its whole catalogue -
+every channel, its `cmd` and its logo path - as one document, which for a real subscription runs to many
+megabytes.
+
+`TgHttp` now takes the ceiling as a parameter, defaulting to the old value so every existing caller is
+unchanged, and `StalkerPortal` asks for 24 MB (`MAX_CATALOGUE_BYTES`). The call timeout still bounds a
+wrong address that streams indefinitely, and the parsed result is held as compact `StalkerChannel` rows,
+so the document itself is released as soon as the list exists.
