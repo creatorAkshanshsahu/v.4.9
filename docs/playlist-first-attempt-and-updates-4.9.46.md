@@ -1651,3 +1651,33 @@ The live player also loses its stacked channel-up/channel-down chevrons (`zapCol
 `ic_chevron_up`, `ic_chevron_down`). They duplicated controls the remote already has — UP/DOWN on the live
 screen changes channel — and they were drawn with the same off-centre compound-drawable fault. The hidden
 key hint no longer advertises them either.
+
+## 69. A maxTV section, fed by a Stalker portal (5.4.13)
+
+The viewer supplied a portal address with a device identity (`http://new.maxtv.be/stalker_portal/c/`,
+MAC `00:1A:79:EE:03:9F`, serial and device id) and asked for it as a new section whose channels play. A
+portal is not a playlist: it never publishes a URL. Instead a MAG box handshakes for a token, ties the
+token to the device with `get_profile`, reads the catalogue with `get_all_channels`, and only when a
+channel is opened does it trade that channel's handle for a short-lived link with `create_link`.
+
+* `StalkerProtocol` is the wire format, Android-free and network-free: `{"js": …}` envelopes (a few portals
+  still wrap them in a JSONP comment), `js.data` channel rows, bare or wrapped genre arrays, the
+  `not_valid` / "Authorization failed." expiry signal, and the `ffmpeg ` prefix plus Kodi-style `|`
+  parameters cut off a playable URL. `StalkerProtocolTest` pins each shape.
+* `StalkerPortal` reproduces the box's conversation over the existing `TgTransport`: MAG200 User-Agent,
+  `X-User-Agent: Model: MAG254; Link: WiFi`, `Cookie: mac=…; stb_lang=en; timezone=…`, `Referer` into
+  `/c/`, and `Bearer` on every catalogue call. An expired token is renewed exactly once and the call is
+  repeated, so a section left open overnight does not become a dead list (`StalkerPortalTest`).
+* `StalkerAccount` reads the address, MAC, serial and device id from preferences, with the supplied set as
+  the default: the section can be repointed or re-issued without a new APK.
+* The section is the fifth pill (`maxTV`), tab id 6, fetched the first time it opens exactly like the
+  playlist section: no portal traffic at launch. Rows are featured channels, favourites, recent, then one
+  row per genre the portal names.
+* Playback reuses the one native player. `resolveAndStart` sends a portal channel to
+  `resolvePortalChannel`, which asks `create_link` off the main thread and hands the resulting URL to
+  `startNative` as a single source: HLS unless the link says `.mpd`, MAG User-Agent, and neither `Origin`
+  nor `Referer` sent to the CDN. The provider machinery is deliberately left empty for these channels -
+  there is no second site provider to fall back to, only a fresh link - so `advanceNative` fails with the
+  portal's own words instead of trying TG, and the guide is skipped because no schedule is published.
+* The live player's channel drawer follows the playing section, so the guide beside a portal channel lists
+  portal channels instead of the site's.

@@ -60,6 +60,7 @@
                     android:contentDescription="STREAMR"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
                 <TextView android:id="@+id/phoneJio" style="@style/Widget.AKTV.PhonePill" android:text="JioTV"/>
+                <TextView android:id="@+id/phonePortal" style="@style/Widget.AKTV.PhonePill" android:text="maxTV"/>
                 <TextView android:id="@+id/phoneMovies" style="@style/Widget.AKTV.PhonePill" android:text="Movies"/>
                 <TextView android:id="@+id/phoneSeries" style="@style/Widget.AKTV.PhonePill" android:text="Series"/>
                 <TextView android:id="@+id/phoneSearch" style="@style/Widget.AKTV.PhonePill" android:text="Search"/>
@@ -120,9 +121,11 @@
             <TextView android:id="@+id/segLive" style="@style/Widget.STREAMR.Pill" android:text="Live TV"
                 android:nextFocusDown="@id/rows" android:nextFocusRight="@id/segJio"/>
             <TextView android:id="@+id/segJio" style="@style/Widget.STREAMR.Pill" android:text="JioTV"
-                android:nextFocusLeft="@id/segLive" android:nextFocusRight="@id/segSites" android:nextFocusDown="@id/rows"/>
+                android:nextFocusLeft="@id/segLive" android:nextFocusRight="@id/segPortal" android:nextFocusDown="@id/rows"/>
+            <TextView android:id="@+id/segPortal" style="@style/Widget.STREAMR.Pill" android:text="maxTV"
+                android:nextFocusLeft="@id/segJio" android:nextFocusRight="@id/segSites" android:nextFocusDown="@id/rows"/>
             <TextView android:id="@+id/segSites" style="@style/Widget.STREAMR.Pill" android:text="Movies"
-                android:nextFocusLeft="@id/segJio" android:nextFocusRight="@id/segSeries" android:nextFocusDown="@id/rows"/>
+                android:nextFocusLeft="@id/segPortal" android:nextFocusRight="@id/segSeries" android:nextFocusDown="@id/rows"/>
             <TextView android:id="@+id/segSeries" style="@style/Widget.STREAMR.Pill" android:text="Series"
                 android:nextFocusLeft="@id/segSites" android:nextFocusRight="@id/searchBtn" android:nextFocusDown="@id/rows"/>
         </LinearLayout>

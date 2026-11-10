@@ -69,9 +69,13 @@ class MainActivity : AppCompatActivity() {
         val pinned: Boolean = false,
         // The site's own player page for this channel (the Sony section's slugs). When the playlist has
         // no stream for the tile, this page plays it inside the app instead of leaving the tile silent.
-        val page: String? = null
+        val page: String? = null,
+        // A Stalker portal channel: [cmd] is the handle the portal trades for a playable URL on every
+        // tune. It has no site provider, no playlist entry and no guide.
+        val portal: Boolean = false,
+        val cmd: String = ""
     ) {
-        val key: String get() = if (v2) "v2:$id" else if (jio) "jio:$id" else id
+        val key: String get() = if (v2) "v2:$id" else if (jio) "jio:$id" else if (portal) "st:$id" else id
         /** A channel the playlist does not carry at all: only its own page can play it. */
         val pageOnly: Boolean get() = page != null && !jio && !v2
     }
@@ -125,6 +129,9 @@ class MainActivity : AppCompatActivity() {
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
+    // maxTV: the Stalker portal section. Fetched the first time the tab opens, like the playlist.
+    private var allPortal = listOf<Channel>(); private var portalLoaded = false; private var portalInFlight = false
+    private var portalMsg = "Loading maxTV channels…"; private var portalGenres = mapOf<String, String>()
     /** The site's second list (its "tata" playlist): its own section, played by the same native resolver. */
     private var tataJio = listOf<Channel>()
     private var tataMsg = "Loading TATA channels…"
@@ -235,12 +242,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var rowsView: RecyclerView; private lateinit var status: TextView
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
-    private lateinit var segLive: TextView; private lateinit var segJio: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
-    // TV top bar: Live TV, Always on, JioTV, Movies, Series
+    private lateinit var segLive: TextView; private lateinit var segJio: TextView; private lateinit var segPortal: TextView
+    private lateinit var segSites: TextView; private lateinit var segSeries: TextView
+    // TV top bar: Live TV, JioTV, maxTV, Movies, Series
     /** Visible sections in top-bar order. Internal tab ids are unchanged, so the screen code below is untouched. */
-    private val tabIds = intArrayOf(0, 2, 3, 4)
+    private val tabIds = intArrayOf(0, 2, 6, 3, 4)
     private fun posOf(tabId: Int) = tabIds.indexOf(tabId).takeIf { it >= 0 } ?: 0
-    private val segs by lazy { listOf(segLive, segJio, segSites, segSeries) }
+    private val segs by lazy { listOf(segLive, segJio, segPortal, segSites, segSeries) }
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
     private val segBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
     private val phoneSegBgs by lazy { List(6) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
@@ -330,9 +338,10 @@ class MainActivity : AppCompatActivity() {
         loadChannelPlaybackResults()
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
-        segLive = findViewById(R.id.segLive); segJio = findViewById(R.id.segJio); segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
+        segLive = findViewById(R.id.segLive); segJio = findViewById(R.id.segJio); segPortal = findViewById(R.id.segPortal)
+        segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries)
         searchBtn = findViewById(R.id.searchBtn)
-        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
+        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
         heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
@@ -395,7 +404,6 @@ class MainActivity : AppCompatActivity() {
         // Use selective translucent panels, not blur/backdrop filters; this stays cheap on 32-bit TVs.
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
-        findViewById<TextView>(R.id.segJio).background = segBgs[2]
         heroOrb.background = orbBg
         // Nothing sits behind the channel block: the site floats its now-playing text straight on the
         // picture, and the scrim underneath is what keeps it readable. No panel, no border, no elevation.
@@ -707,7 +715,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Tabs that show a channel list; 3 and 4 are the VOD shelves. Never index vodRows with anything else. */
-    private val channelsTab get() = tab <= 2 || tab == 5
+    private val channelsTab get() = tab <= 2 || tab == 5 || tab == 6
     private val vodTab get() = tab == 3 || tab == 4
     private fun vodRowsFor(t: Int) = if (t == 3 || t == 4) vodRows[t - 3] else emptyList<Row>()
 
@@ -767,19 +775,19 @@ class MainActivity : AppCompatActivity() {
         phoneSearchBtn.contentDescription = when (tab) { 3 -> "Search movies"; 4 -> "Search series"; else -> "Search channels" }
         navStyle(phoneSearchBtn, phoneSegBgs[5], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
-            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; else -> "Live TV"
+            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; 6 -> "maxTV"; else -> "Live TV"
         }
         findViewById<TextView>(R.id.sectionKicker).apply {
             text = when (tab) {
                 0 -> "LIVE, RIGHT NOW"
                 1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · NATIVE CLEARKEY"
-                3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"
+                3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"; 6 -> "MAXTV PORTAL · NATIVE PLAYBACK"
                 else -> "TATA PLAYLIST · NATIVE CLEARKEY"
             }
             setTextColor(sectionAccent())
         }
         val count = when (tab) {
-            0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; 5 -> tataJio.size
+            0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; 5 -> tataJio.size; 6 -> allPortal.size
             else -> vodRowsFor(tab).sumOf { it.tiles.size }
         }
         findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (channelsTab) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
@@ -917,6 +925,7 @@ class MainActivity : AppCompatActivity() {
         val msg = when { tab == 0 && all.isEmpty() -> v1Msg; tab == 1 && allV2.isEmpty() -> "Loading 24/7 channels…"
             tab == 2 && allJio.isEmpty() -> jioMsg
             tab == 5 && tataJio.isEmpty() -> tataMsg
+            tab == 6 && allPortal.isEmpty() -> portalMsg
             vodTab && vodRowsFor(tab).isEmpty() -> {
                 val idx = tab - 3; val w = if (tab == 4) "series" else "movies"
                 if (vodLoading[idx]) "Loading $w…"
@@ -975,7 +984,7 @@ class MainActivity : AppCompatActivity() {
         // stutter on open and die when the JioTV tab was finally opened. It now loads when that tab is opened.
     }
 
-    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; else -> all }
+    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; 6 -> allPortal; else -> all }
 
     /** Loads the JioTV m3u8 playlist and builds a channel catalogue from it. */
     /**
@@ -1061,6 +1070,82 @@ class MainActivity : AppCompatActivity() {
         return out
     }
 
+    /**
+     * The maxTV section: a Stalker portal rather than a playlist, so its channels have no fixed URL. The
+     * list is read the first time the tab opens, and each channel is exchanged for a fresh link on every
+     * tune (`create_link`), because a portal link is short-lived.
+     */
+    private fun loadPortalChannels() {
+        if (portalLoaded || portalInFlight) return
+        portalInFlight = true
+        portalMsg = "Loading maxTV channels…"
+        if (tab == 6) updateStatus()
+        submit(io) {
+            try {
+                val account = stalkerAccount()
+                val portal = StalkerPortal(account)
+                val listed = portal.channels()
+                val genres = runCatching { portal.genres() }.getOrDefault(emptyMap())
+                val channels = listed.map { c ->
+                    Channel(
+                        id = c.id, name = c.name,
+                        category = genres[c.genre]?.takeIf { it.isNotBlank() } ?: "maxTV",
+                        // The portal publishes logo paths relative to its own host.
+                        logo = if (c.logo.startsWith("/")) account.origin + c.logo else c.logo,
+                        portal = true, cmd = c.cmd
+                    )
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    portalInFlight = false; portalLoaded = true
+                    portalGenres = genres
+                    applyPortal(channels)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    portalInFlight = false; portalLoaded = false
+                    if (allPortal.isEmpty()) {
+                        portalMsg = "maxTV didn't load (${portalReason(e)}). Select this tab again to retry."
+                        if (tab == 6) updateStatus()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyPortal(list: List<Channel>) {
+        if (list == allPortal) return
+        allPortal = list; seedAccents(list); updateStatus()
+        if (tab == 6) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
+        if (searchShown) updateResults()
+    }
+
+    /** The portal section: featured channels first, then one row per genre the portal names. */
+    private fun portalRows(channels: List<Channel>): List<Row> = buildList {
+        if (channels.isNotEmpty()) add(Row("maxTV · Featured", featuredChannels(channels).map { Tile.Ch(it) }))
+        add(Row(FAV, favTiles()))
+        addAll(recentRow())
+        addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+    }
+
+    /** The portal address and device identity, with the viewer's own values overriding the shipped defaults. */
+    private fun stalkerAccount(): StalkerAccount {
+        fun stored(key: String, fallback: String) = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
+        return StalkerAccount(
+            portal = stored("portal_url", StalkerAccount.DEFAULT_PORTAL),
+            mac = stored("portal_mac", StalkerAccount.DEFAULT_MAC),
+            serial = stored("portal_serial", StalkerAccount.DEFAULT_SERIAL),
+            deviceId = stored("portal_device", StalkerAccount.DEFAULT_DEVICE)
+        )
+    }
+
+    /** A portal failure in the viewer's words: the portal's own refusal when it gave one. */
+    private fun portalReason(error: Throwable): String = when (error) {
+        is StalkerException -> error.portalDetail.ifBlank { error.status?.let { "HTTP $it" } ?: "no answer" }
+        else -> why(error)
+    }
+
     private fun applyJio(list: List<Channel>, fromCache: Boolean = false) {
         if (!fromCache) { jioCatalogLoaded = true; jioInFlight = false }
         if (list == allJio) return
@@ -1073,7 +1158,7 @@ class MainActivity : AppCompatActivity() {
     }
     /** The channel behind a stored key: the tab's own list first, then every list the app can hold. */
     private fun channelFor(key: String): Channel? =
-        (pool() + allJio + tataJio + allV2).firstOrNull { it.key == key }
+        (pool() + allJio + tataJio + allV2 + allPortal).firstOrNull { it.key == key }
 
     private fun favTiles(): List<Tile> {
         val l = favs.mapNotNull { channelFor(it) }.map { Tile.Ch(it) }
@@ -1233,13 +1318,14 @@ class MainActivity : AppCompatActivity() {
             1 -> liveRows(allV2, alwaysOn = true)
             2 -> jioRows(allJio)
             5 -> tataRows(tataJio)
+            6 -> portalRows(allPortal)
             else -> { loadVod(tab); continueRow() + vodRowsFor(tab) }
         }
         setHeroCollapsed(false)
         inner.clear()
         rowAdapter.notifyDataSetChanged()
         val first: Tile? = when (tab) {
-            0, 1, 2 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
+            0, 1, 2, 6 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
             else -> rows.firstOrNull()?.tiles?.firstOrNull()
         }
         setHero(first, immediate = true)
@@ -1265,12 +1351,14 @@ class MainActivity : AppCompatActivity() {
             // A section that failed while loading is retried by selecting it again.
             if (t == 2 && !jioCatalogLoaded && !jioInFlight) { jioRetried = false; loadJioChannels() }
             if (t == 5 && tataJio.isEmpty() && !tataLoaded) loadTataChannels()
+            if (t == 6 && !portalLoaded) loadPortalChannels()
             return
         }
         // A list is fetched the first time its section is opened, never at launch: one section cannot slow
         // the shelf down or starve the box's memory for the others.
         if (t == 2 && !jioCatalogLoaded) loadJioChannels()
         if (t == 5 && tataJio.isEmpty()) loadTataChannels()
+        if (t == 6 && !portalLoaded) loadPortalChannels()
         val dir = if (t > tab) 1 else -1
         tab = t; layoutHero(); styleSegs(); stopPreview()
         val shift = 28 * dp * dir
@@ -1460,7 +1548,7 @@ class MainActivity : AppCompatActivity() {
     private fun guideHasSchedule(g: Guide?) = g != null && (g.now != null || g.next != null || g.upcoming.isNotEmpty())
 
     private fun fetchGuide(c: Channel, cb: (Guide?) -> Unit) {
-        if (c.v2 || c.page != null) { cb(null); return }
+        if (c.v2 || c.page != null || c.portal) { cb(null); return }
         Epg.cached(c.id)?.let { cb(it); return }
         val leader = synchronized(guideWaiters) {
             val existing = guideWaiters[c.id]
@@ -1571,6 +1659,7 @@ class MainActivity : AppCompatActivity() {
         infoNow.visibility = View.GONE; infoProgressRow.visibility = View.GONE; infoDesc.visibility = View.GONE
         infoScheduleNext.visibility = View.GONE; infoNext.visibility = View.GONE
         if (ch.v2) { infoNow.text = "24/7 live channel · programme schedule unavailable"; infoNow.visibility = View.VISIBLE }
+        else if (ch.portal) { infoNow.text = "maxTV portal · programme schedule unavailable"; infoNow.visibility = View.VISIBLE }
         else fetchGuide(ch) { g -> if (shown.getOrNull(current)?.key == ch.key) fillInfoGuide(g) }
         showInfo()
         if (television) infoGuideAction.requestFocus()
@@ -1749,6 +1838,8 @@ class MainActivity : AppCompatActivity() {
 
     /** Resolve the last working native provider first; never wait for a web player or bundled playlist. */
     private fun resolveAndStart(ch: Channel, fresh: Boolean = false) {
+        // A portal channel has no site provider and no playlist entry: the portal itself issues its URL.
+        if (ch.portal) { resolvePortalChannel(ch); return }
         val token = ++playToken
         resolveJob?.cancel(true)
         nativeSources = emptyList(); serverIdx = 0
@@ -1781,6 +1872,60 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    /**
+     * One portal exchange per tune: `create_link` for this channel's handle, then the same native player
+     * every other channel uses. The link is never cached - portals expire them within minutes.
+     */
+    private fun resolvePortalChannel(ch: Channel) {
+        val token = ++playToken
+        resolveJob?.cancel(true)
+        nativeSources = emptyList(); serverIdx = 0
+        // No site provider exists for this channel, so the provider machinery is left empty on purpose.
+        nativeProviders = emptyList(); nextNativeProvider = 0
+        currentNativeProvider = LiveProvider.JIOM3U
+        providerWindow.enter(SystemClock.elapsedRealtime())
+        releasePlayer(); spinner.visibility = View.GONE
+        infoNext.text = "maxTV · asking the portal for this channel"
+        infoNext.visibility = View.VISIBLE
+        playMsg(null)
+        resolveJob = playbackIo.submit {
+            try {
+                val url = StalkerPortal(stalkerAccount()).link(ch.cmd)
+                runOnUiThread {
+                    if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    nativeSources = listOf(portalStream(url))
+                    serverIdx = 0
+                    startNative()
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
+                    nativeSources = emptyList()
+                    fail("maxTV: ${portalReason(e)}")
+                }
+            }
+        }
+    }
+
+    /**
+     * A portal link is a plain signed CDN address: no browser Origin or Referer is sent to it, only the
+     * set-top box User-Agent the portal expects for its own streams.
+     */
+    private fun portalStream(url: String) = TgStream(
+        label = "maxTV",
+        url = url,
+        type = when {
+            url.contains(".mpd", true) -> "dash"
+            url.contains(".mp4", true) -> "mp4"
+            // Portal live links are MPEG-TS inside HLS, and many carry no extension at all.
+            else -> "hls"
+        },
+        headers = mapOf("User-Agent" to StalkerProtocol.MAG_USER_AGENT),
+        requestOrigin = stalkerAccount().origin,
+        omitReferrer = true,
+        omitOrigin = true
+    )
 
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
@@ -1915,7 +2060,8 @@ class MainActivity : AppCompatActivity() {
         val source = nativeSources.getOrNull(serverIdx) ?: return
         spinner.visibility = View.GONE
         val channel = shown.getOrNull(current) ?: return
-        val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG) "TG TV · ${source.label}" else source.label
+        val sourceLabel = if (LiveProviders.provider(source) == LiveProvider.TG && source.requestOrigin == TgResolver.SITE)
+            "TG TV · ${source.label}" else source.label
         val probeStatus = starProbeStatus(currentNativeProvider, channel, nativeSources)
         infoNext.text = (if (healthScanActive) "CHECKING ${healthScanIndex + 1}/${healthScanChannels.size} · " else "CONNECTING · ") +
             "${providerMode(channel)} · $sourceLabel · server ${serverIdx + 1} of ${nativeSources.size}" +
@@ -2335,6 +2481,8 @@ class MainActivity : AppCompatActivity() {
     /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
     private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
+        // Nothing else carries a portal channel: there is no second provider to try, only a fresh link.
+        if (ch.portal) { fail("$reason. Hold OK to ask the portal again."); return }
         startupBudget.recover(SystemClock.elapsedRealtime())
         providerWindow.recover(SystemClock.elapsedRealtime())
         releasePlayer()
@@ -3042,7 +3190,7 @@ class MainActivity : AppCompatActivity() {
             val n = c.name.lowercase()
             return when { n.startsWith(toks[0]) -> 0; n.contains(" " + toks[0]) -> 1; else -> 2 }
         }
-        return (all + allV2).filter { c -> val hay = (c.name + " " + c.category).lowercase(); toks.all { hay.contains(it) } }
+        return (all + allV2 + allPortal).filter { c -> val hay = (c.name + " " + c.category).lowercase(); toks.all { hay.contains(it) } }
             .sortedWith(compareBy({ score(it) }, { it.v2 }, { it.name.lowercase() })).take(120)
     }
     private var movieResults = listOf<Tile>(); private var movieSearchToken = 0; private var movieSearching = false
@@ -3375,7 +3523,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- channel guide (Right opens · Left goes back · OK plays) ----------
-    private fun guidePool() = if (shown.getOrNull(current)?.v2 == true) allV2 else all
+    private fun guidePool(): List<Channel> = when {
+        shown.getOrNull(current)?.v2 == true -> allV2
+        shown.getOrNull(current)?.portal == true -> allPortal
+        else -> all
+    }
     private fun channelsIn(cat: String) = if (cat == FAV) guidePool().filter { it.key in favs } else guidePool().filter { it.category == cat }
     private fun within(v: View?, rv: View) = v != null && (v === rv || isInside(v, rv))
     private fun itemOf(v: View, rv: RecyclerView): View { var x = v; while (x.parent !== rv) x = x.parent as View; return x }
@@ -3702,6 +3854,7 @@ class MainActivity : AppCompatActivity() {
             1 -> liveRows(allV2, alwaysOn = true)
             2 -> jioRows(allJio)
             5 -> tataRows(tataJio)
+            6 -> portalRows(allPortal)
             else -> continueRow() + vodRowsFor(tab)
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()
