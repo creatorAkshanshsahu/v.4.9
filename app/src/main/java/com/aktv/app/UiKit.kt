@@ -37,64 +37,71 @@ internal object ImmersiveUi {
 }
 
 /**
- * STREAMR palette: near-black blue ground, warm amber brand signal, one red for LIVE and progress.
- * Names are stable so layouts, players and tests keep one source of truth.
+ * STREAMR palette, v3 (streamr-android-tv-design_v3.md): a near-black blue ground, one crimson brand that
+ * carries the wordmark, the eyebrow labels and every tile accent, and one brighter red kept for LIVE and
+ * progress. Names are stable so layouts, players and tests keep one source of truth.
  */
 object Accent {
-    val ABYSS = 0xFF0B0C10.toInt()
-    val NIGHT = 0xFF08090C.toInt()
-    val SURFACE = 0xFF15181E.toInt()
-    val SURFACE_HI = 0xFF1E222A.toInt()
-    /** Primary glossy crimson used for focus fills, live badges and active controls. */
-    val CRIMSON = 0xFFE5372D.toInt()
-    val CRIMSON_BRIGHT = 0xFFFF5A45.toInt()
-    val CRIMSON_DEEP = 0xFF8A1B10.toInt()
-    val WINE = 0xFF2A1712.toInt()
-    /** Near-white with a warm cast; the specular highlight in gloss gradients. */
-    val GLOSS_HI = 0xFFFFF3E6.toInt()
+    val ABYSS = 0xFF0F1117.toInt()
+    val NIGHT = 0xFF0A0C11.toInt()
+    val SURFACE = 0xFF1B1E26.toInt()
+    val SURFACE_HI = 0xFF23262F.toInt()
+    /** Primary crimson: focus fills, live badges, active controls. */
+    val CRIMSON = 0xFFC4161C.toInt()
+    val CRIMSON_BRIGHT = 0xFFE5383B.toInt()
+    val CRIMSON_DEEP = 0xFF8A0F14.toInt()
+    val WINE = 0xFF2A1013.toInt()
+    /** The specular highlight in gloss gradients. */
+    val GLOSS_HI = 0xFFFFFFFF.toInt()
     val SIGNAL = CRIMSON_BRIGHT
-    val ION = 0xFFFF8A5C.toInt()
+    val ION = 0xFFF2626B.toInt()
     val INDIGO = 0xFF59616E.toInt()
     val DEEP = 0xFF1A1F28.toInt()
-    val LIVE = CRIMSON
+    val LIVE = CRIMSON_BRIGHT
     val GOLD = 0xFFE0A24B.toInt()
-    val TEXT = 0xFFF7F7F9.toInt()
-    val DIM = 0xFFA6ABB4.toInt()
-    val FAINT = 0xFF71767F.toInt()
-    /** Brand amber: wordmark, eyebrow labels, the active pill's tick and the profile dot. */
-    val AMBER = 0xFFE0A24B.toInt()
-    val AMBER_LIGHT = 0xFFF2BE6E.toInt()
-    val AMBER_DEEP = 0xFFB0762F.toInt()
+    val TEXT = 0xFFF5F5F5.toInt()
+    val DIM = 0xFFA4A7B0.toInt()
+    val FAINT = 0xFF6E717A.toInt()
+    /** Brand crimson: wordmark, eyebrow labels, the active pill's tick and the profile dot. */
+    val BRAND = 0xFFC4161C.toInt()
+    val BRAND_LIGHT = 0xFFE0243A.toInt()
+    val BRAND_DEEP = 0xFFA8101A.toInt()
 
     /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
-    fun glossStops(): IntArray = intArrayOf(AMBER_LIGHT, AMBER, AMBER_DEEP)
+    fun glossStops(): IntArray = intArrayOf(BRAND_LIGHT, BRAND, BRAND_DEEP)
+
+    /** The wordmark's two stops, left to right, exactly as the design file states them. */
+    val WORDMARK_STOPS = intArrayOf(BRAND_DEEP, BRAND_LIGHT)
+
+    /** The brand arc: crimson, 344..16 degrees across the wrap at 360. */
+    const val ARC_START = 344f
+    const val ARC_SPAN = 32f
 
     /**
-     * Makes any logo colour usable as a tint. The sampled hue is pulled most of the way to the brand
-     * crimson so channel artwork still varies, but every surface reads as one crimson identity.
+     * Makes any logo colour usable as a tint. The sampled hue is folded onto the brand arc so channel
+     * artwork still varies, but every surface reads as one crimson identity.
      */
     fun normalize(c: Int?): Int {
-        if (c == null) return AMBER
+        if (c == null) return BRAND
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        if (hsl[1] < 0.18f) return AMBER
+        if (hsl[1] < 0.18f) return BRAND
         val hue = projectHue(hsl[0])
-        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.48f), hsl[2].coerceIn(0.48f, 0.64f)))
+        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.58f), hsl[2].coerceIn(0.40f, 0.54f)))
     }
 
     /**
-     * Fold any hue onto the red arc (335..25 degrees) instead of blending toward it in RGB, which
-     * drags saturated blues through magenta. Greys are handled by the caller before this runs.
+     * Fold any hue onto the crimson arc instead of blending toward it in RGB, which drags saturated blues
+     * through magenta. Greys are handled by the caller before this runs.
      */
     fun projectHue(hue: Float): Float {
-        val normalized = ((hue % 360f) + 360f) % 360f
-        // The brand arc is amber: 24..46 degrees. Everything folds onto that span, so a wall of
-        // channel tiles reads as one warm identity instead of a rainbow.
-        return when {
-            normalized in 24f..46f -> normalized
-            normalized < 24f -> 24f + (normalized / 24f) * 22f
-            normalized <= 191f -> 46f - ((normalized - 46f) / 145f) * 22f
-            else -> 24f + ((normalized - 191f) / 169f) * 22f
-        }
+        val h = ((hue % 360f) + 360f) % 360f
+        // Position on the wheel measured from the start of the arc.
+        val within = ((h - ARC_START) % 360f + 360f) % 360f
+        if (within <= ARC_SPAN) return h
+        // The rest of the wheel folds back into the arc: 180 degrees away lands at its middle.
+        val t = (within - ARC_SPAN) / (360f - ARC_SPAN)
+        val folded = if (t <= 0.5f) t * 2f else (1f - t) * 2f
+        return ((ARC_START + folded * ARC_SPAN) % 360f + 360f) % 360f
     }
 
     /** A darker neighbouring crimson so the hero panel has depth instead of one flat colour. */
@@ -108,21 +115,20 @@ object Accent {
 
     /**
      * Stable tint for channels with no logo to sample (V2 / 24-7): same name, same colour.
-     * Hues stay inside a warm crimson band so a wall of tiles reads as one brand, not a rainbow.
+     * Hues stay inside the crimson band so a wall of tiles reads as one brand, not a rainbow.
      */
     fun fromName(name: String): Int {
         var h = 7
         for (ch in name.lowercase()) h = (h * 31 + ch.code) and 0x7fffffff
-        // 0..1 spread across the amber arc, dark enough to carry white type.
         val spread = (h % 100) / 99f
-        val hue = 22f + spread * 26f
+        val hue = ((ARC_START + spread * ARC_SPAN) % 360f + 360f) % 360f
         val lightness = 0.30f + ((h / 100) % 12) / 100f
-        return ColorUtils.HSLToColor(floatArrayOf(hue, 0.46f, lightness))
+        return ColorUtils.HSLToColor(floatArrayOf(hue, 0.62f, lightness))
     }
 
     fun from(d: Drawable, cb: (Int) -> Unit) {
         val bmp = (d as? BitmapDrawable)?.bitmap
-        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(AMBER); return }
+        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(BRAND); return }
         Palette.from(bmp).maximumColorCount(16).generate { p ->
             val sw = p?.vibrantSwatch ?: p?.lightVibrantSwatch ?: p?.darkVibrantSwatch ?: p?.dominantSwatch
             cb(normalize(sw?.rgb))
@@ -142,7 +148,7 @@ object Ui {
      * List-row background driven by the view's own state: white when focused, soft grey when activated
      * (the row that is "playing" / "open"), [rest] otherwise. The framework switches it; no code runs per focus change.
      */
-    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0x33E8A44C) =
+    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0x33C4161C) =
         StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_focused), pill(dp, Accent.TEXT, radiusDp))
             addState(intArrayOf(android.R.attr.state_activated), pill(dp, active, radiusDp))

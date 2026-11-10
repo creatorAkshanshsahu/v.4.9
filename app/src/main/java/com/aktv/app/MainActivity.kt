@@ -260,7 +260,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
-    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF171310.toInt(), 0xFF1D1712.toInt(), 0xFF0D0C0A.toInt())) }
+    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF191013.toInt(), 0xFF1D1712.toInt(), 0xFF0D0C0A.toInt())) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View
     private lateinit var playerTopBar: View; private lateinit var playerTopTitle: TextView
@@ -452,7 +452,7 @@ class MainActivity : AppCompatActivity() {
         val track = ColorStateList.valueOf(Color.argb(52, 255, 52, 72))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
         // Programme progress reads as a lacquered crimson bar, not the old mint.
-        val played = ColorStateList.valueOf(Accent.AMBER)
+        val played = ColorStateList.valueOf(Accent.BRAND)
         heroProgress.progressTintList = played; infoProgress.progressTintList = played
 
         // search pill in the top bar
@@ -598,7 +598,7 @@ class MainActivity : AppCompatActivity() {
         causeLine(note)?.let { cause ->
             column.addView(TextView(this).apply {
                 text = cause
-                setTextColor(Accent.AMBER); textSize = 17f; typeface = fSemi
+                setTextColor(Accent.BRAND); textSize = 17f; typeface = fSemi
                 setPadding(0, 0, 0, px(10))
             })
         }
@@ -719,7 +719,7 @@ class MainActivity : AppCompatActivity() {
     private val vodTab get() = tab == 3 || tab == 4
     private fun vodRowsFor(t: Int) = if (t == 3 || t == 4) vodRows[t - 3] else emptyList<Row>()
 
-    private fun sectionAccent() = if (tab == 1) Accent.AMBER_LIGHT else Accent.AMBER
+    private fun sectionAccent() = if (tab == 1) Accent.BRAND_LIGHT else Accent.BRAND
 
     /**
      * One pill, three states: the active section is a white pill with dark type, focus is a glass fill
@@ -794,11 +794,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
+    /** The design file's focus state: 1.06 scale on a 250 ms fast-out-slow-in curve, lifted off the shelf. */
     private fun focusAnim(x: View, f: Boolean, color: Int = 0) {
-        val s = if (f) 1.045f else 1f
+        val s = if (f) 1.06f else 1f
         x.animate().cancel()
         x.animate().setStartDelay(0).scaleX(s).scaleY(s).translationZ(if (f) 12 * dp else 0f)
-            .setDuration(180).setInterpolator(DecelerateInterpolator(1.6f)).start()
+            .setDuration(250).setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.8f, 0.2f, 1f)).start()
     }
     /**
      * Rows without focus step back so the active row reads first. Only the row's title steps back:
@@ -827,7 +828,7 @@ class MainActivity : AppCompatActivity() {
         while (p != null) { if (p === parent) return true; p = p.parent }
         return false
     }
-    private fun accentOf(key: String) = accents[key] ?: Accent.AMBER
+    private fun accentOf(key: String) = accents[key] ?: Accent.BRAND
     private fun extractAccent(key: String, d: android.graphics.drawable.Drawable, cb: (Int) -> Unit) {
         accents[key]?.let { cb(it); return }
         Accent.from(d) { c -> accents[key] = c; cb(c) }
@@ -1479,7 +1480,7 @@ class MainActivity : AppCompatActivity() {
     }
     /** Tints the dark hero treatment with the selected section's accent. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(0xFF140812.toInt(), partner, 0.12f), Ui.mix(0xFF1A0D15.toInt(), c, 0.16f), 0xFF0C0710.toInt())
+        orbBg.colors = intArrayOf(Ui.mix(0xFF140A0E.toInt(), partner, 0.12f), Ui.mix(0xFF1A0C12.toInt(), c, 0.16f), 0xFF0C0710.toInt())
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
     /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
@@ -1539,8 +1540,8 @@ class MainActivity : AppCompatActivity() {
                 heroLogo.alpha = 1f
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.text = if (t.c.v2) "24/7" else "LIVE NOW"
-                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.AMBER_LIGHT else Accent.AMBER)
-                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.AMBER_LIGHT else Accent.AMBER)
+                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.BRAND_LIGHT else Accent.BRAND)
+                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.BRAND_LIGHT else Accent.BRAND)
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
                 heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
@@ -1571,7 +1572,7 @@ class MainActivity : AppCompatActivity() {
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.apply {
                     text = if (t.m.isSeries) "SERIES" else "ORIGINAL FILM"
-                    setTextColor(Accent.AMBER); backgroundTintList = ColorStateList.valueOf(Accent.AMBER)
+                    setTextColor(Accent.BRAND); backgroundTintList = ColorStateList.valueOf(Accent.BRAND)
                 }
                 heroTitle.text = t.m.name
                 showHeroArtwork(t.m)
@@ -1605,13 +1606,13 @@ class MainActivity : AppCompatActivity() {
                 heroDesc.text = t.m.description
                 heroDesc.visibility = if (!compact && t.m.description.isNotBlank()) View.VISIBLE else View.GONE
                 ui.removeCallbacks(heroGuideRunnable)
-                glowHero(accent, if (t.m.isSeries) 0xFF493A8A.toInt() else 0xFF815331.toInt())
+                glowHero(accent, if (t.m.isSeries) 0xFF5A2338.toInt() else 0xFF8A1A1C.toInt())
             }
             else -> {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "STREAMR"
                 heroSubheading.text = "A clearer view of what’s next."
                 heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.streamr_mark)
-                glowHero(Accent.AMBER, Accent.AMBER_DEEP); scheduleHeroGuide(null)
+                glowHero(Accent.BRAND, Accent.BRAND_DEEP); scheduleHeroGuide(null)
             }
         }
     }
@@ -1812,7 +1813,7 @@ class MainActivity : AppCompatActivity() {
         }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val badge = TextView(this).apply {
-            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.AMBER_LIGHT else Accent.AMBER)
+            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.BRAND_LIGHT else Accent.BRAND)
             letterSpacing = 0.08f
         }
         val time = TextView(this).apply {
@@ -3979,7 +3980,7 @@ class MainActivity : AppCompatActivity() {
                         playingNow -> "PLAYING" to 0xFF16885D.toInt()
                         result?.outcome == ChannelPlaybackOutcome.WORKING -> "WORKING" to 0xFF16885D.toInt()
                         result?.outcome == ChannelPlaybackOutcome.FAILED -> "FAILED" to 0xFF9F3339.toInt()
-                        result?.outcome == ChannelPlaybackOutcome.NO_FRAME -> "NO FRAME" to 0xFF987126.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.NO_FRAME -> "NO FRAME" to 0xFF8A6A22.toInt()
                         else -> "NOT CHECKED" to 0xFF8E7781.toInt()
                     }
                     v.findViewById<TextView>(R.id.liveBadge).apply {
@@ -4039,7 +4040,7 @@ class MainActivity : AppCompatActivity() {
                         v.findViewById<TextView>(R.id.posterName).text = t.m.name
                         img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
                         v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
-                        // The tile's amber line is the kind, as on the site; year and rating stay in the
+                        // The tile's crimson line is the kind, as on the site; year and rating stay in the
                         // accessibility label instead of competing with the eyebrow.
                         v.findViewById<TextView>(R.id.posterMeta).text = if (t.m.isSeries) "SERIES" else "MOVIE"
                         v.contentDescription =

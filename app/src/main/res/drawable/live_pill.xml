@@ -1,5 +1,5 @@
-<!-- LIVE marker: a quiet amber tint, never a red badge. -->
+<!-- LIVE marker: a quiet crimson tint, never a solid badge over the picture. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="#1FE0A24B"/>
+    <solid android:color="#26E5383B"/>
     <corners android:radius="6dp"/>
 </shape>

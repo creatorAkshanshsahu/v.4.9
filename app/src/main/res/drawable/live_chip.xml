@@ -1,5 +1,5 @@
-<!-- The player's LIVE chip: solid amber with dark type, since a 12% tint disappears over bright sport. -->
+<!-- The player's LIVE chip: solid brand crimson with white type; a 12% tint disappears over bright sport. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="@color/amber"/>
+    <solid android:color="@color/brand"/>
     <corners android:radius="5dp"/>
 </shape>

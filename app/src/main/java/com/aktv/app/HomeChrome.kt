@@ -44,24 +44,25 @@ internal object HomeChrome {
         root.findViewById<TextView>(R.id.akText).apply {
             visibility = View.VISIBLE
             textSize = if (m.compact) 16f else 22f
-            setTextColor(Accent.AMBER)
+            setTextColor(Accent.BRAND)
             letterSpacing = -0.02f
-            // The wordmark in the user's logo is a gradient (amber into gold), not a flat colour. Paint the
-            // glyphs with the same two stops once the text is measured, and leave the flat amber as fallback.
+            // The wordmark is a gradient — brand deep into brand light, left to right — not a flat colour.
+            // Paint the glyphs with the two stops once the text is measured, flat brand as fallback.
             post {
                 val paint = paint
                 val width = paint.measureText(text.toString())
                 if (width > 0f) paint.shader = android.graphics.LinearGradient(
-                    0f, 0f, width, 0f, intArrayOf(0xFFF2912B.toInt(), 0xFFF7C64A.toInt()), null,
+                    0f, 0f, width, 0f, Accent.WORDMARK_STOPS, null,
                     android.graphics.Shader.TileMode.CLAMP)
             }
         }
         // Mark plus wordmark, as in the site header — the mark is no longer hidden.
         root.findViewById<View>(R.id.brandMark).apply {
             visibility = View.VISIBLE
-            layoutParams.width = px(if (m.compact) 26 else 36)
-            layoutParams.height = px(if (m.compact) 26 else 36)
-            (layoutParams as ViewGroup.MarginLayoutParams).marginEnd = px(if (m.compact) 8 else 10)
+            // 40dp beside the wordmark on TV, as the design file asks; a touch smaller when compact.
+            layoutParams.width = px(if (m.compact) 30 else 40)
+            layoutParams.height = px(if (m.compact) 30 else 40)
+            (layoutParams as ViewGroup.MarginLayoutParams).marginEnd = px(if (m.compact) 8 else 12)
         }
         root.findViewById<View>(R.id.railTagline).visibility = View.GONE
         root.findViewById<View>(R.id.navProfile).apply {
@@ -154,7 +155,7 @@ internal object HomeChrome {
         }
         root.findViewById<TextView>(R.id.heroDot).apply {
             textSize = if (m.compact) 9f else 11f
-            setTextColor(Accent.AMBER)
+            setTextColor(Accent.BRAND)
         }
         root.findViewById<View>(R.id.heroChips).let {
             (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 12 else 20)

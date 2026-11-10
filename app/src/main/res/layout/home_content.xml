@@ -71,7 +71,7 @@
                 android:layout_marginStart="52dp" android:layout_marginBottom="24dp" android:layout_gravity="start|bottom" android:orientation="vertical">
                 <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
                     <TextView android:id="@+id/heroDot" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="LIVE" android:textColor="@color/amber" android:textSize="11sp" android:fontFamily="@font/sora_semibold" android:letterSpacing="0.28"/>
+                        android:text="LIVE" android:textColor="@color/brand" android:textSize="11sp" android:fontFamily="@font/sora_semibold" android:letterSpacing="0.28"/>
                     <TextView android:id="@+id/heroBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:layout_marginStart="14dp" android:textColor="@color/text_dim" android:textSize="13sp"
                         android:fontFamily="@font/manrope"/>
@@ -110,7 +110,7 @@
             android:contentDescription="STREAMR"/>
         <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:text="STREAMR" android:textSize="22sp" android:letterSpacing="-0.02"
-            android:includeFontPadding="false" android:textColor="@color/amber"
+            android:includeFontPadding="false" android:textColor="@color/brand"
             android:fontFamily="@font/sora_bold"/>
         <TextView android:id="@+id/railTagline" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:visibility="gone" android:text="BY AKSHANSH"/>

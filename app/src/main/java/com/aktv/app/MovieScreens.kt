@@ -40,7 +40,7 @@ class DetailActivity : Activity() {
     private val fBold by lazy { ResourcesCompat.getFont(this, R.font.sora_bold) ?: Typeface.DEFAULT_BOLD }
     private val fBody by lazy { ResourcesCompat.getFont(this, R.font.manrope) ?: Typeface.DEFAULT }
     private val prefs by lazy { getSharedPreferences("aktv", Context.MODE_PRIVATE) }
-    private val pageAccent get() = if (title.isSeries) Accent.AMBER_LIGHT else Accent.AMBER
+    private val pageAccent get() = if (title.isSeries) Accent.BRAND_LIGHT else Accent.BRAND
 
     private lateinit var title: Movies.Title
     private var episodes = listOf<Movies.Episode>(); private var seasons = listOf<Int>(); private var season = 1
@@ -100,7 +100,7 @@ class DetailActivity : Activity() {
         val inset = (if (compact) 28 else 48) * dp
         val textWidth = (resources.displayMetrics.widthPixels * if (compact) 0.73f else 0.62f).toInt()
         body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(inset.toInt(), ((if (compact) 96 else 112) * dp).toInt(), inset.toInt(), (32 * dp).toInt()) }
-        body.addView(tv(if (compact) 9f else 11f, Accent.AMBER, fSemi).apply {
+        body.addView(tv(if (compact) 9f else 11f, Accent.BRAND, fSemi).apply {
             text = if (title.isSeries) "SERIES" else "ORIGINAL FILM"; letterSpacing = 0.28f
         },
             LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (12 * dp).toInt() })

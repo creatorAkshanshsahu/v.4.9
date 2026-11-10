@@ -33,7 +33,7 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
     }
     /** The name, drawn with the brand face, so the reveal introduces STREAMR rather than a picture alone. */
     private val wordmarkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Accent.AMBER; textAlign = Paint.Align.CENTER; textSize = 34 * dp; letterSpacing = 0.16f
+        color = Accent.BRAND; textAlign = Paint.Align.CENTER; textSize = 34 * dp; letterSpacing = 0.16f
         typeface = runCatching { androidx.core.content.res.ResourcesCompat.getFont(context, R.font.sora_bold) }.getOrNull()
     }
     private val destination = RectF()

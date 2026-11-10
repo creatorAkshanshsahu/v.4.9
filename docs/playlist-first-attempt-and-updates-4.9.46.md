@@ -1767,3 +1767,33 @@ channel says so ("maxTV lists no English or Hindi channels") instead of sitting 
   pauses the rotation, so the seven-second turn is unbroken while the viewer moves through home.
 * `HeroRotationTest` adds the section rule (home false, Live/JioTV/maxTV true) alongside the wrap, pacing
   and stop conditions.
+
+## 75. The v3 identity: crimson brand, tile logo (5.4.19)
+
+`streamr-android-tv-design_v3.md` + `tv-app-ui-spec_v2.md` + `streamr-logo.png`, applied in full.
+
+* **Logo.** The supplied crimson tile with the white ribbon "S" is now the launcher icon at every density
+  (`mipmap-*`), the adaptive icon on 26+ (crimson `@color/brand_tile` background, the tile as a full-canvas
+  foreground so any launcher mask reads cleanly) and the in-app mark: `streamr_mark.png` /
+  `streamr_mark_small.png` were regenerated from it, which covers the top bar, the entrance and the player
+  info panel. The top-bar mark is 40dp beside the wordmark, as the design file asks.
+* **Palette.** `Accent` and `colors.xml` now carry the v3 tokens: ground `#0F1117`, night `#0A0C11`, surface
+  `#1B1E26`, raised `#23262F`, text `#F5F5F5`, muted `#A4A7B0`, one crimson `#C4161C` for primary and
+  accent, one brighter `#E5383B` for LIVE and progress. `AMBER`, `AMBER_LIGHT`, `AMBER_DEEP` became
+  `BRAND`, `BRAND_LIGHT`, `BRAND_DEEP` at every call site — a colour named amber cannot be crimson.
+* **Wordmark.** `Accent.WORDMARK_STOPS` is `#A8101A → #E0243A`, and the header paints the glyphs with it.
+* **The tile wall stays one family.** `projectHue` used to fold every hue onto an amber arc (24..46); it now
+  folds onto the crimson arc, `ARC_START = 344`, `ARC_SPAN = 32`, wrapping through 360, and `fromName` picks
+  its stable hue inside the same arc. Without that, brand crimson next to amber channel tiles would have
+  read as two identities.
+* **Focus.** The design file's state is 1.06 scale on a 250 ms `(.2,.8,.2,1)` curve; `focusAnim` now does
+  exactly that, over the existing 3dp white ring.
+* **Ground colours in XML.** Every scrim, glow, pill and glass in `res/drawable` moved to the v3 ground
+  (`#0E1014`/`#0B0C10` → `#0F1117`) and the crimson stops (`#FF3448`/`#E11D2E`/`#8C0F1C` →
+  `#E5383B`/`#C4161C`/`#8A0F14`). The empty `@color/amber` alias is gone; layouts reference `@color/brand`.
+* **Not changed:** layout, type scale, rail geometry, player structure and all playback/EPG/provider logic.
+  The spec's `1920×1080 @1x` type sizes map onto the app's 960dp-wide logical canvas, where the existing
+  values already land on the same rendered heights.
+* `AccentIdentityTest` is rewritten for the crimson band: brand family, LIVE brighter than the brand fill,
+  the projection covering the full wheel without leaving the arc, stable nameless tints, and the wordmark
+  stops and primary tokens pinned.

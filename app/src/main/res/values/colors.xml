@@ -1,26 +1,31 @@
 <resources>
-    <!-- Streamr, matched to the site: near-black blue ground, amber signal; no red badges. -->
-    <color name="abyss">#0B0C10</color>
-    <color name="night">#08090C</color>
-    <color name="surface">#15181E</color>
-    <color name="surface_hi">#1E222A</color>
-    <color name="amber">#E0A24B</color>
-    <color name="amber_deep">#B0762F</color>
-    <color name="crimson">#E5372D</color>
-    <color name="crimson_bright">#FF5A45</color>
-    <color name="crimson_deep">#8A1B10</color>
-    <color name="wine">#2A1712</color>
-    <color name="gloss_hi">#FFF3E6</color>
+    <!-- STREAMR v3 tokens (streamr-android-tv-design_v3.md). Crimson brand on a near-black blue ground;
+         one brighter red for LIVE and progress. Names stay stable so every layout and gradient keeps working. -->
+    <color name="abyss">#0F1117</color>
+    <color name="night">#0A0C11</color>
+    <color name="surface">#1B1E26</color>
+    <color name="surface_hi">#23262F</color>
+    <!-- Brand crimson: primary, labels, profile dot, gloss. -->
+    <color name="brand">#C4161C</color>
+    <color name="brand_light">#E0243A</color>
+    <color name="brand_deep">#A8101A</color>
+    <!-- The crimson inside the launcher tile; the adaptive background must match it exactly. -->
+    <color name="brand_tile">#B4010F</color>
+    <color name="crimson">#C4161C</color>
+    <color name="crimson_bright">#E5383B</color>
+    <color name="crimson_deep">#8A0F14</color>
+    <color name="wine">#2A1013</color>
+    <color name="gloss_hi">#FFFFFFFF</color>
     <!-- Kept names keep existing layout and gradient references valid. -->
-    <color name="signal">#E0A24B</color>
-    <color name="ion">#FF8A5C</color>
+    <color name="signal">#E5383B</color>
+    <color name="ion">#F2626B</color>
     <color name="indigo">#59616E</color>
-    <color name="live">#E5372D</color>
+    <color name="live">#E5383B</color>
     <color name="gold">#E0A24B</color>
-    <color name="text">#F7F7F8</color>
-    <color name="text_dim">#A6ABB4</color>
-    <color name="text_faint">#71767F</color>
-    <color name="glass">#24FFFFFF</color>
-    <color name="glass_deep">#B315171C</color>
+    <color name="text">#F5F5F5</color>
+    <color name="text_dim">#A4A7B0</color>
+    <color name="text_faint">#6E717A</color>
+    <color name="glass">#8C1B1E26</color>
+    <color name="glass_deep">#B30F1117</color>
     <color name="border">#1AFFFFFF</color>
 </resources>

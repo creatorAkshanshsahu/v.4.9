@@ -83,11 +83,10 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
-            // The same amber glass the player paints in production (0xF0151310 / 0xE00C0B0A, amber
-            // hairline). The old wine/red pair here is what made the preview look like a different app.
+            // The same crimson glass the player paints in production (surface into ground, brand hairline).
             card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF0151310.toInt(), 0xE00C0B0A.toInt())).apply {
-                cornerRadius = 16f; setStroke(1, 0x59E8A44C)
+                intArrayOf(0xF01B1E26.toInt(), 0xE00F1117.toInt())).apply {
+                cornerRadius = 16f; setStroke(1, 0x59C4161C)
             }
             layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.streamr_mark)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
@@ -97,9 +96,9 @@ class PlayerPreviewTest {
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoProgress).apply { visibility = View.VISIBLE }
-            // Production tints the live progress line amber; the preview inherited the theme's red.
+            // Production tints the live progress line with the brand crimson.
             layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress)
-                .progressTintList = android.content.res.ColorStateList.valueOf(0xFFE0A24B.toInt())
+                .progressTintList = android.content.res.ColorStateList.valueOf(Accent.BRAND)
             layer.findViewById<TextView>(R.id.infoScheduleNext).apply {
                 text = "Up next:  Post-match coverage"
                 visibility = View.VISIBLE

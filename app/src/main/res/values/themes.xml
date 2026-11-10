@@ -2,7 +2,7 @@
     <style name="Theme.AKTV" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/abyss</item>
         <item name="android:fontFamily">@font/manrope</item>
-        <item name="colorAccent">@color/amber</item>
+        <item name="colorAccent">@color/brand</item>
         <item name="android:statusBarColor">@color/abyss</item>
         <item name="android:navigationBarColor">@color/abyss</item>
         <item name="android:windowLightStatusBar">false</item>

@@ -3,17 +3,17 @@
     <item android:state_focused="true">
         <shape>
             <gradient android:type="linear" android:angle="270"
-                android:startColor="#FFFF4A5C" android:centerColor="#FFE11D2E" android:endColor="#FF8C0F1C"/>
+                android:startColor="#FFE5383B" android:centerColor="#FFC4161C" android:endColor="#FF8A0F14"/>
             <corners android:radius="100dp"/>
-            <stroke android:width="1.5dp" android:color="#55FFEBEE"/>
+            <stroke android:width="1.5dp" android:color="#55F5F5F5"/>
         </shape>
     </item>
     <item android:state_activated="true">
         <shape>
             <gradient android:type="linear" android:angle="270"
-                android:startColor="#66E11D2E" android:endColor="#338C0F1C"/>
+                android:startColor="#66C4161C" android:endColor="#338A0F14"/>
             <corners android:radius="100dp"/>
-            <stroke android:width="1dp" android:color="#99FF3448"/>
+            <stroke android:width="1dp" android:color="#99E5383B"/>
         </shape>
     </item>
     <item>

@@ -9,7 +9,7 @@
         android:textColor="#FFFFFF" android:textSize="19sp" android:fontFamily="@font/sora_bold"
         android:includeFontPadding="false" android:visibility="gone"/>
     <TextView android:id="@+id/fav" android:layout_width="wrap_content" android:layout_height="wrap_content"
-        android:layout_gravity="top|end" android:layout_margin="8dp" android:text="♥" android:textColor="@color/amber"
+        android:layout_gravity="top|end" android:layout_margin="8dp" android:text="♥" android:textColor="@color/brand"
         android:textSize="14sp" android:visibility="gone"/>
     <!-- Same bottom scrim as the poster rail: the copy lives on the artwork, not on a plate under it. -->
     <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
@@ -19,9 +19,9 @@
         <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical">
             <View android:id="@+id/healthDot" android:layout_width="6dp" android:layout_height="6dp"
-                android:layout_marginEnd="6dp" android:background="@drawable/dot" android:backgroundTint="@color/amber"/>
+                android:layout_marginEnd="6dp" android:background="@drawable/dot" android:backgroundTint="@color/brand"/>
             <TextView android:id="@+id/liveBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="LIVE" android:background="@drawable/live_pill" android:textColor="@color/amber"
+                android:text="LIVE" android:background="@drawable/live_pill" android:textColor="@color/brand"
                 android:textSize="8sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.1"
                 android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingTop="1dp"
                 android:paddingBottom="1dp" android:includeFontPadding="false"/>

@@ -62,7 +62,7 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.heroDot).apply {
                 visibility = View.VISIBLE
                 text = if (movies) "ORIGINAL FILM" else "LIVE"
-                setTextColor(Accent.AMBER)
+                setTextColor(Accent.BRAND)
             }
             root.findViewById<ImageView>(R.id.heroLogo).apply {
                 setImageResource(R.drawable.streamr_mark)
