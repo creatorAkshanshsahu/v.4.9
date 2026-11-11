@@ -224,7 +224,7 @@ class JioM3uPlaybackTest {
             browser = { url -> asked.add(url); playlist }
         )
         assertEquals(listOf("143"), resolver.catalogue().map { it.id })
-        assertEquals(listOf("https://allinonereborn2.online/jiotv-m3u/jtv33.m3u8"), asked)
+        assertEquals(listOf(JioM3uProtocol.PLAYLIST), asked)
         // Without the browser engine the refusal is still reported by its own status.
         val cold = JioM3uResolver(http = { _, _ -> TgResponse(415, ByteArray(0)) })
         assertEquals("JioTV m3u8 HTTP 415", runCatching { cold.catalogue() }.exceptionOrNull()?.message)

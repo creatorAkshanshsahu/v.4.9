@@ -55,6 +55,11 @@ internal class JioM3uResolver(
     @Volatile private var playlistShape = 0
     /** The status the front door last answered the playlist with, for the section's own message. */
     @Volatile private var lastPlaylistStatus: Int? = null
+    /** Playlists whose body arrived over the network this session, so a stale disk copy is never mistaken for one. */
+    private val answered = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** True when this exact playlist really answered over the network, not from a copy on disk. */
+    fun answeredOverNetwork(url: String): Boolean = answered.contains(url)
 
     @Synchronized
     fun resolve(id: String, fresh: Boolean = false): List<TgStream> {
@@ -247,6 +252,7 @@ internal class JioM3uResolver(
                 val entries = JioM3uProtocol.parse(body, url)
                 if (entries.isEmpty()) throw IOException("JioTV m3u8 playlist was empty")
                 keepPlaylist(url, body)
+                answered.add(url)
                 cache(url, entries, 30 * 60_000)  // a playlist URL is stable; refresh every 30 min
                 return entries
             } catch (error: Exception) {
@@ -259,7 +265,15 @@ internal class JioM3uResolver(
         }
         // A refused request must not empty the section. The last good copy describes the same channels,
         // and each channel's own address, cookie and keys are still resolved fresh when it is played.
-        return lastGoodPlaylist(url) ?: throw (failure ?: IOException("JioTV m3u8 playlist unavailable"))
+        val copy = lastGoodPlaylist(url)
+        if (copy != null) {
+            // The file on disk is not an answer: the site removed this playlist, so the section must be
+            // free to move on to the next number instead of being pinned to a name that no longer exists.
+            answered.remove(url)
+            return copy
+        }
+        answered.remove(url)
+        throw (failure ?: IOException("JioTV m3u8 playlist unavailable"))
     }
 
     private fun cache(url: String, entries: List<JioM3uProtocol.Entry>, ttlMs: Long) {

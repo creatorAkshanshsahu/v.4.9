@@ -181,6 +181,13 @@
       "from": "5b75d555810f97d708753490c6a177073f7061634aef7abb1e3d5ee62c4a3e50",
       "to": "03d030fe882168e6823eb2bba8e72e31c8d5e77f28c09e034658a61328b96009",
       "unchanged": "Request building, headers, redirect/final-url reporting, the bounded body read and the default 5/6/12 s client are unchanged; only the ceiling became a parameter."
+    },
+    {
+      "change": "The JioTV catalogue walks JioM3uProtocol.playlistCandidates() and remembers the address that answered over the network in aktv_tg/jiotv_playlist, so a renamed numbered playlist (jtv33 -> jtv39) no longer empties the section; the resolver carries the same neighbours so resolving a channel searches what the catalogue listed.",
+      "file": "app/src/main/java/com/aktv/app/TgServers.kt",
+      "from": "7b85a473ef9f1da1717076b14c9df5523b84967ec54ce7e82fb102a46ea49274",
+      "to": "d80815e9e8288f835fb09bc03b4c3ddab36480d1c0d055c7b47243041ae22203",
+      "unchanged": "Channel resolution is untouched: same JioM3uResolver, same playlist parsing, same per-tune key document and the same native streams. Only the playlist address is persisted - no credential, token or cookie."
     }
   ],
   "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
@@ -201,7 +208,7 @@
     "app/src/main/java/com/aktv/app/TgDiscovery.kt": "2a39325cf07875e2f9cc9f27f4e291ea11af5b18b324f86324bc7f9d34d3798c",
     "app/src/main/java/com/aktv/app/TgProtocol.kt": "a504a973cc6b6d6d62f3ecc1a2841fbfe74f186666aa1b1a5017d7d77cf5a185",
     "app/src/main/java/com/aktv/app/TgResolver.kt": "03d030fe882168e6823eb2bba8e72e31c8d5e77f28c09e034658a61328b96009",
-    "app/src/main/java/com/aktv/app/TgServers.kt": "7b85a473ef9f1da1717076b14c9df5523b84967ec54ce7e82fb102a46ea49274"
+    "app/src/main/java/com/aktv/app/TgServers.kt": "d80815e9e8288f835fb09bc03b4c3ddab36480d1c0d055c7b47243041ae22203"
   },
   "sourceCommit": "ec459be5dc413a04d632d9b7ec26df5b2dee53b1"
 }

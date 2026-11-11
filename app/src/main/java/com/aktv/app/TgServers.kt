@@ -14,8 +14,12 @@ object TgServers {
     private val refreshing = AtomicBoolean(false)
     @Volatile private var refreshChannel: String? = null
 
+    /** The address that last answered, and nothing else about it: no token, key or cookie is kept here. */
+    @Volatile private var prefs: android.content.SharedPreferences? = null
+
     fun init(ctx: Context) {
         val prefs = ctx.getSharedPreferences("aktv_tg", Context.MODE_PRIVATE)
+        this.prefs = prefs
         if (prefs.getInt("native_schema", 0) != 2) prefs.edit().clear().putInt("native_schema", 2).apply()
         forgetPreviousLiveSite(ctx)
         resolver.close()
@@ -25,7 +29,10 @@ object TgServers {
         jioM3u = JioM3uResolver(
             // The list can be a megabyte over a link that is barely moving: it gets its own timeouts.
             playlistHttp = TgHttp(readTimeoutSeconds = 30, callTimeoutSeconds = 45),
-            extra = listOf(JioM3uProtocol.TATA_PLAYLIST),
+            // The numbered playlist moves: the resolver carries the neighbours, the stored one first, so a
+            // channel still resolves after the site rebuilds the file. The Tata list stays last.
+            extra = JioM3uProtocol.playlistCandidates(prefs.getString("jiotv_playlist", null)).drop(1) +
+                listOf(JioM3uProtocol.TATA_PLAYLIST),
             cacheDir = java.io.File(ctx.filesDir, "playlists"),
             legacyCacheFile = java.io.File(ctx.filesDir, "jiotv-playlist.m3u8"),
             // No browser engine: the playlist is read over HTTP or not at all.
@@ -58,11 +65,35 @@ object TgServers {
      * The JioTV list on its own. It used to merge both of the site's lists here, which made this section wait
      * for the second one too; each tab now loads its own list and neither can slow the other down.
      */
-    internal fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> =
-        jioM3u.catalogueOf(JioM3uProtocol.PLAYLIST, fresh)
+    internal fun jioCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> {
+        var failure: Exception? = null
+        var copy: List<JioM3uProtocol.Entry>? = null
+        for (url in JioM3uProtocol.playlistCandidates(prefs?.getString("jiotv_playlist", null))) {
+            val entries = try {
+                jioM3u.catalogueOf(url, fresh)
+            } catch (error: Exception) {
+                if (failure == null) failure = error
+                continue
+            }
+            if (entries.isEmpty()) continue
+            // Only an address that really answered is remembered: a stale copy on disk describes a playlist
+            // that no longer exists, and remembering it would pin the section to a dead file.
+            if (jioM3u.answeredOverNetwork(url)) {
+                if (prefs?.getString("jiotv_playlist", null) != url) {
+                    prefs?.edit()?.putString("jiotv_playlist", url)?.apply()
+                }
+                return entries
+            }
+            if (copy == null) copy = entries
+        }
+        // Nothing answered: the copy that does exist still lists the same channels, so show it.
+        copy?.let { return it }
+        throw failure ?: java.io.IOException("JioTV m3u8 playlist was empty")
+    }
 
     /** What is already on disk for a list, so a section can paint before the network answers. */
-    internal fun cachedJioCatalogue(): List<JioM3uProtocol.Entry> = jioM3u.cachedCatalogue()
+    internal fun cachedJioCatalogue(): List<JioM3uProtocol.Entry> =
+        jioM3u.cachedCatalogue(prefs?.getString("jiotv_playlist", null) ?: JioM3uProtocol.PLAYLIST)
 
     /** The site's second list, on its own, so its section is built from it alone. */
     internal fun tataCatalogue(fresh: Boolean = false): List<JioM3uProtocol.Entry> =
