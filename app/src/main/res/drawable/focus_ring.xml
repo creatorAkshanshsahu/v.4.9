@@ -1,4 +1,4 @@
-<!-- STREAMR cyber focus (styles.css --shadow-focus): 2.5dp electric cyan ring over cyber glass. -->
+<!-- STREAMR cyber focus (styles.css shadow-focus): 2.5dp electric cyan ring over cyber glass. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">

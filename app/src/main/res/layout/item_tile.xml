@@ -19,7 +19,7 @@
         <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:orientation="horizontal" android:gravity="center_vertical">
             <View android:id="@+id/healthDot" android:layout_width="6dp" android:layout_height="6dp"
-                android:layout_marginEnd="6dp" android:background="@drawable/dot" android:backgroundTint="@color/brand"/>
+                android:layout_marginEnd="6dp" android:background="@drawable/dot" android:backgroundTint="@color/live"/>
             <TextView android:id="@+id/liveBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:text="LIVE" android:background="@drawable/live_pill" android:textColor="@color/brand_light"
                 android:textSize="8sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.1"
