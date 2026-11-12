@@ -138,7 +138,7 @@ internal object HomeChrome {
         // Hero: full-bleed artwork behind the bar, copy anchored bottom-left, as on the site. No card,
         // no rounding, no inset — the still runs to every edge of the screen.
         val heroHeight = (screenHeight * when {
-            m.phone && m.compact -> 0.34f
+            m.phone && m.compact -> 0.40f
             m.phone -> 0.46f
             // A 2:3 poster shelf is the tallest row the app has, but the hero still has to be tall enough
             // to hold its own copy clear of the bar: the rail peeks, the hero never collides.
@@ -164,18 +164,20 @@ internal object HomeChrome {
                 // max-w-2xl on the site: the copy never runs wider than 672dp.
                 width = minOf(px(672), (screenWidth - px(side) * 2).coerceAtLeast(px(260)))
                 marginStart = px(side)
-                bottomMargin = px(if (m.compact) 24 else 48)
+                bottomMargin = px(if (m.compact) 8 else 48)
             }
         }
         root.findViewById<TextView>(R.id.heroTitle).apply {
-            textSize = when { m.compact -> 25f; m.phone -> 30f; movies -> 36f; else -> 40f }
+            textSize = when { m.compact -> 22f; m.phone -> 30f; movies -> 36f; else -> 40f }
             maxLines = if (m.compact) 1 else 2
+            (layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 4 else 10)
             setTextColor(Accent.TEXT)
             setShadowLayer(px(14).toFloat(), 0f, 0f, 0x88FF00D0.toInt())
         }
         root.findViewById<TextView>(R.id.heroDesc).apply {
-            maxLines = if (m.compact) 2 else 3
+            maxLines = if (m.compact) 1 else 3
             textSize = if (m.compact) 11f else 13f
+            (layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 4 else 10)
             setTextColor(Accent.DIM)
         }
         root.findViewById<TextView>(R.id.heroBadge).apply {
@@ -188,7 +190,7 @@ internal object HomeChrome {
             setTextColor(Accent.BRAND_LIGHT)
         }
         root.findViewById<View>(R.id.heroChips).let {
-            (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 12 else 20)
+            (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 8 else 20)
         }
         // The hero logo sits at the card's top-right, small, the way the site shows a title mark.
         root.findViewById<View>(R.id.heroLogo).apply {

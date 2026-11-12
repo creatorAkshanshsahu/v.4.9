@@ -95,16 +95,39 @@ internal object ElfuraClient {
     private val catalogLock = Any()
     private var memoryCatalog: CachedCatalog? = null
 
-    private val defaultClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(25, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .followSslRedirects(false)
-        .build()
+    @Volatile private var defaultClientRef: OkHttpClient? = null
+
+    internal fun buildSafeHttpClient(
+        connectSec: Long,
+        readSec: Long,
+        callSec: Long,
+        followSslRedirects: Boolean = false
+    ): OkHttpClient {
+        val base = OkHttpClient.Builder()
+            .connectTimeout(connectSec, TimeUnit.SECONDS)
+            .readTimeout(readSec, TimeUnit.SECONDS)
+            .callTimeout(callSec, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(followSslRedirects)
+        return try {
+            base.build()
+        } catch (_: IllegalArgumentException) {
+            val tmf = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            tmf.init(null as java.security.KeyStore?)
+            val tm = tmf.trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>().first()
+            val ctx = javax.net.ssl.SSLContext.getInstance("TLS")
+            ctx.init(null, arrayOf(tm), null)
+            base.sslSocketFactory(ctx.socketFactory, tm).build()
+        }
+    }
+
+    private val defaultClient: OkHttpClient
+        get() = defaultClientRef ?: synchronized(this) {
+            defaultClientRef ?: buildSafeHttpClient(10, 20, 25, followSslRedirects = false).also { defaultClientRef = it }
+        }
 
     fun cancel() {
-        defaultClient.dispatcher.cancelAll()
+        defaultClientRef?.dispatcher?.cancelAll()
     }
 
     fun originString(baseUrl: HttpUrl): String {

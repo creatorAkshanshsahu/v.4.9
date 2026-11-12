@@ -124,20 +124,23 @@ internal class VidLinkClient(
         private val POLY_P = BigInteger.ONE.shiftLeft(130).subtract(BigInteger.valueOf(5))
         private val MOVIEBOX_HOSTS = listOf("hakunaymatata.com", "inmoviebox.com", "aoneroom.com")
 
-        private val defaultHttpClient = OkHttpClient.Builder()
-            .connectTimeout(7, TimeUnit.SECONDS)
-            .readTimeout(10, TimeUnit.SECONDS)
-            .callTimeout(14, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(false)
-            .build()
+        @Volatile private var defaultHttpClientRef: OkHttpClient? = null
+        private val defaultHttpClient: OkHttpClient
+            get() = defaultHttpClientRef ?: synchronized(this) {
+                defaultHttpClientRef ?: ElfuraClient.buildSafeHttpClient(7, 10, 14, followSslRedirects = false)
+                    .also { defaultHttpClientRef = it }
+            }
 
-        private val defaultInstance = VidLinkClient()
+        @Volatile private var defaultInstanceRef: VidLinkClient? = null
+        private val defaultInstance: VidLinkClient
+            get() = defaultInstanceRef ?: synchronized(this) {
+                defaultInstanceRef ?: VidLinkClient().also { defaultInstanceRef = it }
+            }
 
         fun resolveDefault(title: FrostTitle): List<FrostSource> = defaultInstance.resolve(title)
 
         fun cancel() {
-            defaultHttpClient.dispatcher.cancelAll()
+            defaultHttpClientRef?.dispatcher?.cancelAll()
         }
 
         /**
