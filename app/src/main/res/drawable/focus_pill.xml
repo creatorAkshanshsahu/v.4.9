@@ -1,19 +1,19 @@
-<!-- Reusable glossy crimson pill for rail items and action buttons. -->
+<!-- Cyber neon pill for guide & action buttons. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape>
-            <gradient android:type="linear" android:angle="270"
-                android:startColor="#FFE5383B" android:centerColor="#FFC4161C" android:endColor="#FF8A0F14"/>
+            <gradient android:type="linear" android:angle="0"
+                android:startColor="#FFFF00D0" android:endColor="#FF00ECF7"/>
             <corners android:radius="100dp"/>
-            <stroke android:width="1.5dp" android:color="#55F5F5F5"/>
+            <stroke android:width="2dp" android:color="#FFFFFFFF"/>
         </shape>
     </item>
     <item android:state_activated="true">
         <shape>
-            <gradient android:type="linear" android:angle="270"
-                android:startColor="#66C4161C" android:endColor="#338A0F14"/>
+            <gradient android:type="linear" android:angle="0"
+                android:startColor="#66FF00D0" android:endColor="#4400ECF7"/>
             <corners android:radius="100dp"/>
-            <stroke android:width="1dp" android:color="#99E5383B"/>
+            <stroke android:width="1dp" android:color="#9900ECF7"/>
         </shape>
     </item>
     <item>

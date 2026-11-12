@@ -181,18 +181,18 @@ class MoviePlayerActivity : Activity() {
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
-            setPlayedColor(Accent.BRAND); setScrubberColor(Accent.TEXT)
-            setBufferedColor(0x4DFFFFFF); setUnplayedColor(0x29FFFFFF)
+            setPlayedColor(Accent.LIVE); setScrubberColor(Accent.BRAND)
+            setBufferedColor(0x4D98AFD5); setUnplayedColor(0x29FFFFFF)
         }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF20E1014.toInt(), 0xB30E1014.toInt(), 0x330E1014, Color.TRANSPARENT))
+                intArrayOf(0xF2020107.toInt(), 0xB3060410.toInt(), 0x33060410, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(0xF70E1014.toInt(), 0xC70E1014.toInt(), 0x330E1014, Color.TRANSPARENT))
+                intArrayOf(0xF7020107.toInt(), 0xC7060410.toInt(), 0x33060410, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
         // Top bar: a glass back circle, the title, and the S/E line underneath — the site's watch header.
@@ -262,8 +262,8 @@ class MoviePlayerActivity : Activity() {
             textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
             background = GradientDrawable().apply {
-                cornerRadius = px(14).toFloat(); setColor(0xD005070C.toInt())
-                setStroke(px(1), 0x50F8F9FC)
+                cornerRadius = px(14).toFloat(); setColor(0xCC020107.toInt())
+                setStroke(px(1), 0x5500ECF7)
             }
         }
         info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
@@ -333,15 +333,19 @@ class MoviePlayerActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(12) }
             typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
             fun style(focused: Boolean) {
-                // The site's control row: rounded-lg glass, a white ring on focus. "Next" is the one
-                // solid button on the row, exactly as Play is on the home hero.
+                // Cyber control row (watch.$id.tsx): rounded-xl cyber glass, electric cyan ring on focus;
+                // "Next episode" uses primary cyber magenta (`bg-primary`).
                 val primary = label.startsWith("Next")
+                val hairline = px(1).coerceAtLeast(1)
                 background = GradientDrawable().apply {
                     cornerRadius = px(12).toFloat()
-                    setColor(if (primary) Accent.TEXT else if (focused) 0x4DFFFFFF else 0x33FFFFFF)
-                    setStroke(if (focused && !primary) px(2) else 0, if (focused) 0xF2FFFFFF.toInt() else Color.TRANSPARENT)
+                    setColor(if (primary) Accent.BRAND else if (focused) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
+                    setStroke(
+                        if (focused) px(2) else if (primary) 0 else hairline,
+                        if (focused) Accent.SIGNAL else 0x4000ECF7
+                    )
                 }
-                setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
+                setTextColor(Accent.TEXT)
                 elevation = if (focused) px(9).toFloat() else 0f
             }
             style(false)

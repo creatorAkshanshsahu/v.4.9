@@ -93,17 +93,17 @@ class PlayerPreviewTest {
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoProgress).apply { visibility = View.VISIBLE }
-            // Production tints the live progress line with the brand crimson.
+            // Production tints the live progress line with the electric cyan LIVE accent.
             layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress)
-                .progressTintList = android.content.res.ColorStateList.valueOf(Accent.BRAND)
+                .progressTintList = android.content.res.ColorStateList.valueOf(Accent.LIVE)
             layer.findViewById<TextView>(R.id.infoScheduleNext).apply {
                 text = "Up next:  Post-match coverage"
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoHint).visibility = View.GONE
             val primary = layer.findViewById<TextView>(R.id.infoGuideAction)
-            primary.background = Ui.pill(1f, Color.WHITE, 16f)
-            primary.setTextColor(Color.BLACK)
+            primary.background = Ui.pill(1f, Accent.BRAND, 12f)
+            primary.setTextColor(Accent.TEXT)
             capture(root, 960, 540, file)
         } finally { controller.destroy() }
     }

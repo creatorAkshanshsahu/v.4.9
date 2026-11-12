@@ -1,11 +1,9 @@
-<!-- The site's card scrim: scrim/90 at the bottom fading to nothing at the top. Angle 270 runs
-     top (start) to bottom (end), so the card's copy always has a dark floor under it. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
     <gradient
         android:angle="270"
-        android:startColor="#000F1117"
-        android:centerColor="#8C0F1117"
-        android:endColor="#F20A0C11"
+        android:startColor="#00060410"
+        android:centerColor="#8C060410"
+        android:endColor="#F2020107"
         android:type="linear"/>
     <corners android:radius="14dp"/>
 </shape>

@@ -6,7 +6,7 @@
 
     <!-- search: on-screen keyboard on the left, live results on the right -->
     <FrameLayout android:id="@+id/searchLayer" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#FA0E1014" android:visibility="gone" android:clickable="true">
+        android:background="#FA060410" android:visibility="gone" android:clickable="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
             android:id="@+id/searchBody" android:layout_marginStart="28dp" android:layout_marginEnd="28dp" android:layout_marginTop="24dp"
             android:layout_marginBottom="36dp" android:orientation="horizontal">
@@ -36,7 +36,7 @@
 
     <!-- player -->
     <FrameLayout android:id="@+id/playerLayer" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#0A0B0E" android:visibility="gone">
+        android:background="#020107" android:visibility="gone">
         <androidx.media3.ui.PlayerView android:id="@+id/playerView" android:layout_width="match_parent"
             android:layout_height="match_parent" app:use_controller="false" app:resize_mode="fit"
             app:surface_type="surface_view" app:use_artwork="false"
@@ -138,7 +138,7 @@
             android:shadowColor="#99000000" android:shadowRadius="12"/>
         <!-- programme guide: dedicated EPG panel, separate from the channel-zap drawer -->
         <View android:id="@+id/programmeGuideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:background="#C20E1014" android:visibility="gone" android:clickable="true" android:focusable="false"/>
+            android:background="#CC04020C" android:visibility="gone" android:clickable="true" android:focusable="false"/>
         <LinearLayout android:id="@+id/programmeGuidePanel" android:layout_width="440dp" android:layout_height="match_parent"
             android:layout_gravity="end" android:layout_margin="16dp" android:orientation="vertical" android:padding="24dp"
             android:background="@drawable/guide_panel" android:visibility="gone" android:clickable="true" android:focusable="true">

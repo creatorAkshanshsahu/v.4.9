@@ -35,7 +35,29 @@ internal object HomeChrome {
         val nav = if (m.phone) 0 else if (m.compact) 68 else 88
         val side = if (m.compact) 20 else 48
 
-        // The bar: wordmark left, glass pill tabs centred, round search and profile right.
+        // Subtle cyber grid on #home ground matching screen-safari-studio styles.css (64px cyan hairline grid).
+        root.background = object : android.graphics.drawable.Drawable() {
+            private val bgPaint = android.graphics.Paint().apply { color = Accent.ABYSS }
+            private val linePaint = android.graphics.Paint().apply {
+                color = 0x1600ECF7
+                strokeWidth = dp.coerceAtLeast(1f)
+            }
+            override fun draw(canvas: android.graphics.Canvas) {
+                val b = bounds
+                canvas.drawRect(b, bgPaint)
+                val step = (64f * dp).coerceAtLeast(32f)
+                var x = b.left.toFloat()
+                while (x <= b.right) { canvas.drawLine(x, b.top.toFloat(), x, b.bottom.toFloat(), linePaint); x += step }
+                var y = b.top.toFloat()
+                while (y <= b.bottom) { canvas.drawLine(b.left.toFloat(), y, b.right.toFloat(), y, linePaint); y += step }
+            }
+            override fun setAlpha(alpha: Int) {}
+            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
+            @Suppress("OVERRIDE_DEPRECATION")
+            override fun getOpacity(): Int = android.graphics.PixelFormat.OPAQUE
+        }
+
+        // The bar: cyber icon + gradient wordmark left, glass pill tabs centred, round search and cyan profile right.
         root.findViewById<View>(R.id.navRail).apply {
             visibility = if (m.phone) View.GONE else View.VISIBLE
             layoutParams.height = px(nav)
@@ -43,18 +65,17 @@ internal object HomeChrome {
         }
         root.findViewById<TextView>(R.id.akText).apply {
             visibility = View.VISIBLE
-            textSize = if (m.compact) 16f else 22f
+            textSize = if (m.compact) 15f else 19f
             setTextColor(Accent.BRAND)
-            letterSpacing = -0.02f
-            // The wordmark is a gradient — brand deep into brand light, left to right — not a flat colour.
-            // Paint the glyphs with the two stops once the text is measured, flat brand as fallback.
-            post {
-                val paint = paint
-                val width = paint.measureText(text.toString())
-                if (width > 0f) paint.shader = android.graphics.LinearGradient(
-                    0f, 0f, width, 0f, Accent.WORDMARK_STOPS, null,
+            letterSpacing = 0.03f
+            val applyGradient = {
+                val w = paint.measureText(text.toString())
+                if (w > 0f) paint.shader = android.graphics.LinearGradient(
+                    0f, 0f, w, 0f, Accent.WORDMARK_STOPS, null,
                     android.graphics.Shader.TileMode.CLAMP)
             }
+            applyGradient()
+            post { applyGradient(); invalidate() }
         }
         // Mark plus wordmark, as in the site header — the mark is no longer hidden.
         root.findViewById<View>(R.id.brandMark).apply {
@@ -76,8 +97,8 @@ internal object HomeChrome {
         for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg)) {
             root.findViewById<TextView>(id)?.apply {
                 layoutParams.height = px(if (short) 34 else 36)
-                setPadding(px(if (m.compact) 11 else 14), 0, px(if (m.compact) 11 else 14), 0)
-                textSize = if (short) 11f else if (m.compact) 12f else 14f
+                setPadding(px(if (m.compact) 10 else 13), 0, px(if (m.compact) 10 else 13), 0)
+                textSize = if (short) 11.5f else if (m.compact) 12.5f else 14f
                 includeFontPadding = false
                 typeface = androidx.core.content.res.ResourcesCompat.getFont(root.context, R.font.sora_semibold)
             }
@@ -147,9 +168,10 @@ internal object HomeChrome {
             }
         }
         root.findViewById<TextView>(R.id.heroTitle).apply {
-            textSize = when { m.compact -> 28f; m.phone -> 32f; movies -> 44f; else -> 48f }
+            textSize = when { m.compact -> 25f; m.phone -> 30f; movies -> 36f; else -> 40f }
             maxLines = if (m.compact) 1 else 2
             setTextColor(Accent.TEXT)
+            setShadowLayer(px(14).toFloat(), 0f, 0f, 0x88FF00D0.toInt())
         }
         root.findViewById<TextView>(R.id.heroDesc).apply {
             maxLines = if (m.compact) 2 else 3

@@ -1,31 +1,30 @@
 <resources>
-    <!-- STREAMR v3 tokens (streamr-android-tv-design_v3.md). Crimson brand on a near-black blue ground;
-         one brighter red for LIVE and progress. Names stay stable so every layout and gradient keeps working. -->
-    <color name="abyss">#0F1117</color>
-    <color name="night">#0A0C11</color>
-    <color name="surface">#1B1E26</color>
-    <color name="surface_hi">#23262F</color>
-    <!-- Brand crimson: primary, labels, profile dot, gloss. -->
-    <color name="brand">#C4161C</color>
-    <color name="brand_light">#E0243A</color>
-    <color name="brand_deep">#A8101A</color>
-    <!-- The crimson inside the launcher tile; the adaptive background must match it exactly. -->
-    <color name="brand_tile">#B4010F</color>
-    <color name="crimson">#C4161C</color>
-    <color name="crimson_bright">#E5383B</color>
-    <color name="crimson_deep">#8A0F14</color>
-    <color name="wine">#2A1013</color>
+    <!-- STREAMR cyber-neon tokens (screen-safari-studio / styles.css).
+         Deep violet-abyss ground (#060410), electric magenta primary (#FF00D0),
+         and electric cyan accent/focus/live (#00ECF7). -->
+    <color name="abyss">#060410</color>
+    <color name="night">#020107</color>
+    <color name="surface">#100A23</color>
+    <color name="surface_hi">#1B1630</color>
+    <!-- Brand primary (cyber magenta) & accent (cyber cyan). -->
+    <color name="brand">#FF00D0</color>
+    <color name="brand_light">#00ECF7</color>
+    <color name="brand_deep">#BB009B</color>
+    <color name="brand_tile">#03020A</color>
+    <color name="crimson">#FF00D0</color>
+    <color name="crimson_bright">#00ECF7</color>
+    <color name="crimson_deep">#BB009B</color>
+    <color name="wine">#1B0928</color>
     <color name="gloss_hi">#FFFFFFFF</color>
-    <!-- Kept names keep existing layout and gradient references valid. -->
-    <color name="signal">#E5383B</color>
-    <color name="ion">#F2626B</color>
-    <color name="indigo">#59616E</color>
-    <color name="live">#E5383B</color>
-    <color name="gold">#E0A24B</color>
+    <color name="signal">#00ECF7</color>
+    <color name="ion">#5BF3FF</color>
+    <color name="indigo">#5E6C92</color>
+    <color name="live">#00ECF7</color>
+    <color name="gold">#FFB84D</color>
     <color name="text">#F5F5F5</color>
-    <color name="text_dim">#A4A7B0</color>
-    <color name="text_faint">#6E717A</color>
-    <color name="glass">#8C1B1E26</color>
-    <color name="glass_deep">#B30F1117</color>
-    <color name="border">#1AFFFFFF</color>
+    <color name="text_dim">#98AFD5</color>
+    <color name="text_faint">#687AA0</color>
+    <color name="glass">#8C100A23</color>
+    <color name="glass_deep">#D1090713</color>
+    <color name="border">#4000ECF7</color>
 </resources>

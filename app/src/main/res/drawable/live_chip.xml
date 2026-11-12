@@ -1,5 +1,5 @@
-<!-- The player's LIVE chip: solid brand crimson with white type; a 12% tint disappears over bright sport. -->
+<!-- LIVE chip (live.tsx: bg-live): electric cyan badge with dark obsidian type. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="@color/brand"/>
+    <solid android:color="@color/live"/>
     <corners android:radius="5dp"/>
 </shape>

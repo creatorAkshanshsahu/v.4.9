@@ -539,16 +539,31 @@ class MainActivity : AppCompatActivity() {
         runCatching { layoutHero(); styleSegs(); fillHero(null); loadChannels() }
             .onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
-        // No entrance. The site opens on the shelf, so the app does too: no reveal, no sound mark, no
-        // full-screen canvas drawing before the first frame the viewer asked for.
+        // Cyber-neon motion entrance (`streamr-cyber-logo-full-motion.mp4`), skippable by tap or any remote key.
         home.alpha = 1f; home.translationY = 0f
-        intro.onReveal = null
-        intro.onDone = null
-        intro.visibility = View.GONE
-        ui.post {
-            if (isFinishing || currentFocus != null) return@post
-            if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
-            else segs[posOf(tab)].requestFocus()
+        if (!safeMode && !crashScreen) {
+            intro.visibility = View.VISIBLE
+            intro.bringToFront()
+            intro.onReveal = { home.alpha = 1f; home.translationY = 0f }
+            intro.onDone = {
+                intro.visibility = View.GONE
+                ui.post {
+                    if (isFinishing || isDestroyed || currentFocus != null) return@post
+                    if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
+                    else segs[posOf(tab)].requestFocus()
+                }
+            }
+            intro.start()
+        } else {
+            intro.onReveal = null
+            intro.onDone = null
+            intro.visibility = View.GONE
+            intro.skip()
+            ui.post {
+                if (isFinishing || currentFocus != null) return@post
+                if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
+                else segs[posOf(tab)].requestFocus()
+            }
         }
         Movies.diskDir = File(filesDir, "tmdb").apply { mkdirs() }
         Movies.timingListener = { event -> android.util.Log.i("AKTV-VOD", "${event.stage} ${event.elapsedMs}ms cache=${event.cacheHit}") }
@@ -579,8 +594,6 @@ class MainActivity : AppCompatActivity() {
                 checkForUpdates(interactive = true)
             }
         }
-        // The entrance view stays in the hierarchy but is never started: nothing animates, nothing is drawn.
-        intro.skip()
     }
 
     // ---------- crash screen ----------
@@ -702,19 +715,25 @@ class MainActivity : AppCompatActivity() {
         this.text = text; textSize = if (compact) 12f else 15f; typeface = fBold
         isFocusable = true; isClickable = true
         setPadding((24 * dp).toInt(), ((if (compact) 8 else 12) * dp).toInt(), (24 * dp).toInt(), ((if (compact) 8 else 12) * dp).toInt())
-        // Play is the site's white rounded-lg button with dark type; every other hero action is glass,
-        // ringed white on focus. Twelve is the site's --radius; a full pill is not its button shape.
-        val bg = Ui.pill(dp, if (primary) Accent.TEXT else 0x33FFFFFF, 12f)
+        // Cyber-neon hero buttons (Rails.tsx): primary Play is cyber magenta (`bg-primary`) with white type;
+        // secondary actions are cyber glass with a 25% cyan hairline, ringed electric cyan on focus.
+        val hairline = (1 * dp).toInt().coerceAtLeast(1)
+        val focusRing = (2 * dp).toInt().coerceAtLeast(2)
+        val bg = Ui.pill(dp, if (primary) Accent.BRAND else 0xB3100A23.toInt(), 12f).apply {
+            if (!primary) setStroke(hairline, 0x4000ECF7)
+        }
         background = bg
-        setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
-        setOnFocusChangeListener { _, focused ->
+        setTextColor(Accent.TEXT)
+        setOnFocusChangeListener { v, focused ->
             if (primary) {
-                bg.setColor(Accent.TEXT)
+                bg.setColor(Accent.BRAND)
+                bg.setStroke(if (focused) focusRing else 0, Accent.SIGNAL)
             } else {
-                bg.setColor(if (focused) 0x4DFFFFFF else 0x33FFFFFF)
+                bg.setColor(if (focused) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
+                bg.setStroke(if (focused) focusRing else hairline, if (focused) Accent.SIGNAL else 0x4000ECF7)
             }
-            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.TEXT)
-            setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
+            setTextColor(Accent.TEXT)
+            v.animate().scaleX(if (focused) 1.05f else 1f).scaleY(if (focused) 1.05f else 1f).setDuration(180).start()
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[posOf(tab)].id
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (12 * dp).toInt() }
@@ -740,21 +759,26 @@ class MainActivity : AppCompatActivity() {
     private fun sectionAccent() = if (tab == 1) Accent.BRAND_LIGHT else Accent.BRAND
 
     /**
-     * One pill, three states: the active section is a white pill with dark type, focus is a glass fill
-     * with a 2dp white ring, everything else is quiet. Nothing here allocates or animates per frame.
+     * Cyber pill states (TopNav.tsx): active section is cyber magenta (`bg-primary text-primary-foreground`),
+     * focus adds a 2dp electric cyan ring (`--focus`), idle pills sit quietly on the glass bar.
      */
     private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
         val ring = (2 * dp).toInt().coerceAtLeast(2)
         when {
+            focused && active -> {
+                bg.setColor(Accent.BRAND)
+                bg.setStroke(ring, Accent.SIGNAL)
+                tv.setTextColor(Accent.TEXT)
+            }
             focused -> {
-                bg.setColor(0x33FFFFFF)
-                bg.setStroke(ring, 0xF2FFFFFF.toInt())
+                bg.setColor(0x551B1630)
+                bg.setStroke(ring, Accent.SIGNAL)
                 tv.setTextColor(Accent.TEXT)
             }
             active -> {
-                bg.setColor(Accent.TEXT)
+                bg.setColor(Accent.BRAND)
                 bg.setStroke(0, Color.TRANSPARENT)
-                tv.setTextColor(Accent.ABYSS)
+                tv.setTextColor(Accent.TEXT)
             }
             else -> {
                 bg.setColor(Color.TRANSPARENT)
@@ -762,20 +786,21 @@ class MainActivity : AppCompatActivity() {
                 tv.setTextColor(Accent.DIM)
             }
         }
-        val scale = if (focused) 1.04f else 1f
+        val scale = if (focused) 1.05f else 1f
         tv.scaleX = scale; tv.scaleY = scale
     }
 
-    private val searchBg by lazy { Ui.pill(dp, 0x1FFFFFFF, 19f) }
+    private val searchBg by lazy { Ui.pill(dp, 0xA8100A23.toInt(), 19f) }
 
-    /** Round glyph buttons keep their glass disc; only the ring and the lift answer focus. */
+    /** Round glyph buttons keep their cyber glass disc; electric cyan ring and lift answer focus. */
     private fun roundStyle(tv: TextView, bg: GradientDrawable) {
         val ring = (2 * dp).toInt().coerceAtLeast(2)
+        val hairline = (1 * dp).toInt().coerceAtLeast(1)
         val on = tv.isFocused
-        bg.setColor(if (on) 0x40FFFFFF else 0x1FFFFFFF)
-        bg.setStroke(if (on) ring else 0, 0xF2FFFFFF.toInt())
+        bg.setColor(if (on) 0xCC1B1630.toInt() else 0xA8100A23.toInt())
+        bg.setStroke(if (on) ring else hairline, if (on) Accent.SIGNAL else 0x4000ECF7)
         tv.setTextColor(Accent.TEXT)
-        tv.scaleX = if (on) 1.04f else 1f
+        tv.scaleX = if (on) 1.05f else 1f
         tv.scaleY = tv.scaleX
     }
 
@@ -1686,10 +1711,10 @@ class MainActivity : AppCompatActivity() {
             heroText.animate().alpha(1f).translationX(0f).setDuration(380).setInterpolator(DecelerateInterpolator(1.7f)).start()
         }.start()
     }
-    /** Tints the dark hero treatment with the selected section's accent. */
+    /** Tints the dark hero treatment with the selected section's cyber accent. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(0xFF140A0E.toInt(), partner, 0.12f), Ui.mix(0xFF1A0C12.toInt(), c, 0.16f), 0xFF0C0710.toInt())
-        heroProgress.progressTintList = ColorStateList.valueOf(c)
+        orbBg.colors = intArrayOf(Ui.mix(0xFF0A061A.toInt(), partner, 0.16f), Ui.mix(0xFF0E0822.toInt(), c, 0.18f), 0xFF060410.toInt())
+        heroProgress.progressTintList = ColorStateList.valueOf(Accent.LIVE)
     }
     /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
     private fun showCinematicFallback(forTile: Tile?) {
@@ -3427,6 +3452,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (::intro.isInitialized) runCatching { intro.skip() }
         ui.removeCallbacksAndMessages(null); resolveJob?.cancel(true); previewJob?.cancel(true)
         updateNetworkCallback?.let { callback ->
             (getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)?.unregisterNetworkCallback(callback)

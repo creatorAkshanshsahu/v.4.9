@@ -62,7 +62,7 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.heroDot).apply {
                 visibility = View.VISIBLE
                 text = if (movies) "ORIGINAL FILM" else "LIVE"
-                setTextColor(Accent.BRAND)
+                setTextColor(Accent.SIGNAL)
             }
             root.findViewById<ImageView>(R.id.heroLogo).apply {
                 setImageResource(R.drawable.streamr_mark)
@@ -70,7 +70,7 @@ class HomePreviewTest {
             }
             root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF1A070D.toInt(), 0xFF2A0A14.toInt(), 0xFF07040A.toInt()))
+                intArrayOf(0xFF0A061A.toInt(), 0xFF14092C.toInt(), 0xFF060410.toInt()))
             root.findViewById<ImageView>(R.id.heroBackdrop).apply {
                 setImageResource(R.drawable.home_hero_cinematic); visibility = View.VISIBLE; alpha = 1f
             }
@@ -80,24 +80,26 @@ class HomePreviewTest {
             val heroActions = if (movies) listOf("▶   Play", "More Info") else listOf("▶   Play Live", "Details")
             heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
-                    text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)
+                    text = label; textSize = if (compact) 11f else 13f; setTextColor(Accent.TEXT)
                     setPadding(22, if (compact) 7 else 11, 22, if (compact) 7 else 11)
-                    background = Ui.pill(1f, if (index == 0) Color.WHITE else 0x33FFFFFF, 22f)
+                    background = Ui.pill(1f, if (index == 0) Accent.BRAND else 0xB3100A23.toInt(), 12f).apply {
+                        if (index != 0) setStroke(1, 0x4000ECF7)
+                    }
                 }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 12 })
             }
             for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.searchBtn)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) Accent.TEXT else Color.TRANSPARENT, 18f)
-                view.setTextColor(if (selected) Accent.ABYSS else Accent.DIM)
+                view.background = Ui.pill(1f, if (selected) Accent.BRAND else Color.TRANSPARENT, 18f)
+                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
             }
             for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) Accent.TEXT else 0x33FFFFFF, 22f).apply {
-                    if (selected) setStroke(2, Accent.SIGNAL)
+                view.background = Ui.pill(1f, if (selected) Accent.BRAND else 0xA8100A23.toInt(), 22f).apply {
+                    setStroke(if (selected) 2 else 1, if (selected) Accent.SIGNAL else 0x4000ECF7)
                 }
-                view.setTextColor(if (selected) Accent.ABYSS else Accent.DIM)
+                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
             }
             // The Live tab's real shape: the live row, the trending strip, then the recent row. The Sony
             // section that used to sit between them is gone; nothing here uses the browser or the site page.
@@ -127,9 +129,8 @@ class HomePreviewTest {
                         override fun onBindViewHolder(item: VH, index: Int) {
                             val tile = item.itemView
                             HomeChrome.styleTile(tile, poster = movies, compact = compact, dp = 1f, landscape = landscape)
-                            // Sample tile tints sampled through the real harmoniser, so the preview shows the
-                            // crimson identity instead of the retired teal/violet palette.
-                            val colors = listOf("#3F0A14", "#2B0710", "#55202A", "#4A0812", "#8C0F1C")
+                            // Sample tile tints harmonised onto the cyber cyan-to-magenta arc.
+                            val colors = listOf("#0F2852", "#260B48", "#4A0A52", "#0B3A4D", "#3D0A40")
                                 .map { Accent.normalize(android.graphics.Color.parseColor(it)) }
                             if (landscape) {
                                 tile.findViewById<ImageView>(R.id.trendingImage).setImageResource(listOf(

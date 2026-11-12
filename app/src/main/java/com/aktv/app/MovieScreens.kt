@@ -186,14 +186,19 @@ class DetailActivity : Activity() {
 
     private fun button(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 14f; typeface = fSemi; gravity = Gravity.CENTER; isFocusable = true; isClickable = true
-        setPadding((30 * dp).toInt(), (14 * dp).toInt(), (30 * dp).toInt(), (14 * dp).toInt())
-        val bg = GradientDrawable().apply { cornerRadius = 22 * dp }
+        setPadding((28 * dp).toInt(), (13 * dp).toInt(), (28 * dp).toInt(), (13 * dp).toInt())
+        val bg = GradientDrawable().apply { cornerRadius = 12 * dp }
         background = bg
+        val hairline = (1 * dp).toInt().coerceAtLeast(1)
+        val focusRing = (2 * dp).toInt().coerceAtLeast(2)
         val style = { f: Boolean ->
-            bg.setColor(if (primary) Accent.TEXT else if (f) 0x5CFFFFFF else 0x33FFFFFF)
-            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, Accent.TEXT)
-            setTextColor(if (primary || f) Accent.ABYSS else Accent.TEXT)
-            animate().scaleX(if (f) 1.045f else 1f).scaleY(if (f) 1.045f else 1f).translationZ(if (f) 8 * dp else 0f)
+            bg.setColor(if (primary) Accent.BRAND else if (f) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
+            bg.setStroke(
+                if (f) focusRing else if (primary) 0 else hairline,
+                if (f) Accent.SIGNAL else 0x4000ECF7
+            )
+            setTextColor(Accent.TEXT)
+            animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).translationZ(if (f) 8 * dp else 0f)
                 .setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
         }
         style(false)
