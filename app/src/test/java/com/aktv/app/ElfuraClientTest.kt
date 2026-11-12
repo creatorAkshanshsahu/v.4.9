@@ -313,4 +313,38 @@ class ElfuraClientTest {
             assertEquals("Ryomen Sukuna", eps.first().name)
         }
     }
+
+    @Test
+    fun `expands advertised sourceGroups such as source-8 and source-14 when fast window is empty`() {
+        MockWebServer().use { server ->
+            server.dispatcher = object : okhttp3.mockwebserver.Dispatcher() {
+                override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                    val path = request.path.orEmpty()
+                    return when {
+                        path.startsWith("/api/v1/session") ->
+                            MockResponse().setBody("""{"pltoken":"tok-254679b","nonce":"n-254679b"}""")
+                        path.startsWith("/api/v1/playback") && !path.contains("source=") ->
+                            MockResponse().setBody(
+                                """{"ok":true,"sources":[],"sourceGroups":[{"id":"source-8","count":1},{"id":"source-14","count":1}]}"""
+                            )
+                        path.contains("source=source-8") ->
+                            MockResponse().setBody(
+                                """{"ok":true,"sources":[{"id":"s8","sourceId":"source-8","url":"/api/v1/stream?t=s8-hls","type":"hls","quality":"1080p","audioLang":"en"}]}"""
+                            )
+                        path.contains("source=source-14") ->
+                            MockResponse().setBody(
+                                """{"ok":true,"sources":[{"id":"s14","sourceId":"source-14","url":"https://bcdn.hakunaymatata.com/resource/1381071.mp4?sign=ok","type":"mp4","quality":"1080p","audioLang":"hi"}]}"""
+                            )
+                        else -> MockResponse().setBody("""{"ok":true,"sources":[]}""")
+                    }
+                }
+            }
+
+            val sources = ElfuraClient.resolve(FrostTitle(1381071, "movie"), server.url("/"), OkHttpClient())
+            assertTrue("Expected both source-8 HLS and source-14 MP4", sources.size >= 2)
+            assertTrue(sources.any { it.scraperName == "Source 8" && it.format == VodFormat.HLS })
+            val mbSource = sources.first { it.url.contains("hakunaymatata.com") }
+            assertEquals(VidLinkClient.MOVIEBOX_REFERER, mbSource.headers["Referer"])
+        }
+    }
 }

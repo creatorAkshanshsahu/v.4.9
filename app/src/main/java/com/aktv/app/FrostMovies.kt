@@ -392,11 +392,15 @@ internal object FrostHttp {
         return transport.newBuilder().addNetworkInterceptor { chain ->
             val request = chain.request()
             val sameOrigin = origin.scheme == request.url.scheme && origin.host == request.url.host && origin.port == request.url.port
+            val movieBoxRedirect = !sameOrigin && VidLinkClient.isMovieBoxCdn(request.url.toString())
             val builder = request.newBuilder().header("User-Agent", TgHttp.USER_AGENT)
             source.headers.forEach { (name, value) ->
                 builder.removeHeader(name)
                 val scoped = name.equals("authorization", true) || name.equals("cookie", true) || name.startsWith("x-", true)
-                if (!scoped || sameOrigin) builder.header(name, value)
+                val foreignRefererOnMovieBox = movieBoxRedirect &&
+                    (name.equals("referer", true) || name.equals("origin", true)) &&
+                    !value.contains("moviebox", true) && !value.contains("inmoviebox", true) && !value.contains("aoneroom", true)
+                if ((!scoped || sameOrigin) && !foreignRefererOnMovieBox) builder.header(name, value)
             }
             chain.proceed(builder.build())
         }.build()

@@ -39,7 +39,16 @@ internal object ElfuraClient {
     private const val MAX_BYTES = 2 * 1024 * 1024
     private const val CATALOG_TTL_MS = 6L * 3600_000L
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
-    val SOURCE_IDS = listOf("source-1", "source-2", "source-3", "source-4", "source-5", "source-6")
+    val SOURCE_IDS = listOf(
+        "source-1", "source-2", "source-3", "source-4", "source-5",
+        "source-7", "source-8", "source-9", "source-10", "source-11",
+        "source-12", "source-13", "source-14", "source-15", "source-16", "source-17"
+    )
+    private val PRIORITY_LANES = listOf(
+        "source-1", "source-2", "source-3", "source-8",
+        "source-12", "source-13", "source-14", "source-4", "source-5"
+    )
+    private val SOURCE_ID_REGEX = Regex("^source-[1-9]\\d{0,3}$")
 
     private val BOOT_JSON = Regex(
         """window\.__ELFURA_BOOT__\s*=\s*(\{[\s\S]*?\})\s*(?:;|</script>)""",
@@ -277,17 +286,36 @@ internal object ElfuraClient {
         val session = obtainSession(title, baseUrl, client)
         val initial = fetchPlayback(title, session, sourceId = null, baseUrl = baseUrl, client = client)
         val rawCandidates = ArrayList<JSONObject>()
-        if (initial != null) collectCandidates(initial, rawCandidates)
+        val advertisedGroups = LinkedHashSet<String>()
+        if (initial != null) {
+            collectCandidates(initial, rawCandidates)
+            val groups = initial.optJSONArray("sourceGroups")
+            if (groups != null) {
+                for (i in 0 until minOf(groups.length(), 32)) {
+                    val g = groups.optJSONObject(i) ?: continue
+                    val id = cleanText(g.opt("id"), 24)
+                    if (SOURCE_ID_REGEX.matches(id) && g.optInt("count", 1) > 0) advertisedGroups.add(id)
+                }
+            }
+        }
 
-        // When the fast server window returns empty, poll individual scraper lanes concurrently
-        // under a tight shared deadline so empty titles fail over to VidLink / TG in ~3.5s.
-        if (rawCandidates.isEmpty() && session != null) {
-            val pool = Executors.newFixedThreadPool(SOURCE_IDS.size) { r ->
+        // Poll additional advertised sourceGroups or priority scraper lanes concurrently when the fast
+        // window returns empty (or advertises unexpanded sourceGroups) so cold-cache titles resolve cleanly.
+        val resolvedGroups = rawCandidates.mapNotNull { cleanText(it.opt("sourceId"), 24).takeIf { id -> id.isNotEmpty() } }.toSet()
+        val pendingGroups = advertisedGroups.filter { it !in resolvedGroups }
+        val lanesToPoll = when {
+            rawCandidates.isEmpty() -> (advertisedGroups + PRIORITY_LANES).distinct().take(10)
+            pendingGroups.isNotEmpty() && rawCandidates.size < 3 -> pendingGroups.take(4)
+            else -> emptyList()
+        }
+        if (lanesToPoll.isNotEmpty() && session != null) {
+            val pool = Executors.newFixedThreadPool(lanesToPoll.size.coerceAtMost(8)) { r ->
                 Thread(r, "aktv-elfura-lane").apply { isDaemon = true }
             }
             try {
-                val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(3_800)
-                val jobs = SOURCE_IDS.map { lane ->
+                val budgetMs = if (rawCandidates.isEmpty()) 8_000L else 3_500L
+                val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs)
+                val jobs = lanesToPoll.map { lane ->
                     pool.submit(Callable {
                         fetchPlayback(title, session, sourceId = lane, baseUrl = baseUrl, client = client)
                     })
@@ -380,6 +408,11 @@ internal object ElfuraClient {
             if (!session?.pltoken.isNullOrBlank()) put("X-Playback-Token", session!!.pltoken)
         }
 
+        val movieBoxHeaders = mapOf(
+            "User-Agent" to TgHttp.USER_AGENT,
+            "Referer" to VidLinkClient.MOVIEBOX_REFERER
+        )
+
         val direct = ArrayList<FrostSource>()
         val proxied = ArrayList<FrostSource>()
         val seen = HashSet<String>()
@@ -400,6 +433,7 @@ internal object ElfuraClient {
             val lang = if (multiAudio) "Multi-Audio" else readableLanguage(cleanText(item.opt("audioLang") ?: item.opt("language"), 32))
             val subs = parseSubtitles(item.optJSONArray("subtitles") ?: item.optJSONArray("tracks"), baseUrl, nonce)
             val baseId = cleanText(item.opt("id"), 96).ifBlank { "elfura-$idx" }
+            val mainHeaders = if (VidLinkClient.isMovieBoxCdn(mainUrl)) movieBoxHeaders else headers
 
             if (seen.add("${mainUrl}|${format.name}|$lang")) {
                 direct.add(
@@ -411,7 +445,7 @@ internal object ElfuraClient {
                         quality = quality,
                         language = lang,
                         hevc = item.opt("hevc") as? Boolean,
-                        headers = headers,
+                        headers = mainHeaders,
                         subtitles = subs,
                         credentialOrigin = origin,
                         scraperName = sourceLabel

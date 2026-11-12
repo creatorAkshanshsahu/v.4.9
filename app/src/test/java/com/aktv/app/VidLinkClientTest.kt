@@ -108,4 +108,27 @@ class VidLinkClientTest {
         assertTrue(titles.any { it.contains("Crunchyroll") })
         assertTrue(titles.any { it.contains("Indian Cinema") })
     }
+
+    @Test
+    fun `1080p H264 ranks ahead of multi-gigabyte 2160p progressive MP4 while keeping 2160p selectable`() {
+        val json = """
+            {
+              "sourceId": "mwVault",
+              "stream": {
+                "id": "primary",
+                "type": "file",
+                "qualities": {
+                  "2160": {"type": "mp4", "url": "https://bcdn.hakunaymatata.com/resource/2160.mp4?sign=4k", "codecName": "h264", "headers": {}},
+                  "1080": {"type": "mp4", "url": "https://bcdn.hakunaymatata.com/resource/1080.mp4?sign=fhd", "codecName": "h264", "headers": {}},
+                  "480": {"type": "mp4", "url": "https://bcdn.hakunaymatata.com/resource/480.mp4?sign=sd", "codecName": "h264", "headers": {}}
+                },
+                "captions": []
+              }
+            }
+        """.trimIndent()
+
+        val sources = VidLinkClient.parseResponse(json)
+        assertEquals("1080p", sources.first().quality)
+        assertTrue("2160p must remain selectable in sources list", sources.any { it.quality == "2160p" })
+    }
 }

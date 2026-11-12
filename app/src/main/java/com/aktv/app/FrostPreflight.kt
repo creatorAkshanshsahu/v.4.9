@@ -1,5 +1,7 @@
 package com.aktv.app
 
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import okhttp3.Request
 
@@ -20,7 +22,9 @@ internal object FrostPreflight {
         .followRedirects(true).followSslRedirects(false).build()
 
     fun check(source: FrostSource): Verdict = try {
-        val builder = Request.Builder().url(source.url).get().header("Accept", "*/*")
+        val builder = Request.Builder().url(source.url).get().header("Accept", "*/*").apply {
+            if (source.format == VodFormat.MP4) header("Range", "bytes=0-1023")
+        }
         // Ask the way the player will ask: same client, same per-source headers.
         val call = FrostHttp.client(source, client).newCall(builder.build())
         call.execute().use { response ->
@@ -64,17 +68,29 @@ internal object FrostPreflight {
             body.isBlank() -> Verdict.UNKNOWN
             else -> Verdict.UNKNOWN
         }
-        format == VodFormat.MP4 -> Verdict.ALIVE
+        format == VodFormat.MP4 -> if (contentType.contains("html", true)) Verdict.DEAD else Verdict.ALIVE
         else -> Verdict.UNKNOWN
     }
 
     /** Everything but the addresses that answered "this does not exist". */
     fun keep(sources: List<FrostSource>): List<FrostSource> {
         if (sources.isEmpty()) return sources
-        val alive = ArrayList<FrostSource>(sources.size)
-        for (source in sources) {
-            if (check(source) != Verdict.DEAD) alive += source
+        if (sources.size == 1) return if (check(sources[0]) != Verdict.DEAD) sources else emptyList()
+        val pool = Executors.newFixedThreadPool(sources.size.coerceAtMost(4)) { r ->
+            Thread(r, "aktv-vod-preflight").apply { isDaemon = true }
         }
-        return if (alive.isEmpty()) emptyList() else alive
+        return try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
+            val jobs = sources.map { source -> pool.submit(Callable { check(source) }) }
+            val alive = ArrayList<FrostSource>(sources.size)
+            for ((index, job) in jobs.withIndex()) {
+                val remainNs = (deadline - System.nanoTime()).coerceAtLeast(10_000_000L)
+                val verdict = try { job.get(remainNs, TimeUnit.NANOSECONDS) } catch (_: Exception) { job.cancel(true); Verdict.UNKNOWN }
+                if (verdict != Verdict.DEAD) alive += sources[index]
+            }
+            if (alive.isEmpty()) emptyList() else alive
+        } finally {
+            pool.shutdownNow()
+        }
     }
 }

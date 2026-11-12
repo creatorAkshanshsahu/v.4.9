@@ -40,7 +40,7 @@ class MoviePlayerUiTest {
             val back = views.first { it.contentDescription?.toString() == "Back" }
             assertTrue("the back arrow is centred in its circle: ${back.javaClass.simpleName}",
                 back is ImageView && back.scaleType == ImageView.ScaleType.CENTER)
-            for (label in listOf("Change source", "Audio & Subtitles", "Retry", "Playback details")) {
+            for (label in listOf("Change source", "OG Server", "TG Server", "Audio & Subtitles", "Retry", "Playback details")) {
                 assertTrue(label, views.filterIsInstance<TextView>().any { it.text.toString() == label && it.isFocusable && it.isClickable })
             }
             assertTrue(views.filterIsInstance<TextView>().any { it.text.toString() == "Sample film" })

@@ -136,11 +136,20 @@ class DetailActivity : Activity() {
         val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         playBtn = button("▶  Play", primary = true) { playCurrent() }
         buttons.addView(playBtn)
+        val altIsOg = preferredProvider != FrostProvider.OG.id
+        val altBtn = button(if (altIsOg) "▶  Play OG" else "▶  Play TG", primary = false) {
+            playCurrent(if (altIsOg) FrostProvider.OG.id else FrostProvider.FROST.id)
+        }
+        buttons.addView(altBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
         val serverBtn = button("Servers", primary = false) { showServerPicker() }
         buttons.addView(serverBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
         loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(pageAccent) }
         buttons.addView(loading, LinearLayout.LayoutParams((28 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (16 * dp).toInt() })
-        body.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (26 * dp).toInt() })
+        val buttonScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false; clipChildren = false; clipToPadding = false
+            addView(buttons)
+        }
+        body.addView(buttonScroll, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (26 * dp).toInt() })
 
         val sc = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; clipChildren = false; clipToPadding = false }
         seasonRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, (8 * dp).toInt(), (40 * dp).toInt(), (8 * dp).toInt()) }

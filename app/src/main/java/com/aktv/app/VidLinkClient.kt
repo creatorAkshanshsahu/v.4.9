@@ -282,10 +282,10 @@ internal class VidLinkClient(
                     val qHeaders = parseHeaders(qObj.optJSONObject("headers"))
                     entries += QualityEntry(rank, label, url, format, hevc, qHeaders)
                 }
-                // Prefer H.264/AVC ahead of HEVC when available, then highest resolution first
+                // Prefer 1080p/720p H.264/AVC ahead of multi-GB 4K progressive MP4s for fast mobile/TV start; keep 4K selectable.
                 entries.sortWith(
                     compareByDescending<QualityEntry> { it.hevc != true }
-                        .thenByDescending { it.rank }
+                        .thenByDescending { if (it.rank in 720..1080) it.rank + 2000 else it.rank }
                 )
                 for (entry in entries) {
                     val headers = if (entry.headers.isNotEmpty()) entry.headers

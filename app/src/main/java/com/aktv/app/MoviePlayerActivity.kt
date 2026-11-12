@@ -274,6 +274,8 @@ class MoviePlayerActivity : Activity() {
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         sourcesButton = button("Change source") { showSources() }.also(row::addView)
+        row.addView(button("OG Server") { desiredPlay = true; begin(FrostProvider.OG, fresh = true) })
+        row.addView(button("TG Server") { desiredPlay = true; begin(FrostProvider.FROST, fresh = true) })
         row.addView(button("Audio & Subtitles") { showTracks() })
         episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
         nextButton = button("Next episode") { nextEpisode() }.also(row::addView)

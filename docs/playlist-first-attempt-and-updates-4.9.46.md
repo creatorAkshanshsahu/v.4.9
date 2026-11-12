@@ -1849,3 +1849,28 @@ The brand files were in place in 5.4.19 and the icon still looked wrong on the d
   follows. The player says "TG TV playlist · programme schedule unavailable" instead of waiting for a guide.
 * `M3uPlaylistTest` pins the attribute/name split, the `#EXTGRP` fallback, the three drop rules, the empty-file
   case, the id derivation and the row caps.
+
+## 79. The JioTV playlist moved; it now finds itself (5.4.23)
+
+"Check if jio tv playlist is dead or not" → it was. `…/jiotv-m3u/jtv33.m3u8` answered **404**: the site had
+rebuilt its list as `jtv39.m3u8` (and `jtv34`, `jtv1` were 404 too — the whole name had moved on, not one typo).
+The host and its ClearKey endpoint were alive the whole time, so the section was pointed at a file that no
+longer existed and could never recover on its own.
+
+* `JioM3uProtocol.PLAYLIST` is now `jtv39.m3u8`.
+* `JioM3uProtocol.playlistCandidates()` is the real fix: the remembered address first (only if it is this
+  site's own numbered playlist), then the shipped one, then the next three numbers, then the two before it.
+  A rebuild is a rename, so the section now follows the rename instead of waiting for a release.
+* `TgServers.jioCatalogue()` walks those candidates and remembers whichever **answered over the network** in
+  `aktv_tg/jiotv_playlist`. A disk copy is deliberately not an answer: `JioM3uResolver` now tracks which
+  playlists really answered this session, so a stale `m3u8` on disk can never pin the section back to a name
+  the site has deleted. When nothing answers, the newest disk copy is still shown — the tab degrades to a
+  readable list instead of an error.
+* The resolver is built with the same neighbours (`extras`), so *playing* a channel searches the same names the
+  catalogue did — otherwise the shelf would list channels from `jtv39` while `resolve()` still asked `jtv33`.
+* `cachedJioCatalogue()` reads the file for the remembered address, so the first paint after a rebuild comes
+  from the right copy.
+* `JioM3uCandidatesTest` pins the order, the duplicate-free list, that every candidate is the site's own
+  numbered playlist, and that an address from anywhere else is never asked.
+* Sheet: the **TATA** list (`…/playlist/ttv6t.m3u`) is behind a bot-verification wall for a scriptless client,
+  and the app has no browser engine by design. It is left as it is; the tab reports its own empty state.
