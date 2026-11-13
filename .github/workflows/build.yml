@@ -59,6 +59,12 @@ jobs:
           STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
+          mkdir -p out
+          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then
+            echo "included" > out/starshare-prebake-status.txt
+          else
+            echo "not-set" > out/starshare-prebake-status.txt
+          fi
           env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
             gradle testArm32DebugUnitTest testArm64DebugUnitTest --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
           ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
@@ -110,12 +116,6 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
           cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
-          BC_FILE="app/build/generated/source/buildConfig/arm64/release/com/aktv/app/BuildConfig.java"
-          if [ -f "$BC_FILE" ] && ! grep -q 'STARSHARE_USER = "";' "$BC_FILE" && ! grep -q 'STARSHARE_PASS = "";' "$BC_FILE"; then
-            echo "included" > out/starshare-prebake-status.txt
-          else
-            echo "not-set" > out/starshare-prebake-status.txt
-          fi
       - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
