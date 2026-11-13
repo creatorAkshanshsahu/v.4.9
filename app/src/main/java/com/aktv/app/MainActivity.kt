@@ -2685,15 +2685,22 @@ class MainActivity : AppCompatActivity() {
             }
             val dir = if (t > tab) 1 else -1
             ui.removeCallbacks(heroRotate)
-            tab = t; layoutHero(); styleSegs(); stopPreview()
-            val shift = 28 * dp * dir
+            tab = t; layoutHero(); stopPreview()
             rowsView.animate().cancel()
-            rowsView.animate().alpha(0f).translationY(-shift).setDuration(150).withEndAction {
-                if (isFinishing || isDestroyed) return@withEndAction
-                refreshRows(); rowsView.scrollToPosition(0)
+            refreshRows()
+            rowsView.scrollToPosition(0)
+            val animScale = runCatching {
+                android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+            }.getOrDefault(1f)
+            if (animScale > 0f && rowsView.isAttachedToWindow) {
+                val shift = 18 * dp * dir
+                rowsView.alpha = 0.35f
                 rowsView.translationY = shift
-                rowsView.animate().alpha(1f).translationY(0f).setDuration(280).setInterpolator(DecelerateInterpolator(1.8f)).start()
-            }.start()
+                rowsView.animate().alpha(1f).translationY(0f).setDuration(200).setInterpolator(DecelerateInterpolator(1.8f)).start()
+            } else {
+                rowsView.alpha = 1f
+                rowsView.translationY = 0f
+            }
         } catch (err: Throwable) {
             CrashLog.record(this, err, "switchTab:$t")
             playMsg("Could not switch to this section right now.")

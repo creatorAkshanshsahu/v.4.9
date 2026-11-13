@@ -131,10 +131,11 @@ class MainActivityLaunchTest {
         val controller = Robolectric.buildActivity(MainActivity::class.java).create().start().resume()
         try {
             val activity = controller.get()
-            // Wait briefly for background disk-cache warmup to populate slices.
+            // Wait briefly for background disk-cache warmup to populate slices and lay out RecyclerViews.
             val deadline = System.currentTimeMillis() + 5_000L
             while (System.currentTimeMillis() < deadline) {
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+                measureAndLayout(activity)
                 val liveTexts = ArrayList<String>()
                 collect(activity.window.decorView, liveTexts)
                 if (liveTexts.any { it.contains("maxTV · Playlist") }) break
@@ -142,6 +143,7 @@ class MainActivityLaunchTest {
             }
 
             // Live TV must expose maxTV as a playlist shelf!
+            measureAndLayout(activity)
             val liveTexts = ArrayList<String>()
             collect(activity.window.decorView, liveTexts)
             assertTrue("Live TV must surface maxTV · Playlist shelf: $liveTexts", liveTexts.any { it.contains("maxTV · Playlist") })
@@ -149,6 +151,7 @@ class MainActivityLaunchTest {
             // Click StarShare tab and verify zero crashes & Hindi/Sports shelves render cleanly.
             activity.findViewById<View>(R.id.segStar).performClick()
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            measureAndLayout(activity)
             val starTexts = ArrayList<String>()
             collect(activity.window.decorView, starTexts)
             assertTrue("StarShare section title must appear: $starTexts", starTexts.any { it.contains("StarShare") })
@@ -158,6 +161,7 @@ class MainActivityLaunchTest {
             // Click maxTV tab and verify playlist shelves render cleanly.
             activity.findViewById<View>(R.id.segPortal).performClick()
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            measureAndLayout(activity)
             val maxTexts = ArrayList<String>()
             collect(activity.window.decorView, maxTexts)
             assertTrue("maxTV featured playlist shelf must appear: $maxTexts", maxTexts.any { it.contains("maxTV · Featured Playlist") })
@@ -165,6 +169,15 @@ class MainActivityLaunchTest {
         } finally {
             controller.pause().stop().destroy()
         }
+    }
+
+    private fun measureAndLayout(activity: MainActivity) {
+        val root = activity.window.decorView
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(960, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(1800, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, 960, 1800)
     }
 
     private fun collect(view: View, out: MutableList<String>) {
