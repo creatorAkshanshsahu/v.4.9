@@ -173,4 +173,39 @@ class XtreamClientTest {
             tmpDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `keepsIndianHindi retains Indian Hindi, Cricket and Dual-Audio while dropping foreign and regional`() {
+        // Must KEEP across all Indian Hindi & Sports/Dual-Audio categories:
+        assertTrue(XtreamClient.keepsIndianHindi("Star Plus HD", "|IN| HINDI ENTERTAINMENT"))
+        assertTrue(XtreamClient.keepsIndianHindi("Sony Max HD", "IN | HINDI MOVIES"))
+        assertTrue(XtreamClient.keepsIndianHindi("Aaj Tak HD", "IN | HINDI NEWS"))
+        assertTrue(XtreamClient.keepsIndianHindi("Star Sports 1 HD", "SPORTS"))
+        assertTrue(XtreamClient.keepsIndianHindi("Willow Cricket HD", "VIP CRICKET"))
+        assertTrue(XtreamClient.keepsIndianHindi("Discovery HD World", "KNOWLEDGE"))
+        assertTrue(XtreamClient.keepsIndianHindi("Cartoon Network", "KIDS"))
+        assertTrue(XtreamClient.keepsIndianHindi("9XM", "MUSIC"))
+        assertTrue(XtreamClient.keepsIndianHindi("Aastha", "DEVOTIONAL"))
+        assertTrue(XtreamClient.keepsIndianHindi("Pushpa (2021) Hindi Dubbed", "SOUTH HINDI DUBBED"))
+
+        // Must DROP non-Hindi regional Indian channels & categories:
+        assertFalse(XtreamClient.keepsIndianHindi("Star Vijay HD", "IN | TAMIL"))
+        assertFalse(XtreamClient.keepsIndianHindi("Star Maa HD", "IN | TELUGU"))
+        assertFalse(XtreamClient.keepsIndianHindi("Asianet HD", "IN | MALAYALAM"))
+        assertFalse(XtreamClient.keepsIndianHindi("Zee Marathi HD", "IN | MARATHI"))
+        assertFalse(XtreamClient.keepsIndianHindi("Star Jalsha HD", "IN | BENGALI"))
+        assertFalse(XtreamClient.keepsIndianHindi("PTC Punjabi", "IN | PUNJABI"))
+        assertFalse(XtreamClient.keepsIndianHindi("Colors Gujarati", "IN | GUJARATI"))
+
+        // Must DROP US, UK, PK, AR, BD and generic foreign channels:
+        assertFalse(XtreamClient.keepsIndianHindi("Sky Cinema Premiere", "UK | MOVIES"))
+        assertFalse(XtreamClient.keepsIndianHindi("ESPN HD", "US | SPORTS"))
+        assertFalse(XtreamClient.keepsIndianHindi("Geo News", "PK | PAKISTAN"))
+        assertFalse(XtreamClient.keepsIndianHindi("MBC 1", "AR | ARABIC"))
+        assertFalse(XtreamClient.keepsIndianHindi("HBO HD", "VIP ENTERTAINMENT"))
+
+        // Clean category display labels:
+        assertEquals("HINDI ENTERTAINMENT", XtreamClient.displayCategoryName("|IN| HINDI ENTERTAINMENT"))
+        assertEquals("SPORTS", XtreamClient.displayCategoryName("IN | SPORTS"))
+    }
 }

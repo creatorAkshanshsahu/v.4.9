@@ -38,7 +38,9 @@ import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.TrackSelectionDialogBuilder
 import androidx.recyclerview.widget.*
+import java.util.Locale
 import coil.load
 import coil.imageLoader
 import coil.request.ImageRequest
@@ -157,7 +159,7 @@ class MainActivity : AppCompatActivity() {
     private var xtreamVodMap = mapOf<Int, XtreamVodItem>()
     private var xtreamSeriesMap = mapOf<Int, XtreamSeriesItem>()
     private var xtreamMode = 0 // 0 = Live TV, 1 = Movies (VOD), 2 = Series
-    private var xtreamFilterEnHi = false
+    private var xtreamFilterMode = XtreamClient.FILTER_INDIAN_HINDI
     private var xtreamLiveLoaded = false; private var xtreamVodLoaded = false; private var xtreamSeriesLoaded = false
     private var xtreamInFlight = false
     private var xtreamPromptedThisRun = false
@@ -300,7 +302,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
     private lateinit var infoProgressRow: View; private lateinit var infoStart: TextView; private lateinit var infoEnd: TextView
     private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
-    private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
+    private lateinit var infoActions: View; private lateinit var infoSourceAction: TextView; private lateinit var infoAudioAction: TextView; private lateinit var infoQualityAction: TextView; private lateinit var infoRetryAction: TextView
     private lateinit var infoGuideAction: TextView
     private lateinit var playStatus: TextView; private var currentGuideNow: Programme? = null
     private var currentGuideData: Guide? = null
@@ -375,7 +377,7 @@ class MainActivity : AppCompatActivity() {
         segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries); segOg = findViewById(R.id.segOg)
         segStar = findViewById(R.id.segStar)
         searchBtn = findViewById(R.id.searchBtn)
-        xtreamFilterEnHi = xtreamPrefs.getBoolean("filter_en_hi", false)
+        xtreamFilterMode = xtreamPrefs.getInt("filter_mode", XtreamClient.FILTER_INDIAN_HINDI)
         findViewById<View>(R.id.navProfile)?.apply {
             isClickable = true
             setOnClickListener { showStarShareDialog() }
@@ -399,13 +401,14 @@ class MainActivity : AppCompatActivity() {
         infoProgressRow = findViewById(R.id.infoProgressRow); infoStart = findViewById(R.id.infoStart); infoEnd = findViewById(R.id.infoEnd)
         infoDesc = findViewById(R.id.infoDesc); infoScheduleNext = findViewById(R.id.infoScheduleNext)
         infoNext = findViewById(R.id.infoNext); playStatus = findViewById(R.id.playStatus); infoActions = findViewById(R.id.infoActions)
-        infoSourceAction = findViewById(R.id.infoSourceAction); infoQualityAction = findViewById(R.id.infoQualityAction); infoRetryAction = findViewById(R.id.infoRetryAction)
+        infoSourceAction = findViewById(R.id.infoSourceAction); infoAudioAction = findViewById(R.id.infoAudioAction); infoQualityAction = findViewById(R.id.infoQualityAction); infoRetryAction = findViewById(R.id.infoRetryAction)
         infoGuideAction = findViewById(R.id.infoGuideAction)
         infoSourceAction.setOnClickListener { showNativeSourceMenu() }
+        infoAudioAction.setOnClickListener { showAudioMenu() }
         infoQualityAction.setOnClickListener { showPictureMenu() }
         infoRetryAction.setOnClickListener { reloadStream() }
         infoGuideAction.setOnClickListener { showProgrammeGuide() }
-        listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+        listOf(infoGuideAction, infoSourceAction, infoAudioAction, infoQualityAction, infoRetryAction).forEach { action ->
             action.background = Ui.pill(dp, 0xB31C0D16.toInt(), 18f)
             action.setOnFocusChangeListener { v, focused ->
                 val text = v as TextView
@@ -472,7 +475,7 @@ class MainActivity : AppCompatActivity() {
                 card.getChildAt(1).layoutParams = lp
             }
             infoName.maxWidth = dockLp.width - (28 * dp).toInt()
-            listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
+            listOf(infoGuideAction, infoSourceAction, infoAudioAction, infoQualityAction, infoRetryAction).forEach { action ->
                 action.textSize = 9f; action.setPadding((8 * dp).toInt(), 0, (8 * dp).toInt(), 0)
                 (action.layoutParams as? LinearLayout.LayoutParams)?.let { lp -> lp.marginEnd = (4 * dp).toInt(); action.layoutParams = lp }
             }
@@ -561,8 +564,10 @@ class MainActivity : AppCompatActivity() {
             tv.setOnFocusChangeListener { _, _ -> styleSegs() }
         }
         // One guarded setup: a failure here leaves a usable app with a message, not a closed one.
-        runCatching { layoutHero(); styleSegs(); fillHero(null); loadChannels() }
-            .onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
+        runCatching {
+            layoutHero(); styleSegs(); fillHero(null); loadChannels()
+            if (!safeMode && xtreamAccount().isConfigured) loadXtreamCurrentMode(force = false)
+        }.onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
         // Cyber-neon motion entrance (`streamr-cyber-logo-full-motion.mp4`), skippable by tap or any remote key.
         home.alpha = 1f; home.translationY = 0f
@@ -1320,24 +1325,41 @@ class MainActivity : AppCompatActivity() {
     )
 
     // ---------- StarShare / Xtream Codes IPTV ----------
-    private fun xtreamAccount(): XtreamAccount = XtreamClient.parseInput(
-        xtreamPrefs.getString("server", XtreamClient.DEFAULT_SERVER).orEmpty(),
-        xtreamPrefs.getString("username", "").orEmpty(),
-        xtreamPrefs.getString("password", "").orEmpty()
-    )
+    private fun xtreamUsingCustomOverride(): Boolean =
+        !xtreamPrefs.getString("username", "").isNullOrBlank() &&
+            !xtreamPrefs.getString("password", "").isNullOrBlank()
+
+    private fun xtreamAccount(): XtreamAccount {
+        if (xtreamUsingCustomOverride()) {
+            return XtreamClient.parseInput(
+                xtreamPrefs.getString("server", XtreamClient.DEFAULT_SERVER).orEmpty(),
+                xtreamPrefs.getString("username", "").orEmpty(),
+                xtreamPrefs.getString("password", "").orEmpty()
+            )
+        }
+        val inbuilt = XtreamAccount.INBUILT
+        if (inbuilt.isConfigured && !xtreamPrefs.getBoolean("signed_out_inbuilt", false)) {
+            return inbuilt
+        }
+        return XtreamAccount(XtreamClient.DEFAULT_SERVER, "", "")
+    }
 
     private fun xtreamWorkingOrigin(account: XtreamAccount = xtreamAccount()): String =
         xtreamAuthInfo?.workingOrigin
-            ?: xtreamPrefs.getString("working_origin", null)?.takeIf { it.startsWith("http", true) }
+            ?: xtreamPrefs.getString("working_origin_${account.cacheKey}", null)?.takeIf { it.startsWith("http", true) }
             ?: account.normalizedOrigin
 
-    private fun xtreamAllowedFormats(): List<String> =
+    private fun xtreamAllowedFormats(account: XtreamAccount = xtreamAccount()): List<String> =
         xtreamAuthInfo?.allowedFormats
-            ?: xtreamPrefs.getString("allowed_formats", null)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+            ?: xtreamPrefs.getString("allowed_formats_${account.cacheKey}", null)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
                 .ifEmpty { listOf("ts", "m3u8") }
 
-    private fun visibleXtreamChannels(): List<Channel> =
-        if (xtreamFilterEnHi) allXtream.filter { XtreamClient.keepsEnglishOrHindi(it.name, it.category) } else allXtream
+    private fun visibleXtreamChannels(): List<Channel> {
+        if (allXtream.isEmpty()) return emptyList()
+        val filtered = allXtream.filter { XtreamClient.keepsByFilter(it.name, it.category, xtreamFilterMode) }
+        return if (filtered.isNotEmpty() || xtreamFilterMode == XtreamClient.FILTER_ALL) filtered
+        else allXtream.filter { XtreamClient.keepsEnglishOrHindi(it.name, it.category) }.ifEmpty { allXtream }
+    }
 
     private fun xtreamNeedsStatus(): Boolean {
         if (!xtreamAccount().isConfigured) return false
@@ -1360,10 +1382,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleXtreamFilter() {
-        xtreamFilterEnHi = !xtreamFilterEnHi
-        xtreamPrefs.edit().putBoolean("filter_en_hi", xtreamFilterEnHi).apply()
-        val label = if (xtreamFilterEnHi) "StarShare filter: India · English & Hindi" else "StarShare filter: All categories"
-        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
+        xtreamFilterMode = (xtreamFilterMode + 1) % 3
+        xtreamPrefs.edit().putInt("filter_mode", xtreamFilterMode).apply()
+        if (xtreamVodMap.isNotEmpty()) xtreamVodRows = buildXtreamVodRows(xtreamVodMap.values.toList())
+        if (xtreamSeriesMap.isNotEmpty()) xtreamSeriesRows = buildXtreamSeriesRows(xtreamSeriesMap.values.toList())
+        Toast.makeText(this, "StarShare filter: ${XtreamClient.filterLabel(xtreamFilterMode)}", Toast.LENGTH_SHORT).show()
         if (tab == 9) { refreshRows(); rowsView.scrollToPosition(0) }
     }
 
@@ -1409,8 +1432,8 @@ class MainActivity : AppCompatActivity() {
                 val auth = xtreamAuthInfo ?: XtreamClient.authenticate(account).also { info ->
                     xtreamAuthInfo = info
                     xtreamPrefs.edit()
-                        .putString("working_origin", info.workingOrigin)
-                        .putString("allowed_formats", info.allowedFormats.joinToString(","))
+                        .putString("working_origin_${account.cacheKey}", info.workingOrigin)
+                        .putString("allowed_formats_${account.cacheKey}", info.allowedFormats.joinToString(","))
                         .apply()
                 }
                 val origin = auth.workingOrigin
@@ -1425,9 +1448,7 @@ class MainActivity : AppCompatActivity() {
                             if (isFinishing || isDestroyed) return@runOnUiThread
                             xtreamInFlight = false; xtreamLiveLoaded = true
                             allXtream = mapped; seedAccents(mapped)
-                            xtreamMsg = if (mapped.isEmpty()) "StarShare returned no live channels."
-                            else if (visibleXtreamChannels().isEmpty()) "No English/Hindi channels matched — switch Filter to All."
-                            else ""
+                            xtreamMsg = if (mapped.isEmpty()) "StarShare returned no live channels." else ""
                             if (tab == 9) { refreshRows(); if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus() }
                             if (searchShown) updateResults()
                         }
@@ -1474,9 +1495,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildXtreamVodRows(items: List<XtreamVodItem>): List<Row> {
-        val filtered = if (xtreamFilterEnHi) items.filter { XtreamClient.keepsEnglishOrHindi(it.name, it.categoryName) } else items
+        val filtered = items.filter { XtreamClient.keepsByFilter(it.name, it.categoryName, xtreamFilterMode) }
         val source = filtered.ifEmpty { items }
-        val grouped = source.groupBy { it.categoryName }
+        val grouped = source.groupBy { XtreamClient.displayCategoryName(it.categoryName) }
         val orderedCats = grouped.keys.sortedWith(compareBy({ XtreamClient.categoryRank(it) }, { it.lowercase() }))
         return orderedCats.take(60).mapNotNull { cat ->
             val tiles = grouped[cat].orEmpty().take(80).map { v ->
@@ -1491,8 +1512,8 @@ class MainActivity : AppCompatActivity() {
                         logo = "",
                         year = v.year,
                         rating = v.rating,
-                        genres = listOf(v.categoryName),
-                        description = "StarShare VOD · ${v.categoryName} · ${v.containerExtension.uppercase()} direct stream"
+                        genres = listOf(cat),
+                        description = "StarShare VOD · $cat · ${v.containerExtension.uppercase()} direct stream"
                     )
                 )
             }
@@ -1501,9 +1522,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildXtreamSeriesRows(items: List<XtreamSeriesItem>): List<Row> {
-        val filtered = if (xtreamFilterEnHi) items.filter { XtreamClient.keepsEnglishOrHindi(it.name, it.categoryName) } else items
+        val filtered = items.filter { XtreamClient.keepsByFilter(it.name, it.categoryName, xtreamFilterMode) }
         val source = filtered.ifEmpty { items }
-        val grouped = source.groupBy { it.categoryName }
+        val grouped = source.groupBy { XtreamClient.displayCategoryName(it.categoryName) }
         val orderedCats = grouped.keys.sortedWith(compareBy({ XtreamClient.categoryRank(it) }, { it.lowercase() }))
         return orderedCats.take(60).mapNotNull { cat ->
             val tiles = grouped[cat].orEmpty().take(80).map { s ->
@@ -1518,8 +1539,8 @@ class MainActivity : AppCompatActivity() {
                         logo = "",
                         year = s.year,
                         rating = s.rating,
-                        genres = listOf(s.categoryName),
-                        description = s.plot.ifBlank { "StarShare Series · ${s.categoryName}" }
+                        genres = listOf(cat),
+                        description = s.plot.ifBlank { "StarShare Series · $cat" }
                     )
                 )
             }
@@ -1548,7 +1569,10 @@ class MainActivity : AppCompatActivity() {
             Tile.Action("Live TV" + (if (allXtream.isNotEmpty()) "\n${visibleXtreamChannels().size} channels" else ""), active = xtreamMode == 0) { switchXtreamMode(0) },
             Tile.Action("Movies (VOD)", active = xtreamMode == 1) { switchXtreamMode(1) },
             Tile.Action("Series", active = xtreamMode == 2) { switchXtreamMode(2) },
-            Tile.Action(if (xtreamFilterEnHi) "Filter: India · EN + HI\nTap for All" else "Filter: All Categories\nTap for EN + HI", active = xtreamFilterEnHi) { toggleXtreamFilter() },
+            Tile.Action(
+                "Filter: ${XtreamClient.filterLabel(xtreamFilterMode)}\nTap to cycle",
+                active = xtreamFilterMode != XtreamClient.FILTER_ALL
+            ) { toggleXtreamFilter() },
             Tile.Action("Account & Server\n$hostShort") { showStarShareDialog() },
             Tile.Action("Refresh Catalogue\nRe-sync with server") {
                 xtreamAuthInfo = null
@@ -1565,10 +1589,10 @@ class MainActivity : AppCompatActivity() {
             0 -> {
                 val channels = visibleXtreamChannels()
                 if (channels.isNotEmpty()) {
-                    add(Row("StarShare · Featured Live", featuredChannels(channels).take(40).map { Tile.Ch(it) }))
+                    add(Row("StarShare · Featured Hindi & Sports", featuredChannels(channels).take(40).map { Tile.Ch(it) }))
                     add(Row(FAV, favTiles()))
                     addAll(recentRow())
-                    val grouped = channels.groupBy { it.category }
+                    val grouped = channels.groupBy { XtreamClient.displayCategoryName(it.category) }
                     val orderedCats = grouped.keys.sortedWith(compareBy({ XtreamClient.categoryRank(it) }, { it.lowercase() }))
                     for (cat in orderedCats) {
                         val items = grouped[cat].orEmpty()
@@ -1576,8 +1600,8 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            1 -> addAll(if (xtreamFilterEnHi && xtreamVodMap.isNotEmpty()) buildXtreamVodRows(xtreamVodMap.values.toList()) else xtreamVodRows)
-            else -> addAll(if (xtreamFilterEnHi && xtreamSeriesMap.isNotEmpty()) buildXtreamSeriesRows(xtreamSeriesMap.values.toList()) else xtreamSeriesRows)
+            1 -> addAll(xtreamVodRows)
+            else -> addAll(xtreamSeriesRows)
         }
     }
 
@@ -1676,6 +1700,8 @@ class MainActivity : AppCompatActivity() {
         if (isFinishing || isDestroyed) return
         xtreamDialog?.dismiss()
         val px = { v: Int -> (v * dp).toInt() }
+        val customOverride = xtreamUsingCustomOverride()
+        val inbuilt = XtreamAccount.INBUILT
         val existing = xtreamAccount()
 
         val container = LinearLayout(this).apply {
@@ -1687,14 +1713,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         container.addView(TextView(this).apply {
-            text = "StarShare / Xtream Login"
+            text = "StarShare / Xtream Account"
             textSize = 18f; typeface = fBold; setTextColor(Accent.TEXT)
         })
         container.addView(TextView(this).apply {
-            val statusNote = xtreamAuthInfo?.let { "Connected: ${it.summary()} (${it.workingOrigin})" }
-                ?: "Sign in with your StarShare username & password (or paste an M3U link). Saved privately on this device only."
+            val statusNote = when {
+                !customOverride && inbuilt.isConfigured && existing.isConfigured ->
+                    "Using inbuilt StarShare account (${inbuilt.normalizedOrigin})${xtreamAuthInfo?.let { " · ${it.summary()}" }.orEmpty()}. Enter credentials below only if you want to override it."
+                xtreamAuthInfo != null ->
+                    "Connected: ${xtreamAuthInfo!!.summary()} (${xtreamAuthInfo!!.workingOrigin})"
+                else ->
+                    "Sign in with your StarShare username & password (or paste an M3U link). Saved privately on this device only."
+            }
             text = statusNote
-            textSize = 11.5f; setTextColor(if (xtreamAuthInfo != null) Accent.SIGNAL else Accent.DIM)
+            textSize = 11.5f; setTextColor(if (existing.isConfigured) Accent.SIGNAL else Accent.DIM)
             setPadding(0, px(4), 0, px(10))
         })
 
@@ -1721,8 +1753,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val serverInput = inputField("Server URL (e.g. http://livebox.pro:8080)", existing.server.ifBlank { XtreamClient.DEFAULT_SERVER })
-        val userInput = inputField("Username", existing.username)
-        val passInput = inputField("Password", existing.password, password = true)
+        val userInput = inputField("Username", if (customOverride) existing.username else "")
+        val passInput = inputField(
+            if (!customOverride && inbuilt.isConfigured) "Password (inbuilt active — enter only to override)" else "Password",
+            if (customOverride) existing.password else "",
+            password = true
+        )
 
         // Quick 1-tap server preset row for TV remote & touch.
         val presetScroll = android.widget.HorizontalScrollView(this).apply {
@@ -1815,9 +1851,24 @@ class MainActivity : AppCompatActivity() {
         dlg.window?.setBackgroundDrawableResource(android.R.color.transparent)
         xtreamDialog = dlg
 
-        if (existing.isConfigured) {
+        if (customOverride && inbuilt.isConfigured) {
+            btnRow.addView(actionPill("Use Inbuilt", primary = false) {
+                xtreamPrefs.edit()
+                    .remove("server").remove("username").remove("password")
+                    .putBoolean("signed_out_inbuilt", false)
+                    .apply()
+                xtreamAuthInfo = null
+                allXtream = emptyList(); xtreamVodRows = emptyList(); xtreamSeriesRows = emptyList()
+                xtreamVodMap = emptyMap(); xtreamSeriesMap = emptyMap()
+                xtreamLiveLoaded = false; xtreamVodLoaded = false; xtreamSeriesLoaded = false
+                dlg.dismiss()
+                loadXtreamCurrentMode(force = true)
+                if (tab == 9) refreshRows()
+                Toast.makeText(this, "Switched back to inbuilt StarShare account.", Toast.LENGTH_SHORT).show()
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
+        } else if (existing.isConfigured) {
             btnRow.addView(actionPill("Sign Out", primary = false) {
-                xtreamPrefs.edit().clear().apply()
+                xtreamPrefs.edit().clear().putBoolean("signed_out_inbuilt", true).apply()
                 runCatching { xtreamCacheDir().deleteRecursively() }
                 xtreamAuthInfo = null
                 allXtream = emptyList(); xtreamVodRows = emptyList(); xtreamSeriesRows = emptyList()
@@ -1826,7 +1877,14 @@ class MainActivity : AppCompatActivity() {
                 xtreamMsg = ""
                 dlg.dismiss()
                 if (tab == 9) refreshRows()
-                Toast.makeText(this, "StarShare credentials cleared from this device.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "StarShare signed out on this device.", Toast.LENGTH_SHORT).show()
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
+        } else if (inbuilt.isConfigured && xtreamPrefs.getBoolean("signed_out_inbuilt", false)) {
+            btnRow.addView(actionPill("Use Inbuilt", primary = false) {
+                xtreamPrefs.edit().putBoolean("signed_out_inbuilt", false).apply()
+                dlg.dismiss()
+                loadXtreamCurrentMode(force = true)
+                if (tab == 9) refreshRows()
             }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
         }
 
@@ -1862,8 +1920,9 @@ class MainActivity : AppCompatActivity() {
                             .putString("server", parsed.server)
                             .putString("username", parsed.username)
                             .putString("password", parsed.password)
-                            .putString("working_origin", auth.workingOrigin)
-                            .putString("allowed_formats", auth.allowedFormats.joinToString(","))
+                            .putBoolean("signed_out_inbuilt", false)
+                            .putString("working_origin_${parsed.cacheKey}", auth.workingOrigin)
+                            .putString("allowed_formats_${parsed.cacheKey}", auth.allowedFormats.joinToString(","))
                             .apply()
                         allXtream = emptyList(); xtreamVodRows = emptyList(); xtreamSeriesRows = emptyList()
                         xtreamLiveLoaded = false; xtreamVodLoaded = false; xtreamSeriesLoaded = false
@@ -3094,7 +3153,12 @@ class MainActivity : AppCompatActivity() {
         val profile = NativePlaybackPolicy.profile(television, lowEnd, compatiblePlayback, startCap())
         val channel = shown.getOrNull(current)
         val stable = stablePicture(channel)
-        val ts = NativePlaybackPolicy.tracks(this, profile, shown.getOrNull(current)?.name?.contains("Hindi", true) == true)
+        val prefLang = prefs.getString("preferred_audio_lang", "hi").orEmpty().ifBlank { "hi" }
+        val preferHindi = prefLang.startsWith("hi", true) || channel?.name?.contains("Hindi", true) == true
+        val ts = NativePlaybackPolicy.tracks(this, profile, preferHindi)
+        if (!preferHindi && prefLang.isNotBlank()) {
+            ts.setParameters(ts.buildUponParameters().setPreferredAudioLanguage(prefLang))
+        }
         val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
             .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
         val loadControl = when {
@@ -3560,11 +3624,146 @@ class MainActivity : AppCompatActivity() {
             prefs.edit().putBoolean("native_force_tv", !prefs.getBoolean("native_force_tv", false)).apply()
             selectNativeProvider(requestedNativeProvider?.takeIf { it.first == ch.key }?.second)
         })
-        if (player != null) choices.add("Picture quality · ${picture?.modeLabel() ?: "Auto"}" to { showPictureMenu() })
+        if (player != null) {
+            choices.add("Audio track · ${currentAudioLabel()}" to { showAudioMenu() })
+            choices.add("Picture quality · ${picture?.modeLabel() ?: "Auto"}" to { showPictureMenu() })
+        }
         choices.add("Playback details" to { showPlaybackDetails() })
         val dialog = AlertDialog.Builder(this).setTitle("Native stream source")
             .setItems(choices.map { it.first }.toTypedArray()) { _, index -> choices[index].second() }
             .setNegativeButton("Close", null).create()
+        sourceMenu = dialog
+        dialog.setOnDismissListener { if (sourceMenu === dialog) sourceMenu = null }
+        dialog.show()
+    }
+
+    private fun formatAudioTrackLabel(format: Format, fallbackIndex: Int): String {
+        val rawLang = format.language?.trim().orEmpty()
+        val langName = when {
+            rawLang.isBlank() || rawLang.equals("und", true) -> ""
+            rawLang.equals("hi", true) || rawLang.equals("hin", true) -> "Hindi"
+            rawLang.equals("en", true) || rawLang.equals("eng", true) -> "English"
+            else -> runCatching {
+                Locale.forLanguageTag(rawLang).getDisplayLanguage(Locale.ENGLISH)
+                    .takeIf { it.isNotBlank() && !it.equals(rawLang, true) }
+            }.getOrNull() ?: rawLang.uppercase(Locale.ROOT)
+        }
+        val titleLabel = format.label?.trim().orEmpty()
+        val primary = when {
+            langName.isNotBlank() && titleLabel.isNotBlank() && !titleLabel.equals(langName, true) -> "$langName ($titleLabel)"
+            langName.isNotBlank() -> langName
+            titleLabel.isNotBlank() -> titleLabel
+            else -> "Track ${fallbackIndex + 1}"
+        }
+        val channels = when (format.channelCount) {
+            1 -> "Mono"
+            2 -> "Stereo"
+            6 -> "5.1"
+            8 -> "7.1"
+            else -> if (format.channelCount > 0) "${format.channelCount}ch" else ""
+        }
+        val codec = when (val mime = format.sampleMimeType.orEmpty()) {
+            MimeTypes.AUDIO_AAC -> "AAC"
+            MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
+            MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital+"
+            MimeTypes.AUDIO_MPEG -> "MP2/MP3"
+            MimeTypes.AUDIO_OPUS -> "Opus"
+            else -> mime.substringAfter('/', "").uppercase(Locale.ROOT)
+        }
+        val kbps = if (format.bitrate > 0) "${format.bitrate / 1000} kbps" else ""
+        val details = listOf(codec, channels, kbps).filter { it.isNotBlank() }.joinToString(" · ")
+        return if (details.isNotBlank()) "$primary  ·  $details" else primary
+    }
+
+    private fun currentAudioLabel(): String {
+        val owner = player ?: return "Auto"
+        val groups = owner.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        var trackCounter = 0
+        for (group in groups) {
+            for (i in 0 until group.length) {
+                if (group.isTrackSelected(i)) {
+                    return formatAudioTrackLabel(group.getTrackFormat(i), trackCounter).substringBefore("  ·  ")
+                }
+                trackCounter++
+            }
+        }
+        return if (prefs.getString("preferred_audio_lang", "hi") == "en") "Auto (English)" else "Auto (Hindi)"
+    }
+
+    private fun showAudioMenu() {
+        val owner = player ?: run {
+            Toast.makeText(this, "Wait a moment for the stream to connect first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val audioGroups = owner.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        val hasSubtitles = owner.currentTracks.groups.any { it.type == C.TRACK_TYPE_TEXT }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        var counter = 0
+        for (group in audioGroups) {
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) {
+                    counter++
+                    continue
+                }
+                val fmt = group.getTrackFormat(i)
+                val selected = group.isTrackSelected(i)
+                val label = "${if (selected) "✓  " else ""}${formatAudioTrackLabel(fmt, counter)}"
+                val mediaGroup = group.mediaTrackGroup
+                val trackIdx = i
+                items += label to {
+                    if (player === owner) {
+                        val langCode = fmt.language?.trim()?.lowercase(Locale.ROOT).orEmpty()
+                        if (langCode.startsWith("hi")) prefs.edit().putString("preferred_audio_lang", "hi").apply()
+                        else if (langCode.startsWith("en")) prefs.edit().putString("preferred_audio_lang", "en").apply()
+                        val paramsBuilder = owner.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .addOverride(TrackSelectionOverride(mediaGroup, listOf(trackIdx)))
+                        owner.trackSelectionParameters = paramsBuilder.build()
+                        Toast.makeText(this, "Audio: ${formatAudioTrackLabel(fmt, trackIdx).substringBefore("  ·  ")}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                counter++
+            }
+        }
+        val prefLang = prefs.getString("preferred_audio_lang", "hi").orEmpty().ifBlank { "hi" }
+        items += "${if (items.isEmpty() && prefLang == "hi") "✓  " else ""}Auto — Prefer Hindi audio" to {
+            prefs.edit().putString("preferred_audio_lang", "hi").apply()
+            if (player === owner) {
+                owner.trackSelectionParameters = owner.trackSelectionParameters.buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                    .setPreferredAudioLanguages("hi", "hin")
+                    .build()
+                Toast.makeText(this, "Default audio set to Hindi", Toast.LENGTH_SHORT).show()
+            }
+        }
+        items += "${if (items.isEmpty() && prefLang == "en") "✓  " else ""}Auto — Prefer English audio" to {
+            prefs.edit().putString("preferred_audio_lang", "en").apply()
+            if (player === owner) {
+                owner.trackSelectionParameters = owner.trackSelectionParameters.buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                    .setPreferredAudioLanguages("en", "eng")
+                    .build()
+                Toast.makeText(this, "Default audio set to English", Toast.LENGTH_SHORT).show()
+            }
+        }
+        if (hasSubtitles) {
+            items += "Subtitles / Captions…" to {
+                if (player === owner) {
+                    TrackSelectionDialogBuilder(this, "Subtitles", owner, C.TRACK_TYPE_TEXT)
+                        .setShowDisableOption(true)
+                        .build()
+                        .show()
+                }
+            }
+        }
+        sourceMenu?.dismiss()
+        val title = if (audioGroups.isEmpty()) "Audio language (stream carries 1 embedded mix)"
+        else "Audio tracks · ${currentAudioLabel()}"
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(items.map { it.first }.toTypedArray()) { _, idx -> items[idx].second() }
+            .setNegativeButton("Close", null)
+            .create()
         sourceMenu = dialog
         dialog.setOnDismissListener { if (sourceMenu === dialog) sourceMenu = null }
         dialog.show()
@@ -3948,7 +4147,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playerActionFocused(): Boolean = ::infoGuideAction.isInitialized &&
-        listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).any { it.isFocused && it.isShown }
+        listOf(infoGuideAction, infoSourceAction, infoAudioAction, infoQualityAction, infoRetryAction).any { it.isFocused && it.isShown }
 
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         // The failure screen is built by hand; the shelf's key handling must not run against views that were
@@ -4007,6 +4206,7 @@ class MainActivity : AppCompatActivity() {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_CHANNEL_UP -> { play(current - 1); return true }
             KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_CHANNEL_DOWN -> { play(current + 1); return true }
             KeyEvent.KEYCODE_MENU -> { showNativeSourceMenu(); return true }
+            KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK -> { showAudioMenu(); return true }
             KeyEvent.KEYCODE_INFO -> { showPlaybackDetails(); return true }
             KeyEvent.KEYCODE_DPAD_LEFT -> { switchServer(); return true }
         }
@@ -4198,9 +4398,14 @@ class MainActivity : AppCompatActivity() {
             val n = c.name.lowercase()
             return when { n.startsWith(toks[0]) -> 0; n.contains(" " + toks[0]) -> 1; else -> 2 }
         }
-        val universe = if (tab == 9) allXtream else (all + allV2 + allPortal + allPlaylist + allXtream)
-        return universe.filter { c -> val hay = (c.name + " " + c.category).lowercase(); toks.all { hay.contains(it) } }
-            .sortedWith(compareBy({ score(it) }, { it.v2 }, { it.name.lowercase() })).take(120)
+        fun filterPool(src: List<Channel>): List<Channel> =
+            src.filter { c -> val hay = (c.name + " " + c.category).lowercase(); toks.all { hay.contains(it) } }
+                .sortedWith(compareBy({ score(it) }, { it.v2 }, { it.name.lowercase() })).take(120)
+        if (tab == 9) {
+            val primary = filterPool(visibleXtreamChannels())
+            return if (primary.isNotEmpty()) primary else filterPool(allXtream)
+        }
+        return filterPool(all + allV2 + allPortal + allPlaylist + visibleXtreamChannels())
     }
     private var movieResults = listOf<Tile>(); private var movieSearchToken = 0; private var movieSearching = false
     private var searchScope = SearchScope.CHANNELS   // what the search looks in, from SearchScope.of(tab)
@@ -4904,6 +5109,7 @@ class MainActivity : AppCompatActivity() {
             5 -> tataRows(tataJio)
             6 -> portalRows(allPortal)
             7 -> playlistRows(allPlaylist)
+            9 -> xtreamRows()
             else -> continueRow() + vodRowsFor(tab)
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()

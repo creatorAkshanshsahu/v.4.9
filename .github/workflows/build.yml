@@ -53,6 +53,10 @@ jobs:
       - name: Verify the working playback contracts during UI rebuild
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Test stream resolution and build both APKs
+        env:
+          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER }}
+          STARSHARE_USER: ${{ secrets.STARSHARE_USER }}
+          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS }}
         run: |
           set -o pipefail
           gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"

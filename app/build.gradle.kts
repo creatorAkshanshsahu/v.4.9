@@ -8,11 +8,29 @@ val updateKeystore = rootProject.file("keystore/aktv-update.p12")
 val updateStorePassword = providers.gradleProperty("aktvUpdateStorePassword").orNull
     ?: System.getenv("AKTV_UPDATE_STORE_PASSWORD")
     ?: "aktv-update-key"
+
+fun quoteBuildConfig(raw: String): String =
+    "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "") + "\""
+
+val starshareServer = (providers.gradleProperty("starshareServer").orNull
+    ?: System.getenv("STARSHARE_SERVER")
+    ?: "").trim()
+val starshareUser = (providers.gradleProperty("starshareUser").orNull
+    ?: System.getenv("STARSHARE_USER")
+    ?: "").trim()
+val starsharePass = (providers.gradleProperty("starsharePass").orNull
+    ?: System.getenv("STARSHARE_PASS")
+    ?: "").trim()
+
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 147; versionName = "5.4.28"
+    buildFeatures { buildConfig = true }
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 148; versionName = "5.4.29"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
+        buildConfigField("String", "STARSHARE_SERVER", quoteBuildConfig(starshareServer))
+        buildConfigField("String", "STARSHARE_USER", quoteBuildConfig(starshareUser))
+        buildConfigField("String", "STARSHARE_PASS", quoteBuildConfig(starsharePass))
     }
     signingConfigs {
         create("update") {

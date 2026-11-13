@@ -31,13 +31,17 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
@@ -331,6 +335,7 @@ class MoviePlayerActivity : Activity() {
             row.addView(button("OG Server") { desiredPlay = true; pinnedOg = true; begin(FrostProvider.OG, fresh = true) })
             row.addView(button("TG Server") { desiredPlay = true; pinnedOg = false; begin(FrostProvider.FROST, fresh = true) })
         }
+        row.addView(button("Audio") { showQuickAudioMenu() })
         row.addView(button("Audio & Subtitles") { showTracks() })
         episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
         nextButton = button("Next episode") { nextEpisode() }.also(row::addView)
@@ -612,7 +617,9 @@ class MoviePlayerActivity : Activity() {
         attemptAt = SystemClock.elapsedRealtime(); bufferingAt = 0
         try {
             val profile = NativePlaybackPolicy.profile(television, lowMemory, software, if (television) 720 else 1080)
-            val selector = FrostMedia.tracks(this, profile, source.language.contains("Hindi", true))
+            val preferHindi = getSharedPreferences("aktv", MODE_PRIVATE).getString("preferred_audio_lang", "hi") != "en" ||
+                source.language.contains("Hindi", true)
+            val selector = FrostMedia.tracks(this, profile, preferHindi)
             val owner = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
                 .setTrackSelector(selector).setLoadControl(FrostMedia.buffers(profile))
                 .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build()
@@ -981,6 +988,77 @@ class MoviePlayerActivity : Activity() {
                     }
                 }
             }.setNegativeButton("Close", null).create())
+    }
+
+    private fun formatVodAudioLabel(format: Format, fallbackIndex: Int): String {
+        val rawLang = format.language?.trim().orEmpty()
+        val langName = when {
+            rawLang.isBlank() || rawLang.equals("und", true) -> ""
+            rawLang.equals("hi", true) || rawLang.equals("hin", true) -> "Hindi"
+            rawLang.equals("en", true) || rawLang.equals("eng", true) -> "English"
+            else -> runCatching {
+                Locale.forLanguageTag(rawLang).getDisplayLanguage(Locale.ENGLISH)
+                    .takeIf { it.isNotBlank() && !it.equals(rawLang, true) }
+            }.getOrNull() ?: rawLang.uppercase(Locale.ROOT)
+        }
+        val titleLabel = format.label?.trim().orEmpty()
+        val primary = when {
+            langName.isNotBlank() && titleLabel.isNotBlank() && !titleLabel.equals(langName, true) -> "$langName ($titleLabel)"
+            langName.isNotBlank() -> langName
+            titleLabel.isNotBlank() -> titleLabel
+            else -> "Track ${fallbackIndex + 1}"
+        }
+        val channels = when (format.channelCount) {
+            1 -> "Mono"; 2 -> "Stereo"; 6 -> "5.1"; 8 -> "7.1"
+            else -> if (format.channelCount > 0) "${format.channelCount}ch" else ""
+        }
+        val codec = when (val mime = format.sampleMimeType.orEmpty()) {
+            MimeTypes.AUDIO_AAC -> "AAC"
+            MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
+            MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital+"
+            MimeTypes.AUDIO_MPEG -> "MP2/MP3"
+            MimeTypes.AUDIO_OPUS -> "Opus"
+            else -> mime.substringAfter('/', "").uppercase(Locale.ROOT)
+        }
+        val details = listOf(codec, channels).filter { it.isNotBlank() }.joinToString(" · ")
+        return if (details.isNotBlank()) "$primary  ·  $details" else primary
+    }
+
+    private fun showQuickAudioMenu() {
+        val owner = player ?: run { showSources(); return }
+        val audioGroups = owner.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        if (audioGroups.isEmpty()) {
+            Toast.makeText(this, "No selectable audio tracks yet.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        var counter = 0
+        for (group in audioGroups) {
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) { counter++; continue }
+                val fmt = group.getTrackFormat(i)
+                val selected = group.isTrackSelected(i)
+                val label = "${if (selected) "✓  " else ""}${formatVodAudioLabel(fmt, counter)}"
+                val mediaGroup = group.mediaTrackGroup
+                val trackIdx = i
+                items += label to {
+                    if (player === owner) {
+                        val langCode = fmt.language?.trim()?.lowercase(Locale.ROOT).orEmpty()
+                        if (langCode.startsWith("hi")) prefs.edit().putString("preferred_audio_lang", "hi").apply()
+                        else if (langCode.startsWith("en")) prefs.edit().putString("preferred_audio_lang", "en").apply()
+                        owner.trackSelectionParameters = owner.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .addOverride(TrackSelectionOverride(mediaGroup, listOf(trackIdx)))
+                            .build()
+                        Toast.makeText(this, "Audio: ${formatVodAudioLabel(fmt, trackIdx).substringBefore("  ·  ")}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                counter++
+            }
+        }
+        showDialog(AlertDialog.Builder(this).setTitle("Audio track")
+            .setItems(items.map { it.first }.toTypedArray()) { _, idx -> items[idx].second() }
+            .setNegativeButton("Close", null).create())
     }
 
     private fun showTracks() {

@@ -55,6 +55,16 @@ internal data class XtreamAccount(
             val digest = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
             return digest.take(8).joinToString("") { "%02x".format(it) }
         }
+
+    companion object {
+        /** Build-time pre-baked StarShare account injected via private CI secrets or Gradle properties. */
+        val INBUILT: XtreamAccount
+            get() = XtreamClient.parseInput(
+                BuildConfig.STARSHARE_SERVER.ifBlank { XtreamClient.DEFAULT_SERVER },
+                BuildConfig.STARSHARE_USER,
+                BuildConfig.STARSHARE_PASS
+            )
+    }
 }
 
 internal data class XtreamAuthInfo(
@@ -723,32 +733,166 @@ internal object XtreamClient {
             .createMediaSource(itemBuilder.build())
     }
 
-    /** Ranks Indian, Sports, Cricket, Hindi, and English shelves first so the viewer sees relevant rows immediately. */
-    fun categoryRank(category: String): Int {
-        val lower = category.lowercase(Locale.ROOT)
-        return when {
-            lower.contains("india") || lower.contains("indian") || lower.startsWith("in ") || lower.startsWith("in|") || lower.startsWith("in:") || lower.startsWith("ind ") -> 0
-            lower.contains("cricket") || lower.contains("ipl") -> 1
-            lower.contains("hindi") || lower.contains("bollywood") -> 2
-            lower.contains("sport") -> 3
-            lower.contains("entertainment") -> 4
-            lower.contains("movie") || lower.contains("cinema") || lower.contains("hollywood") || lower.contains("dual audio") -> 5
-            lower.contains("english") || lower.startsWith("uk ") || lower.startsWith("uk|") || lower.startsWith("us ") || lower.startsWith("usa") -> 6
-            lower.contains("news") -> 7
-            lower.contains("kids") || lower.contains("cartoon") -> 8
-            lower.contains("documentary") || lower.contains("infotainment") || lower.contains("discovery") -> 9
-            lower.contains("music") -> 10
-            else -> 20
-        }
+    const val FILTER_INDIAN_HINDI = 0
+    const val FILTER_ENGLISH_HINDI = 1
+    const val FILTER_ALL = 2
+
+    fun filterLabel(mode: Int): String = when (mode) {
+        FILTER_INDIAN_HINDI -> "Indian Hindi"
+        FILTER_ENGLISH_HINDI -> "India + English"
+        else -> "All Channels"
     }
 
-    /** Optional strict English + Hindi / India / Sports filter for huge multi-country StarShare bouquets. */
+    /** Ranks Indian Hindi Entertainment, Movies, Sports/Cricket, News, Kids, Knowledge, Music, and Devotional shelves in natural order. */
+    fun categoryRank(category: String): Int {
+        val lower = displayCategoryName(category).lowercase(Locale.ROOT)
+        val rawLower = category.lowercase(Locale.ROOT)
+        val isIndia = INDIA_TAG_REGEX.containsMatchIn(rawLower) || lower.contains("hindi") || lower.contains("bollywood")
+        val base = when {
+            lower.contains("entertainment") || lower.contains("gec") || lower.contains("general") || lower.contains("serial") -> 0
+            lower.contains("movie") || lower.contains("cinema") || lower.contains("bollywood") || lower.contains("film") || lower.contains("dual audio") -> 1
+            lower.contains("cricket") || lower.contains("ipl") || lower.contains("sport") -> 2
+            lower.contains("news") || lower.contains("business") -> 3
+            lower.contains("kid") || lower.contains("cartoon") || lower.contains("anime") -> 4
+            lower.contains("knowledge") || lower.contains("infotainment") || lower.contains("documentary") || lower.contains("discovery") || lower.contains("science") || lower.contains("factual") || lower.contains("lifestyle") -> 5
+            lower.contains("music") || lower.contains("youth") -> 6
+            lower.contains("spiritual") || lower.contains("devotional") || lower.contains("religious") || lower.contains("bhakti") -> 7
+            else -> 9
+        }
+        return if (isIndia) base else base + 12
+    }
+
+    /** Cleans noisy IPTV panel country prefixes like `|IN| HINDI ENTERTAINMENT` -> `HINDI ENTERTAINMENT` while preserving clarity. */
+    fun displayCategoryName(category: String): String {
+        val stripped = category.trim()
+            .replace(Regex("^[|\\[({\\s]*(?:IN|IND|INDIA|INDIAN|VIP)[|\\])}\\s:\\-–—]+", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^[|:\\-–—\\s]+|[|:\\-–—\\s]+$"), "")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+        return stripped.ifBlank { category.trim().ifBlank { "Indian TV" } }
+    }
+
+    fun keepsByFilter(name: String, category: String, mode: Int): Boolean = when (mode) {
+        FILTER_INDIAN_HINDI -> keepsIndianHindi(name, category)
+        FILTER_ENGLISH_HINDI -> keepsEnglishOrHindi(name, category)
+        else -> !ADULT_REGEX.containsMatchIn("$category $name")
+    }
+
+    /**
+     * Default StarShare filter: keeps Indian Hindi channels/VOD across ALL genres (Entertainment,
+     * Bollywood/Hindi Movies, News, Music, Kids, Devotional) PLUS Indian Sports/Cricket & Dual-Audio
+     * Infotainment (Discovery/NatGeo/History/Cartoon Network/Nick), while hiding US/UK/foreign &
+     * non-Hindi regional Indian feeds (Tamil, Telugu, Malayalam, Kannada, Bengali, Marathi, Gujarati,
+     * Punjabi, Odia, Assamese, Urdu, etc. unless Hindi-dubbed).
+     */
+    fun keepsIndianHindi(name: String, category: String): Boolean {
+        val combined = "$category $name"
+        if (ADULT_REGEX.containsMatchIn(combined)) return false
+
+        val explicitHindi = HINDI_EXPLICIT_REGEX.containsMatchIn(combined)
+
+        // 1. Exclude non-Hindi regional Indian languages & regional-only channels unless explicitly Hindi / Hindi-dubbed.
+        if (!explicitHindi && REGIONAL_NON_HINDI_REGEX.containsMatchIn(combined)) return false
+
+        // 2. Exclude foreign countries/regions (US, UK, CA, PK, BD, AR, EU, etc.) unless explicitly India/Hindi or Cricket.
+        val isCricket = CRICKET_REGEX.containsMatchIn(combined)
+        if (!explicitHindi && !INDIA_TAG_REGEX.containsMatchIn(category) && !isCricket) {
+            if (FOREIGN_STRICT_REGEX.containsMatchIn(category) || FOREIGN_STRICT_REGEX.containsMatchIn(name)) {
+                return false
+            }
+        }
+        // Even inside unmarked categories, drop channels explicitly prefixed PK / BD / UK / US / AR (unless Cricket).
+        if (!explicitHindi && !isCricket && FOREIGN_CHANNEL_PREFIX_REGEX.containsMatchIn(name.trim())) {
+            return false
+        }
+
+        // 3. Keep if tagged India / Hindi / Bollywood / Dual Audio, Indian DTH/OTT, Indian Sports/Cricket, or known pan-India Hindi/Dual-Audio network.
+        return explicitHindi ||
+            INDIA_TAG_REGEX.containsMatchIn(combined) ||
+            isCricket ||
+            INDIAN_SPORTS_REGEX.containsMatchIn(combined) ||
+            INDIAN_BROADCASTER_REGEX.containsMatchIn(name)
+    }
+
+    /** Broader India + English filter for multi-country StarShare bouquets. */
     fun keepsEnglishOrHindi(name: String, category: String): Boolean {
-        val combined = "$category $name".lowercase(Locale.ROOT)
+        if (ADULT_REGEX.containsMatchIn("$category $name")) return false
         if (FOREIGN_PREFIX_REGEX.containsMatchIn(category.trim())) return false
         if (!PortalLanguages.keeps(name, category)) return false
-        return categoryRank(category) < 20 || PortalLanguages.keeps(name, category)
+        return categoryRank(category) < 25 || PortalLanguages.keeps(name, category)
     }
+
+    private val ADULT_REGEX = Regex(
+        "\\b(?:XXX|ADULT|18\\+|PORN|PLAYBOY|BRAZZERS|EROTIC|ONLYFANS)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val HINDI_EXPLICIT_REGEX = Regex(
+        "\\b(?:HINDI|BOLLYWOOD|HIN\\s*DUB|HINDI\\s*DUB(?:BED)?|DUAL\\s*AUDIO|DESI)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val INDIA_TAG_REGEX = Regex(
+        "(?:^|[|\\[({\\s:\\-])(?:IN|IND|INDIA|INDIAN|BHARAT|HINDUSTAN|TATA\\s*PLAY|TATA\\s*SKY|JIO(?:\\s*TV|\\s*CINEMA|\\s*HOTSTAR)?|AIRTEL|DISH\\s*TV|D2H|DOORDARSHAN|HOTSTAR|ZEE5|SONYLIV|SONY\\s*LIV|MX\\s*PLAYER|TVF)(?:$|[|\\])}\\s:\\-])",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val CRICKET_REGEX = Regex(
+        "\\b(?:CRICKET|IPL|BCCI|ICC|WPL|ASIA\\s*CUP|WILLOW|ASTRO\\s*CRICKET|STAR\\s*SPORTS|SPORTS\\s*18|SPORTS18|SONY\\s*(?:SPORTS|TEN)|TEN\\s*SPORTS|DD\\s*SPORTS|FANCODE|FAN\\s*CODE)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val INDIAN_SPORTS_REGEX = Regex(
+        "\\b(?:PRO\\s*KABADDI|ISL|INDIAN\\s*SUPER\\s*LEAGUE|EUROSPORT\\s*INDIA)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val REGIONAL_NON_HINDI_REGEX = Regex(
+        "\\b(?:TAMIL|TAMIZH|TELUGU|TELGU|MALAYALAM|MALYALAM|KERALAM|KANNADA|MARATHI|MARATHIBANA|BENGALI|BANGLA|PUNJABI|GUJARATI|GUJRATI|ODIA|ORIYA|ASSAMESE|ASSAM|ASOMIYA|BHOJPURI|RAJASTHANI|HARYANVI|URDU|NEPALI|SINHALA|KONKANI|KASHMIRI|MANIPURI|" +
+            "SUN\\s*TV|SUN\\s*MUSIC|SUN\\s*NEWS|SUN\\s*LIFE|KTV|ADITHYA|UDAYA|CHINTU|KOCHU|SURYA\\s*TV|KIRAN\\s*TV|GEMINI|ETV\\s*(?:TELUGU|PLUS|CINEMA|ABHIRUCHI|LIFE|ANDHRA|TELANGANA|BAL\\s*BHARAT\\s*(?:TAMIL|TELUGU|MALAYALAM|KANNADA))|" +
+            "STAR\\s*(?:MAA|VIJAY|JALSHA|SUVARNA|PRAVAH|KIRAN)|VIJAY\\s*(?:SUPER|TAKAKAR)|JALSHA\\s*MOVIES|PRAVAH\\s*PICTURE|SUVARNA\\s*PLUS|" +
+            "ASIANET|MAZHAVIL|KAIRALI|MATHRUBHUMI|AMRITA\\s*TV|FLOWERS\\s*TV|REPORTER\\s*TV|MANORAMA|TWENTY\\s*FOUR|" +
+            "KALAIGNAR|POLIMER|THANTHI|PUTHIYA|JAYA\\s*TV|RAJ\\s*TV|ZEE\\s*(?:TAMIL|TELUGU|KANNADA|KERALAM|MARATHI|BANGLA|PUNJABI|SARTHAK|TALKIES|PICCHAR|24\\s*TAAS|24\\s*KALAK|24\\s*GHANTA|YUVAA|THIRAI|CINEMALU|BISKOP|GANGA)|" +
+            "COLORS\\s*(?:TAMIL|KANNADA|MARATHI|BANGLA|GUJARATI|ODIA|SUPER|ORIYA)|SONY\\s*(?:MARATHI|AATH)|" +
+            "ABP\\s*(?:MAJHA|ANANDA|ASMITA|SANJHA|DESAM|NADU)|NEWS18\\s*(?:LOKMAT|BANGLA|TAMIL|KERALA|KANNADA|ODIA|ASSAM|PUNJAB|GUJARATI|URDU)|" +
+            "TV9\\s*(?:MARATHI|TELUGU|KANNADA|GUJARATI|BANGLA)|PTC\\s*(?:PUNJABI|NEWS|CHAK|MUSIC|SIMRAN)|MH\\s*ONE\\s*(?:MUSIC|NEWS)|" +
+            "TARANG|OTV|PRATIDIN|RENGONI|RAMDHENU|DY\\s*365)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val FOREIGN_STRICT_REGEX = Regex(
+        "(?:^|[|\\[({\\s:\\-])(?:US|USA|UNITED\\s*STATES|UK|UNITED\\s*KINGDOM|BRITAIN|CA|CAN|CANADA|AU|AUS|AUSTRALIA|NZ|" +
+            "PK|PAK|PAKISTAN|BD|BAN|BANGLADESH|AF|AFG|AFGHAN|AFGHANISTAN|NP|NEPAL|LK|SL|SRI\\s*LANKA|" +
+            "AR|ARA|ARAB|ARABIC|AE|UAE|SAUDI|QATAR|KUWAIT|OMAN|BAHRAIN|EGYPT|MOROCCO|ALGERIA|TUNISIA|IRAQ|SYRIA|LEBANON|JORDAN|OSN|SHAHID|MBC|ROTANA|" +
+            "TR|TUR|TURKEY|TURKISH|IR|IRN|IRAN|PERSIAN|FARSI|KURD|KURDISH|IL|ISR|ISRAEL|HEBREW|" +
+            "FR|FRA|FRANCE|FRENCH|DE|GER|GERMANY|GERMAN|AT|AUSTRIA|CH|SWISS|ES|ESP|SPAIN|SPANISH|LATAM|LATINO|MEXICO|ARGENTINA|COLOMBIA|CHILE|PERU|" +
+            "PT|POR|PORTUGAL|PORTUGUESE|BR|BRA|BRAZIL|IT|ITA|ITALY|ITALIAN|NL|NED|NETHERLANDS|DUTCH|BE|BELGIUM|" +
+            "PL|POL|POLAND|POLISH|RU|RUS|RUSSIA|RUSSIAN|UA|UKR|UKRAINE|RO|ROM|ROMANIA|BG|BULGARIA|GR|GRE|GREECE|AL|ALB|ALBANIA|EX[-\\s]*YU|SERBIA|CROATIA|BOSNIA|" +
+            "SE|SWE|SWEDEN|NO|NOR|NORWAY|DK|DEN|DENMARK|FI|FIN|FINLAND|NORDIC|IE|IRL|IRELAND|" +
+            "AFRICA|ZA|SOUTH\\s*AFRICA|DSTV|NIGERIA|KENYA|GHANA|ETHIOPIA|SOMALI|" +
+            "PH|PHI|PHILIPPINES|MY|MALAYSIA|SG|SINGAPORE|ID|INDONESIA|TH|THAILAND|VN|VIETNAM|CN|CHINA|CHINESE|HK|HONG\\s*KONG|TW|TAIWAN|JP|JAPAN|KR|KOREA|" +
+            "CARIBBEAN|SURINAME|NFL|NBA|NHL|MLB|MLS|NASCAR|SPFL|EFL|LOI|GAAGO)(?:$|[|\\])}\\s:\\-])",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val FOREIGN_CHANNEL_PREFIX_REGEX = Regex(
+        "^(?:US|USA|UK|CA|AU|NZ|PK|PAK|BD|AF|AR|AE|TR|IR|FR|DE|ES|PT|BR|IT|NL|PL|RU|RO|GR|AL|ZA|PH|MY|ID|TH|VN|CN|HK|JP|KR)\\b\\s*[:|\\-]",
+        RegexOption.IGNORE_CASE
+    )
+
+    private val INDIAN_BROADCASTER_REGEX = Regex(
+        "\\b(?:STAR\\s*(?:PLUS|BHARAT|UTSAV|GOLD|MOVIES|WORLD)|" +
+            "SONY\\s*(?:SET|SAB|MAX|PIX|PAL|WAH|YAY|BBC\\s*EARTH|KAL)|SET\\s*(?:INDIA|HD)|SAB\\s*(?:TV|HD)|" +
+            "ZEE\\s*(?:TV|CINEMA|BOLLYWOOD|ACTION|CLASSIC|ANMOL|CAFE|ZEST|NEWS|BUSINESS|BHARAT|HINDUSTAN)|" +
+            "COLORS\\s*(?:HD|SD|TV|INFINITY|CINEPLEX|RISHTEY)?|RISHTEY\\s*CINEPLEX|&\\s*(?:TV|PICTURES|FLICKS|PRIVE|XPLOR)|AND\\s*(?:TV|PICTURES|FLICKS|PRIVE)|" +
+            "DANGAL|SHEMAROO|GOLDMINES|MANORANJAN|B4U\\s*(?:MOVIES|MUSIC|KADAK|BHOJPURI)?|UTV\\s*(?:MOVIES|ACTION|BINDASS)|BINDASS|EPIC\\s*TV|ISHARA|NAZARA|CHUMBAK|ENTER10|MAHA\\s*MOVIE|ALL\\s*TIME\\s*MOVIES|" +
+            "AAJ\\s*TAK|INDIA\\s*TODAY|NDTV\\s*(?:INDIA|24X7|PROFIT)|INDIA\\s*TV|ABP\\s*(?:NEWS|GANGA)|NEWS\\s*18\\s*INDIA|NEWS\\s*24|GOOD\\s*NEWS\\s*TODAY|BHARAT\\s*24|BHARAT\\s*EXPRESS|REPUBLIC\\s*(?:TV|BHARAT)|TIMES\\s*NOW|MIRROR\\s*NOW|ET\\s*NOW|CNBC\\s*(?:AWAAZ|TV18)|WION|DD\\s*(?:NATIONAL|NEWS|INDIA|BHARATI|KISAN|RETRO|SPORTS)|SANSAD\\s*TV|SUDARSHAN|TV9\\s*BHARATVARSH|NEWS\\s*NATION|INDIA\\s*NEWS|" +
+            "DISCOVERY\\s*(?:INDIA|HD\\s*WORLD|SCIENCE|TURBO|KIDS)|ANIMAL\\s*PLANET\\s*(?:INDIA|HD\\s*WORLD)?|TLC\\s*(?:INDIA|HD)|INVESTIGATION\\s*DISCOVERY|HISTORY\\s*TV\\s*18|NAT\\s*GEO|NATIONAL\\s*GEOGRAPHIC|TRAVELXP|FOOD\\s*FOOD|" +
+            "HUNGAMA|SUPER\\s*HUNGAMA|POGO|CARTOON\\s*NETWORK|NICKELODEON|NICK\\s*(?:HD|JR)?|SONIC\\s*NICKELODEON|GUBBARE|DISNEY\\s*(?:INDIA|INTERNATIONAL\\s*HD)|" +
+            "9XM|9X\\s*JALWA|MASTIII|ZOOM\\s*TV|MTV\\s*(?:BEATS|INDIA)|SHOWBOX|E24|MUSIC\\s*INDIA|ZING|" +
+            "AASTHA|SANSKAR|SADHNA|PARAS\\s*TV|SHUBH\\s*TV|ISHWAR\\s*TV|SATSANG|DIVYA\\s*TV|PEACE\\s*OF\\s*MIND)\\b",
+        RegexOption.IGNORE_CASE
+    )
 
     private val FOREIGN_PREFIX_REGEX = Regex(
         "^(?:AR|FR|DE|ES|PT|IT|TR|NL|PL|RO|GR|BG|AL|EX-YU|RU|UA|AF|PK|BD|LK|NP|IR|IQ|KU|VN|TH|ID|MY|PH|CN|JP|KR|BR|LATAM)\\b\\s*[:|\\-]",

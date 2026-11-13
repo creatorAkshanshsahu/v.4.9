@@ -70,6 +70,7 @@
                 android:layout_marginBottom="10dp" android:orientation="horizontal" android:gravity="center_vertical|end" android:visibility="gone">
                 <TextView android:id="@+id/infoGuideAction" style="@style/Widget.AKTV.PlayerAction" android:text="GUIDE"/>
                 <TextView android:id="@+id/infoSourceAction" style="@style/Widget.AKTV.PlayerAction" android:text="SOURCE"/>
+                <TextView android:id="@+id/infoAudioAction" style="@style/Widget.AKTV.PlayerAction" android:text="AUDIO"/>
                 <TextView android:id="@+id/infoQualityAction" style="@style/Widget.AKTV.PlayerAction" android:text="PICTURE QUALITY"/>
                 <TextView android:id="@+id/infoRetryAction" style="@style/Widget.AKTV.PlayerAction" android:text="RETRY"/>
             </LinearLayout>
