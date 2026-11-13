@@ -29,11 +29,12 @@ export const Route = createFileRoute("/live")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  component: LivePlayer,
+  component: LivePlayerContent,
 });
 
-function LivePlayer() {
-  const [source, setSource] = useState<"maxtv" | "starshare" | "all">("maxtv");
+export function LivePlayerContent() {
+  // maxTV leads, with JioTV and TG TV available both as first-class sources and automatic fallbacks.
+  const [source, setSource] = useState<"maxtv" | "jio" | "tgtv" | "all">("maxtv");
   const [filter, setFilter] = useState<"hindi" | "en_hi" | "all">("hindi");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
   const [query, setQuery] = useState("");
@@ -42,12 +43,16 @@ function LivePlayer() {
   const [activeId, setActiveId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [muted, setMuted] = useState(false);
+  const [autoMutedBanner, setAutoMutedBanner] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [containerKind, setContainerKind] = useState("MPEG-TS");
   const [audioTracks, setAudioTracks] = useState<AudioTrackOption[]>([]);
   const [activeAudio, setActiveAudio] = useState(-1);
   const [showEmbedModal, setShowEmbedModal] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [portalError, setPortalError] = useState<string | null>(null);
+  const [servedBy, setServedBy] = useState<string>("");
+  const [backupError, setBackupError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -65,10 +70,16 @@ function LivePlayer() {
         const data = (await res.json()) as {
           channels?: LiveChannelDto[];
           categories?: string[];
+          portalError?: string | null;
+          servedBy?: string;
+          backupError?: string | null;
         };
         const list = data.channels ?? [];
         setChannels(list);
         setCategories(data.categories ?? []);
+        setPortalError(data.portalError ?? null);
+        setServedBy(data.servedBy ?? "");
+        setBackupError(data.backupError ?? null);
         setSelectedCategory("");
         if (list.length > 0) {
           setActiveId((prev) => (prev && list.some((c) => c.id === prev) ? prev : list[0]!.id));
@@ -125,18 +136,41 @@ function LivePlayer() {
   const m3uUrl = `${origin}/api/live/playlist.m3u?source=${source}&filter=${filter}`;
   const sdkCode = `<div id="og-live-tv"></div>\n<script src="${origin}/embed-sdk.js" data-target="#og-live-tv" data-source="${source}" data-filter="${filter}"></script>`;
 
+  const handleAutoMuted = useCallback(() => {
+    setMuted(true);
+    setAutoMutedBanner(true);
+  }, []);
+
   return (
     <main className="player-scene relative h-screen w-full overflow-hidden bg-black">
       {activeChannel && (
         <LiveVideoSurface
           channelId={activeChannel.id}
           channelName={activeChannel.name}
+          directUrl={activeChannel.directUrl}
+          drm={activeChannel.drm ?? null}
+          container={activeChannel.container}
+          activeSource={activeChannel.source}
           muted={muted}
           reloadNonce={reloadNonce}
           selectedAudioTrack={activeAudio}
           onAudioTracksChange={handleTracks}
           onContainerDetected={setContainerKind}
+          onAutoMuted={handleAutoMuted}
         />
+      )}
+
+      {autoMutedBanner && muted && (
+        <button
+          type="button"
+          onClick={() => {
+            setMuted(false);
+            setAutoMutedBanner(false);
+          }}
+          className="glass absolute left-1/2 top-24 z-30 -translate-x-1/2 rounded-full border border-accent/60 px-4 py-2 text-xs font-bold text-foreground shadow-lg transition hover:bg-accent hover:text-accent-foreground"
+        >
+          <VolumeX className="mr-1.5 inline size-4" /> Tap to Unmute Live Audio
+        </button>
       )}
 
       <div className="bg-player-scrim pointer-events-none absolute inset-0" />
@@ -151,21 +185,34 @@ function LivePlayer() {
           <div>
             <p className="font-display text-lg font-bold md:text-2xl">{activeChannel?.name ?? "Loading Live TV…"}</p>
             <p className="text-xs text-muted-foreground">
-              {activeChannel ? `${activeChannel.source.toUpperCase()} · ${activeChannel.category} · ${containerKind}` : "Connecting to maxTV portal…"}
+              {activeChannel
+                ? `${activeChannel.source.toUpperCase()} · ${activeChannel.category} · ${containerKind}`
+                : loading
+                  ? "Loading channels…"
+                  : "No channels available from this source"}
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* This used to be a static "maxTV" pill, so the backup playlist could not be
+              chosen at all — it only appeared when the portal happened to fail. */}
           <div className="glass flex rounded-full p-1 text-xs font-semibold">
-            {(["maxtv", "starshare", "all"] as const).map((s) => (
+            {(
+              [
+                ["maxtv", "maxTV"],
+                ["jio", "JioTV"],
+                ["tgtv", "TG TV"],
+                ["all", "Both"],
+              ] as const
+            ).map(([val, label]) => (
               <button
-                key={s}
+                key={val}
                 type="button"
-                onClick={() => setSource(s)}
-                className={`rounded-full px-3 py-1 transition ${source === s ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => setSource(val)}
+                className={`rounded-full px-3 py-1 transition ${source === val ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"}`}
               >
-                {s === "maxtv" ? "maxTV" : s === "starshare" ? "StarShare" : "Both"}
+                {label}
               </button>
             ))}
           </div>
@@ -199,8 +246,30 @@ function LivePlayer() {
         </div>
       </div>
 
+      {/* Say plainly where the list came from; never let a dead seed look like a working catalogue. */}
+      {(portalError || ((servedBy === "jio" || servedBy === "tgtv") && source === "maxtv") || ((source === "jio" || source === "tgtv") && !loading)) && (
+        <div className="absolute left-4 right-4 top-20 z-30 rounded-xl border border-accent/40 bg-background/85 px-4 py-2.5 text-xs md:left-8 md:right-auto md:max-w-xl">
+          {servedBy === "jio" && source === "maxtv" && (
+            <p className="font-bold text-accent">maxTV unreachable — playing the JioTV backup playlist ({visibleChannels.length} channels).</p>
+          )}
+          {servedBy === "tgtv" && source === "maxtv" && (
+            <p className="font-bold text-accent">maxTV &amp; JioTV unreachable — playing the TG TV live playlist ({visibleChannels.length} channels).</p>
+          )}
+          {portalError && (
+            <p className="font-bold text-accent">No live source reachable — these {visibleChannels.length} sample channels will not play.</p>
+          )}
+          <p className="mt-0.5 text-muted-foreground">
+            {portalError ??
+              (source === "jio" ? backupError : null) ??
+              ((source === "jio" || source === "tgtv") && visibleChannels.length === 0
+                ? "This playlist returned no channels. Press Refresh to try again."
+                : "Live playlist connected.")}
+          </p>
+        </div>
+      )}
+
       {/* Desktop Channel Guide Drawer */}
-      <aside className="glass absolute bottom-32 right-4 top-24 z-20 hidden w-88 flex-col gap-2.5 overflow-hidden rounded-2xl p-3 md:right-8 md:flex">
+      <aside className="glass absolute bottom-32 right-4 top-24 z-20 hidden w-88 flex-col gap-2.5 overflow-hidden rounded-2xl p-3 lg:right-8 lg:flex">
         <div className="flex items-center justify-between px-1">
           <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
             {loading ? "Loading…" : `${visibleChannels.length} Channels`}
@@ -310,7 +379,14 @@ function LivePlayer() {
       <div className="absolute inset-x-0 bottom-0 z-20 space-y-3 p-4 md:p-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" onClick={() => setMuted((m) => !m)} className="glass rounded-full px-4 text-xs font-bold">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setAutoMutedBanner(false);
+                setMuted((m) => !m);
+              }}
+              className="glass rounded-full px-4 text-xs font-bold"
+            >
               {muted ? <VolumeX className="mr-1.5 size-4" /> : <Volume2 className="mr-1.5 size-4" />}
               {muted ? "Unmute" : "Mute"}
             </Button>
@@ -363,18 +439,71 @@ function LivePlayer() {
           </div>
         </div>
 
-        {/* Mobile Channel Strip */}
-        <div className="no-scrollbar flex gap-2 overflow-x-auto md:hidden">
-          {visibleChannels.slice(0, 60).map((ch) => (
-            <Button
-              variant="secondary"
-              key={ch.id}
-              onClick={() => setActiveId(ch.id)}
-              className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold ${activeChannel?.id === ch.id ? "bg-primary text-primary-foreground" : "glass"}`}
+        {/* Compact channel guide: every viewport below lg gets a horizontal rail so the
+            channel list is never hidden behind a desktop-only drawer. */}
+        <div className="space-y-2 lg:hidden">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              {loading ? "Loading…" : `${visibleChannels.length} Channels`}
+            </p>
+            <button type="button" onClick={() => void loadCatalogue(true)} className="text-[11px] font-semibold text-accent hover:underline">
+              Refresh
+            </button>
+          </div>
+
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-2 size-3.5 text-muted-foreground" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search channels…"
+              aria-label="Search channels"
+              className="w-full rounded-full border border-border bg-background/70 py-1 pl-8 pr-3 text-[11px] outline-none focus:border-accent"
+            />
+          </div>
+
+          <div className="no-scrollbar flex shrink-0 gap-1.5 overflow-x-auto pb-0.5">
+            <button
+              type="button"
+              onClick={() => setSelectedCategory("")}
+              className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedCategory === "" ? "bg-primary text-primary-foreground" : "glass text-muted-foreground"}`}
             >
-              {ch.name}
-            </Button>
-          ))}
+              All
+            </button>
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedCategory === cat ? "bg-primary text-primary-foreground" : "glass text-muted-foreground"}`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+
+          <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+            {visibleChannels.length === 0 && (
+              <p className="px-1 py-1.5 text-[11px] text-muted-foreground">
+                {loading ? "Loading channels…" : query.trim() ? `No channels match “${query.trim()}”.` : "No channels from this source."}
+              </p>
+            )}
+            {visibleChannels.map((ch) => (
+              <Button
+                variant="secondary"
+                key={ch.id}
+                onClick={() => setActiveId(ch.id)}
+                className={`h-auto shrink-0 rounded-xl px-3 py-1.5 text-left text-xs font-bold ${activeChannel?.id === ch.id ? "bg-primary text-primary-foreground" : "glass"}`}
+              >
+                {ch.name}
+              </Button>
+            ))}
+          </div>
+
+          {!loading && visibleChannels.length === 0 && (
+            <p className="text-xs text-muted-foreground">No channels match this filter. Try “All”.</p>
+          )}
         </div>
       </div>
     </main>

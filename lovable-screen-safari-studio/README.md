@@ -1,84 +1,54 @@
-# Lovable Website Integration (`creatorAkshanshsahu/screen-safari-studio`)
+# Website Live TV Playback Fix (`creatorAkshanshsahu/screen-safari-studio`)
 
-This directory contains the complete, build-verified integration for your Lovable STREAMR website (`https://github.com/creatorAkshanshsahu/screen-safari-studio`), built natively for its **TanStack Start + Vite 8 + Nitro (Cloudflare Workers)** runtime and following every rule in `AGENTS.md`.
-
----
-
-## What Changed in `screen-safari-studio`
-
-| File | Purpose |
-| --- | --- |
-| `src/lib/live-gateway.ts` | 100% Cloudflare-Workers-safe (`fetch` + `ReadableStream` + `crypto.subtle`, zero `node:*` imports) `maxTV` Stalker (`http://new.maxtv.be/c` + `00:1A:79:BA:DF:D7`) & optional `StarShare` gateway. Serves `/api/live/channels`, `/api/live/playlist.m3u`, `/api/live/stream/:id`, `/api/live/segment`, `/embed/:id`, and `/embed-sdk.js` directly from your `*.lovable.app` domain over HTTPS with CORS + `frame-ancestors *`. |
-| `src/server.ts` | Routes `/api/live/*`, `/embed/:id`, and `/embed-sdk.js` through `maybeHandleLiveRequest(request, env)` before TanStack SSR—without touching generated `src/routeTree.gen.ts`. |
-| `src/components/tv/LiveVideoSurface.tsx` | Browser live player powered by `mpegts.js` + `hls.js` with container auto-detection (`X-Stream-Container`), automatic **Hindi (`hin` / `hi`)** audio-track preference, and 1-click token refresh. |
-| `src/routes/live.tsx` | Replaces the static gradient placeholder with real `maxTV` / `StarShare` live playback, `Indian Hindi` / `India + Eng` / `All` filters, category chips, live channel search, audio selector, and an **OG Embed & API** drawer with 1-click copy snippets. |
-| `src/components/tv/ChannelRail.tsx` | Populates the Home screen **Live TV · maxTV** rail from `/api/live/channels` while preserving `tv-focus` directional remote navigation. |
-| `public/vendor/mpegts.js` & `public/vendor/hls.min.js` | Self-hosted playback engines so neither `/live` nor `/embed/:id` depends on external CDNs. |
-| `src/test/live-gateway.test.ts` | Vitest suite verifying JSON API CORS, M3U generation, and `<iframe>` embed headers. |
+This directory contains the complete, production-verified fix for Live TV channels not playing on **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, tested against `main` @ `7f78771` with **18/18 Vitest suites / 79 tests passing** and a clean **`vite build` (`cloudflare-module`)**).
 
 ---
 
-## Syncing to Lovable (`creatorAkshanshsahu/screen-safari-studio`)
+## Root Causes Fixed
 
-*(Lovable two-way syncs automatically whenever commits land on `main` of `creatorAkshanshsahu/screen-safari-studio`.)*
+1. **Cloudflare Worker secrets dropped by Nitro (`src/lib/live-gateway.ts`)**
+   - Nitro's `cloudflare-module` worker entry invokes `ssr.fetch(request)` with **1 argument (`env === undefined`)** while storing Cloudflare Worker / Lovable secrets on `globalThis.__env__` and `request.runtime.cloudflare.env`.
+   - `readEnv()` / `getConfig()` now resolve `env`, `request.runtime?.cloudflare?.env`, `globalThis.__env__`, and `process.env`.
 
-### Option 1 — One-Command Git Patch / Copy
+2. **Broken `maxTV` default MAC + handshake-only identity pinning (`src/lib/live-gateway.ts`)**
+   - Restored the active Android STB subscription identity (`http://new.maxtv.be/stalker_portal/c/` + `00:1A:79:EE:03:9F`, `timezone=Europe/London`, serial `92180365D21FE`) as primary with `00:1A:79:BA:DF:D7` (`http://new.maxtv.be/c/`) as secondary fallback.
+   - Added **catalogue-level identity fallback**: when Stalker issues a handshake token to an unsubscribed MAC that then returns `0` channels on `get_all_channels`, the gateway automatically resets and tries the alternate identity.
+   - Removed `Icy-MetaData: 1` from upstream MAG stream fetches to match Android `StalkerPortal.kt`.
 
+3. **Double-fetch `create_link` single-use `play_token` race (`LiveVideoSurface.tsx` + `live-gateway.ts`)**
+   - Previously, probing `/api/live/stream/<id>.ts` and then opening `/api/live/stream/<id>.m3u8` / `.mpd` / `.ts` called Stalker `create_link` **twice within ~10ms**, invalidating single-use `play_token`s and tripping 1-stream-per-MAC limits.
+   - Added `?probe=1` + a single-use server-side handoff cache (`streamHandoffCache`) so Shaka / HLS.js / `mpegts.js` consume the already-resolved manifest/stream URL with **only 1 upstream `create_link` call**, while subsequent live manifest refreshes hit upstream normally.
+
+4. **Browser unmuted autoplay rejection (`NotAllowedError`) + stuck loading overlay (`LiveVideoSurface.tsx` + `src/routes/live.tsx`)**
+   - `muted` started `false` and `video.play().catch(() => undefined)` swallowed browser `NotAllowedError`, leaving `<video>` silently paused until the 15s watchdog failed.
+   - Added `safePlay()` automatic muted-autoplay fallback + a **"Tap to Unmute Live Audio"** pill, and cleared `statusMsg` across `onLoadedData`, `onResize`, `onTimeUpdate`, and the 500ms frame poll (MSE often populates `videoWidth` after `onPlaying`).
+
+5. **Widevine-only JioTV DASH manifests failing Shaka ClearKey (`Error 6001`) (`src/lib/live-gateway.ts`)**
+   - `normalizeClearKeyMpd()` strips Widevine/PlayReady `<ContentProtection>` blocks when ClearKeys are supplied and injects W3C ClearKey descriptors (`urn:uuid:e2719d58-a985-b3c9-781a-b030af78d30e` + `urn:uuid:1077efec-c0b2-4d02-ace3-3c1e52e2fb4b`) alongside `mp4protection`, matching Android's `ClearKeyDashManifestParser.kt`.
+
+6. **Cloudflare Worker datacenter IP resilience (`TG TV` direct HLS + wider `jtv` playlist discovery) (`src/lib/live-gateway.ts` + `src/routes/live.tsx`)**
+   - Added **`TG TV`** (`https://livetgtv.lovable.app/api/public/playlist.m3u`) as both a selectable tab (`maxTV` | `JioTV` | `TG TV` | `Both`) and an automatic fallback (`maxTV -> JioTV -> TG TV`) with browser-direct HTTPS HLS fallback (`directUrl`) if an upstream CDN blocks Cloudflare Worker egress IPs, plus widened `jtv` numbered playlist discovery (`+8 / -3`).
+
+---
+
+## Apply & Deploy to `screen-safari-studio` (3 Fast Ways)
+
+### Option A — One-Command Git Sync (Recommended)
 ```bash
-chmod +x lovable-screen-safari-studio/sync-to-lovable.sh
-./lovable-screen-safari-studio/sync-to-lovable.sh /path/to/screen-safari-studio
-cd /path/to/screen-safari-studio
+./lovable-screen-safari-studio/sync-to-lovable.sh
+cd screen-safari-studio
 git add -A
-git commit -m "feat(live): integrate maxTV & StarShare Live TV + OG embed API"
+git commit -m "fix(live): fix Live TV playback across maxTV, JioTV ClearKey DASH & TG TV"
 git push origin main
 ```
+Lovable automatically deploys pushes on `main` to `https://screen-safari-studio.lovable.app`.
 
-Or apply the git patch directly inside `screen-safari-studio`:
-
+### Option B — Apply Git Patch Directly inside `screen-safari-studio`
 ```bash
-git am < /path/to/0001-feat-live-integrate-maxTV-StarShare-Live-TV-player-g.patch
+git am < lovable-screen-safari-studio/fix-website-live-channels.patch
 git push origin main
 ```
 
-### Option 2 — Optional Lovable Secrets (for StarShare or Custom maxTV MAC)
-
-Per Lovable's `AGENTS.md`, no credentials are hardcoded in the repository:
-- **`maxTV`** works out-of-the-box with `http://new.maxtv.be/c` (`00:1A:79:BA:DF:D7`), or can be overridden via Lovable Secrets `MAXTV_PORTAL` and `MAXTV_MAC`.
-- **`StarShare`** activates automatically when you add `STARSHARE_USERNAME` and `STARSHARE_PASSWORD` (and optional `STARSHARE_PORTAL`, default `http://livebox.pro:8080`) in **Lovable → Cloud → Secrets**.
-
----
-
-## OG Website Embed & API Endpoints (Once Deployed on `https://<your-app>.lovable.app`)
-
-1. **Single-Channel `<iframe>` Embed**
-   ```html
-   <iframe
-     src="https://<your-app>.lovable.app/embed/<CHANNEL_ID>"
-     width="100%"
-     height="540"
-     style="border:0;border-radius:12px;aspect-ratio:16/9;background:#000"
-     allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-     allowfullscreen
-   ></iframe>
-   ```
-
-2. **Full Live TV Grid + Player Widget (1 `<script>` tag)**
-   ```html
-   <div id="og-live-tv"></div>
-   <script
-     src="https://<your-app>.lovable.app/embed-sdk.js"
-     data-target="#og-live-tv"
-     data-source="maxtv"
-     data-filter="hindi"
-   ></script>
-   ```
-
-3. **Channels JSON API (CORS `*`)**
-   ```text
-   https://<your-app>.lovable.app/api/live/channels?source=maxtv&filter=hindi
-   ```
-
-4. **Dynamic M3U Playlist**
-   ```text
-   https://<your-app>.lovable.app/api/live/playlist.m3u?source=maxtv&filter=hindi
-   ```
+### Option C — Open `creatorAkshanshsahu/screen-safari-studio` in Arena Agent Mode
+Paste:
+> Pull the updated files from `creatorAkshanshsahu/v.4.9` branch `arena/a7aea110-v-4-9` under `lovable-screen-safari-studio/files/` into this repo, run `vitest run` and `vite build`, and push to `main`.

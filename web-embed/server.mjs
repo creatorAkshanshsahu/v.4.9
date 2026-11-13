@@ -12,16 +12,16 @@ const SEED_PATH = path.join(__dirname, "seed-channels.json");
 export const CONFIG = {
   port: Number(process.env.PORT || 8787),
   host: process.env.HOST || "0.0.0.0",
-  maxtvPortal: (process.env.MAXTV_PORTAL || "http://new.maxtv.be/c").trim(),
+  maxtvPortal: (process.env.MAXTV_PORTAL || "http://new.maxtv.be/stalker_portal/c/").trim(),
   maxtvMac: (process.env.MAXTV_MAC || "00:1A:79:EE:03:9F").trim(),
-  maxtvSerial: (process.env.MAXTV_SERIAL || "092014N028195").trim(),
+  maxtvSerial: (process.env.MAXTV_SERIAL || "92180365D21FE").trim(),
   maxtvDeviceId: (
     process.env.MAXTV_DEVICE_ID ||
-    "EC32E82D78B465AA7B53263FB24AD856013BEFB9F0698B46AA9E0FE9D0675B51"
+    "3610DEAFB556781F84CBC8A6AF876A8F20637668862B28DEECFACE00D67A6070"
   ).trim(),
-  starshareServer: (process.env.STARSHARE_SERVER || "http://livebox.pro:8080").trim(),
-  starshareFallback: (process.env.STARSHARE_FALLBACK || "http://starshare.fans:8080").trim(),
-  starshareUser: (process.env.STARSHARE_USER || "hud1234").trim(),
+  starshareServer: (process.env.STARSHARE_SERVER || "http://starshare.cx").trim(),
+  starshareFallback: (process.env.STARSHARE_FALLBACK || "http://livebox.pro:8080").trim(),
+  starshareUser: (process.env.STARSHARE_USER || "Hud1234").trim(),
   starsharePass: (process.env.STARSHARE_PASS || "hud1234").trim(),
   catalogueTtlMs: Number(process.env.CATALOGUE_TTL_MS || 15 * 60 * 1000),
   proxySecret: process.env.PROXY_SECRET || crypto.randomBytes(24).toString("hex")
@@ -665,7 +665,9 @@ export function createGatewayServer(customOpts = {}) {
     res.end(body);
   }
 
-  async function pipeUpstreamMedia(req, res, upstreamUrl, uaMode) {
+  const probeHandoff = new Map();
+
+  async function pipeUpstreamMedia(req, res, upstreamUrl, uaMode, probeOpts = null) {
     const headers =
       uaMode === "xtream"
         ? {
@@ -675,9 +677,7 @@ export function createGatewayServer(customOpts = {}) {
           }
         : {
             "User-Agent": MAG_USER_AGENT,
-            "X-User-Agent": MAG_DEVICE_UA,
-            Accept: "*/*",
-            "Icy-MetaData": "1"
+            Accept: "*/*"
           };
 
     const { req: upReq, res: upRes, finalUrl } = await openUpstreamStream(upstreamUrl, headers);
@@ -712,12 +712,30 @@ export function createGatewayServer(customOpts = {}) {
       }
       const text = Buffer.concat(chunks).toString("utf8");
       const rewritten = rewriteHlsManifest(text, finalUrl, uaMode, publicBaseOf(req), cfg.proxySecret);
+      if (probeOpts && probeOpts.isProbe && probeOpts.handoffId) {
+        probeHandoff.set(probeOpts.handoffId, { at: Date.now(), kind: "hls", body: rewritten });
+      }
       res.writeHead(200, {
         "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
         "Cache-Control": "no-store",
         "X-Stream-Container": "hls"
       });
       res.end(rewritten);
+      return;
+    }
+
+    if (probeOpts && probeOpts.isProbe) {
+      upReq.destroy();
+      upRes.destroy();
+      if (probeOpts.handoffId) {
+        probeHandoff.set(probeOpts.handoffId, { at: Date.now(), kind: "mpegts", resolvedUrl: finalUrl });
+      }
+      res.writeHead(200, {
+        "Content-Type": "video/mp2t",
+        "Cache-Control": "no-store",
+        "X-Stream-Container": "mpegts"
+      });
+      res.end();
       return;
     }
 
@@ -887,14 +905,36 @@ export function createGatewayServer(customOpts = {}) {
       if (pathname.startsWith("/api/stream/")) {
         const rawParam = pathname.slice("/api/stream/".length);
         const preferHls = rawParam.toLowerCase().endsWith(".m3u8") || reqUrl.searchParams.get("format") === "m3u8";
+        const isProbe = reqUrl.searchParams.get("probe") === "1";
         const ch = await findChannelById(rawParam);
         if (!ch) {
           sendJson(res, 404, { ok: false, error: "Channel not found" });
           return;
         }
+        if (!isProbe) {
+          const hit = probeHandoff.get(ch.id);
+          if (hit) {
+            probeHandoff.delete(ch.id);
+            if (Date.now() - hit.at < 8000) {
+              if (hit.kind === "hls" && hit.body) {
+                res.writeHead(200, {
+                  "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+                  "Cache-Control": "no-store",
+                  "X-Stream-Container": "hls"
+                });
+                res.end(hit.body);
+                return;
+              }
+              if (hit.kind === "mpegts" && hit.resolvedUrl) {
+                await pipeUpstreamMedia(req, res, hit.resolvedUrl, ch.source === "starshare" ? "xtream" : "mag");
+                return;
+              }
+            }
+          }
+        }
         if (ch.source === "starshare") {
           const target = xtream.streamUrl(ch.rawId, preferHls ? "m3u8" : "ts");
-          await pipeUpstreamMedia(req, res, target, "xtream");
+          await pipeUpstreamMedia(req, res, target, "xtream", { isProbe, handoffId: ch.id });
           return;
         }
         if (cache.maxtv.usingSeed && String(ch.cmd).includes("localhost/ch/")) {
@@ -906,7 +946,7 @@ export function createGatewayServer(customOpts = {}) {
           return;
         }
         const resolvedUrl = await stalker.resolveLink(ch.cmd);
-        await pipeUpstreamMedia(req, res, resolvedUrl, "mag");
+        await pipeUpstreamMedia(req, res, resolvedUrl, "mag", { isProbe, handoffId: ch.id });
         return;
       }
 

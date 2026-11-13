@@ -211,8 +211,8 @@
         wakeHud();
       }
 
-      function streamEndpoint(suffix) {
-        return "../api/stream/" + encodeURIComponent(ch.id) + (suffix || "") + "?_t=" + Date.now();
+      function streamEndpoint(suffix, probe) {
+        return "../api/stream/" + encodeURIComponent(ch.id) + (suffix || "") + "?_t=" + Date.now() + (probe ? "&probe=1" : "");
       }
 
       function populateHlsAudioTracks(hls) {
@@ -318,7 +318,7 @@
       async function bootStream() {
         destroyEngines();
         showLoading("Requesting fresh maxTV token for " + (ch.name || ch.id) + "…");
-        const probeUrl = streamEndpoint(".ts");
+        const probeUrl = streamEndpoint(".ts", true);
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 9000);
         try {
