@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: streamr-maxtv-embed
+    runtime: node
+    rootDir: web-embed
+    plan: free
+    buildCommand: echo "Ready"
+    startCommand: node server.mjs
+    envVars:
+      - key: MAXTV_PORTAL
+        value: http://new.maxtv.be/c
+      - key: MAXTV_MAC
+        value: 00:1A:79:EE:03:9F
+      - key: STARSHARE_SERVER
+        value: http://livebox.pro:8080
+      - key: STARSHARE_USER
+        value: hud1234
+      - key: STARSHARE_PASS
+        value: hud1234

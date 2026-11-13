@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STREAMR Live Player</title>
+  <style>
+    :root {
+      --bg: #05040b;
+      --glass: rgba(14, 12, 26, 0.82);
+      --border: rgba(255, 255, 255, 0.14);
+      --cyan: #00ecf7;
+      --brand: #ff2e63;
+      --text: #f6f7fb;
+      --dim: #9da3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #000;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+    .stage {
+      position: relative;
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(circle at 50% 35%, #151129 0%, #05040b 70%);
+    }
+    video {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      background: #000;
+    }
+    .hud-top {
+      position: absolute; top: 0; left: 0; right: 0;
+      padding: 14px 18px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: linear-gradient(180deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0) 100%);
+      transition: opacity 0.25s ease;
+      pointer-events: none;
+    }
+    .ch-meta { display: flex; align-items: center; gap: 10px; }
+    .live-pill {
+      background: var(--brand);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      padding: 4px 8px;
+      border-radius: 999px;
+      box-shadow: 0 0 14px rgba(255, 46, 99, 0.55);
+    }
+    .ch-title { font-size: 14px; font-weight: 700; text-shadow: 0 1px 6px rgba(0,0,0,0.9); }
+    .ch-cat { font-size: 11px; color: var(--cyan); font-weight: 600; margin-left: 4px; }
+    .hud-bottom {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 14px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: linear-gradient(0deg, rgba(0,0,0,0.86) 0%, rgba(0,0,0,0) 100%);
+      transition: opacity 0.25s ease;
+    }
+    .stage.idle .hud-top, .stage.idle .hud-bottom { opacity: 0; }
+    .stage.idle { cursor: none; }
+    .btn-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    button, select {
+      background: var(--glass);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.16s ease;
+    }
+    button:hover, select:hover {
+      border-color: var(--cyan);
+      color: #fff;
+    }
+    .overlay-msg {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px; padding: 24px; text-align: center;
+      background: rgba(5, 4, 11, 0.72);
+      z-index: 5;
+    }
+    .overlay-msg.hidden { display: none; }
+    .spinner {
+      width: 38px; height: 38px;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-top-color: var(--cyan);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .status-text { font-size: 13px; color: var(--dim); max-width: 460px; line-height: 1.5; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="stage" id="stage">
+    <video id="video" playsinline autoplay></video>
+
+    <div class="hud-top">
+      <div class="ch-meta">
+        <span class="live-pill">LIVE</span>
+        <span class="ch-title" id="chName">Live TV</span>
+        <span class="ch-cat" id="chCat"></span>
+      </div>
+      <span style="font-size:11px;color:var(--dim);font-weight:700;letter-spacing:0.12em;">STREAMR · maxTV</span>
+    </div>
+
+    <div class="overlay-msg" id="overlay">
+      <div class="spinner" id="spinner"></div>
+      <div class="status-text" id="statusText">Connecting to maxTV live stream…</div>
+      <button id="retryOverlayBtn" style="display:none;">Reload Stream</button>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="btn-row">
+        <button id="playBtn">Pause</button>
+        <button id="muteBtn">Mute</button>
+        <button id="reloadBtn" title="Fetch fresh maxTV token & reconnect">Reload</button>
+        <select id="audioSelect" style="display:none;" title="Switch Audio Track (Hindi / English)"></select>
+      </div>
+      <div class="btn-row">
+        <span id="engineBadge" style="font-size:11px;color:var(--dim);"></span>
+        <button id="pipBtn">PiP</button>
+        <button id="fsBtn">Fullscreen</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="../vendor/mpegts.js"></script>
+  <script src="../vendor/hls.min.js"></script>
+  <script>
+    /*__CHANNEL_BOOT__*/
+    (function () {
+      const ch = window.__STREAMR_CHANNEL__ || { id: "st:1001", name: "Live TV", category: "Live" };
+      const params = new URLSearchParams(location.search);
+      const startMuted = params.get("muted") === "1";
+
+      const stage = document.getElementById("stage");
+      const video = document.getElementById("video");
+      const chName = document.getElementById("chName");
+      const chCat = document.getElementById("chCat");
+      const overlay = document.getElementById("overlay");
+      const spinner = document.getElementById("spinner");
+      const statusText = document.getElementById("statusText");
+      const retryOverlayBtn = document.getElementById("retryOverlayBtn");
+      const playBtn = document.getElementById("playBtn");
+      const muteBtn = document.getElementById("muteBtn");
+      const reloadBtn = document.getElementById("reloadBtn");
+      const audioSelect = document.getElementById("audioSelect");
+      const engineBadge = document.getElementById("engineBadge");
+      const pipBtn = document.getElementById("pipBtn");
+      const fsBtn = document.getElementById("fsBtn");
+
+      chName.textContent = ch.name || ch.id;
+      chCat.textContent = ch.category ? "· " + ch.category : "";
+      document.title = (ch.name || "Live TV") + " · STREAMR Live";
+
+      video.muted = startMuted;
+      muteBtn.textContent = video.muted ? "Unmute" : "Mute";
+
+      let mpegtsPlayer = null;
+      let hlsPlayer = null;
+      let idleTimer = null;
+
+      function wakeHud() {
+        stage.classList.remove("idle");
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          if (!video.paused) stage.classList.add("idle");
+        }, 3200);
+      }
+      ["mousemove", "touchstart", "keydown", "click"].forEach((ev) => document.addEventListener(ev, wakeHud));
+
+      function destroyEngines() {
+        if (mpegtsPlayer) {
+          try { mpegtsPlayer.unload(); mpegtsPlayer.detachMediaElement(); mpegtsPlayer.destroy(); } catch {}
+          mpegtsPlayer = null;
+        }
+        if (hlsPlayer) {
+          try { hlsPlayer.destroy(); } catch {}
+          hlsPlayer = null;
+        }
+        audioSelect.style.display = "none";
+        audioSelect.innerHTML = "";
+      }
+
+      function showLoading(msg) {
+        overlay.classList.remove("hidden");
+        spinner.style.display = "block";
+        retryOverlayBtn.style.display = "none";
+        statusText.textContent = msg || "Connecting to live stream…";
+      }
+
+      function showError(msg) {
+        overlay.classList.remove("hidden");
+        spinner.style.display = "none";
+        retryOverlayBtn.style.display = "inline-block";
+        statusText.textContent = msg;
+      }
+
+      function hideOverlay() {
+        overlay.classList.add("hidden");
+        wakeHud();
+      }
+
+      function streamEndpoint(suffix) {
+        return "../api/stream/" + encodeURIComponent(ch.id) + (suffix || "") + "?_t=" + Date.now();
+      }
+
+      function populateHlsAudioTracks(hls) {
+        const tracks = hls.audioTracks || [];
+        if (tracks.length <= 1) {
+          audioSelect.style.display = "none";
+          return;
+        }
+        audioSelect.innerHTML = "";
+        let hindiIdx = -1;
+        tracks.forEach((t, idx) => {
+          const opt = document.createElement("option");
+          const label = [t.name, t.lang].filter(Boolean).join(" · ") || "Track " + (idx + 1);
+          opt.value = String(idx);
+          opt.textContent = "Audio: " + label;
+          if (hindiIdx < 0 && /hin|^hi$/i.test((t.name || "") + " " + (t.lang || ""))) hindiIdx = idx;
+          audioSelect.appendChild(opt);
+        });
+        if (hindiIdx >= 0 && hls.audioTrack !== hindiIdx) {
+          hls.audioTrack = hindiIdx;
+        }
+        audioSelect.value = String(hls.audioTrack);
+        audioSelect.style.display = "inline-block";
+        audioSelect.onchange = () => {
+          hls.audioTrack = Number(audioSelect.value);
+        };
+      }
+
+      function startHls(url) {
+        destroyEngines();
+        engineBadge.textContent = "HLS";
+        if (window.Hls && window.Hls.isSupported()) {
+          hlsPlayer = new window.Hls({
+            enableWorker: true,
+            lowLatencyMode: true,
+            backBufferLength: 30
+          });
+          hlsPlayer.loadSource(url);
+          hlsPlayer.attachMedia(video);
+          hlsPlayer.on(window.Hls.Events.MANIFEST_PARSED, () => {
+            populateHlsAudioTracks(hlsPlayer);
+            video.play().catch(() => {
+              video.muted = true;
+              muteBtn.textContent = "Unmute";
+              video.play().catch(() => {});
+            });
+          });
+          hlsPlayer.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, () => populateHlsAudioTracks(hlsPlayer));
+          hlsPlayer.on(window.Hls.Events.ERROR, (_, data) => {
+            if (data && data.fatal) {
+              showError("Live HLS stream interrupted. Click Reload to request a fresh maxTV link.");
+            }
+          });
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = url;
+          video.play().catch(() => {});
+        } else {
+          showError("HLS playback is not supported in this browser.");
+        }
+      }
+
+      function startMpegTs(url, allowFallbackToHls) {
+        destroyEngines();
+        if (!window.mpegts || !window.mpegts.isSupported()) {
+          startHls(streamEndpoint(".m3u8"));
+          return;
+        }
+        engineBadge.textContent = "MPEG-TS";
+        mpegtsPlayer = window.mpegts.createPlayer(
+          {
+            type: "mpegts",
+            isLive: true,
+            url
+          },
+          {
+            enableWorker: true,
+            enableStashBuffer: false,
+            stashInitialSize: 128 * 1024,
+            liveBufferLatencyChasing: true,
+            liveBufferLatencyMaxLatency: 6.0,
+            liveBufferLatencyMinRemain: 1.2
+          }
+        );
+        mpegtsPlayer.attachMediaElement(video);
+        mpegtsPlayer.load();
+        const playPromise = mpegtsPlayer.play();
+        if (playPromise && playPromise.catch) {
+          playPromise.catch(() => {
+            video.muted = true;
+            muteBtn.textContent = "Unmute";
+            video.play().catch(() => {});
+          });
+        }
+        mpegtsPlayer.on(window.mpegts.Events.ERROR, (errType, errDetail) => {
+          if (allowFallbackToHls) {
+            startHls(streamEndpoint(".m3u8"));
+          } else {
+            showError("Stream error (" + (errDetail || errType) + "). Click Reload for a fresh maxTV token.");
+          }
+        });
+      }
+
+      async function bootStream() {
+        destroyEngines();
+        showLoading("Requesting fresh maxTV token for " + (ch.name || ch.id) + "…");
+        const probeUrl = streamEndpoint(".ts");
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 9000);
+        try {
+          const res = await fetch(probeUrl, { method: "GET", signal: ctrl.signal });
+          clearTimeout(timer);
+          if (!res.ok) {
+            let detail = "HTTP " + res.status;
+            try {
+              const j = await res.json();
+              if (j && j.error) detail = j.error;
+            } catch {}
+            ctrl.abort();
+            showError(detail);
+            return;
+          }
+          const container = (res.headers.get("x-stream-container") || "").toLowerCase();
+          const ctype = (res.headers.get("content-type") || "").toLowerCase();
+          ctrl.abort(); // Close probe connection immediately before player opens live feed
+          if (container === "hls" || ctype.includes("mpegurl")) {
+            startHls(streamEndpoint(".m3u8"));
+          } else {
+            startMpegTs(streamEndpoint(".ts"), true);
+          }
+        } catch (err) {
+          clearTimeout(timer);
+          startMpegTs(streamEndpoint(".ts"), true);
+        }
+      }
+
+      video.addEventListener("playing", () => {
+        hideOverlay();
+        playBtn.textContent = "Pause";
+      });
+      video.addEventListener("pause", () => {
+        playBtn.textContent = "Play";
+      });
+      video.addEventListener("waiting", () => {
+        showLoading("Buffering live broadcast…");
+      });
+
+      playBtn.onclick = () => {
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+      };
+      muteBtn.onclick = () => {
+        video.muted = !video.muted;
+        muteBtn.textContent = video.muted ? "Unmute" : "Mute";
+      };
+      reloadBtn.onclick = bootStream;
+      retryOverlayBtn.onclick = bootStream;
+      pipBtn.onclick = () => {
+        if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
+        else if (video.requestPictureInPicture) video.requestPictureInPicture().catch(() => {});
+      };
+      fsBtn.onclick = () => {
+        if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+        else if (stage.requestFullscreen) stage.requestFullscreen().catch(() => {});
+      };
+
+      bootStream();
+    })();
+  </script>
+</body>
+</html>

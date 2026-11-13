@@ -158,9 +158,9 @@ jobs:
           python3 .github/scripts/publish-update.test.py
           python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
           if [ -f out/starshare-prebake-status.txt ] && [ "$(cat out/starshare-prebake-status.txt)" = "included" ]; then
-            printf "\nInbuilt StarShare login: **Included**\n" >> out/update-notes.md
+            printf "\nInbuilt StarShare login: **Included (Secret override)**\n" >> out/update-notes.md
           else
-            printf "\nInbuilt StarShare login: **Not set in Actions secrets**\n" >> out/update-notes.md
+            printf "\nInbuilt StarShare login: **Included (Inbuilt default)**\n" >> out/update-notes.md
           fi
       - name: Publish the rolling latest release
         env:

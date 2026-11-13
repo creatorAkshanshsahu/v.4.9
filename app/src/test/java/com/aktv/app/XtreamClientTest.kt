@@ -207,5 +207,50 @@ class XtreamClientTest {
         // Clean category display labels:
         assertEquals("HINDI ENTERTAINMENT", XtreamClient.displayCategoryName("|IN| HINDI ENTERTAINMENT"))
         assertEquals("SPORTS", XtreamClient.displayCategoryName("IN | SPORTS"))
+
+        // Real StarShare bouquet categories (Bigg Boss, Bollywood collections, Adult drop):
+        assertTrue(XtreamClient.keepsIndianHindi("Bigg Boss 18 Live", "BIGG BOSS 24X7"))
+        assertTrue(XtreamClient.keepsIndianHindi("Jawan (2023)", "SHAH RUKH KHAN | COLLECTION"))
+        assertTrue(XtreamClient.keepsIndianHindi("Tiger 3 (2023)", "SALMAN KHAN | COLLECTION"))
+        assertTrue(XtreamClient.keepsIndianHindi("Leo (2023)", "SOUTH INDIAN | HINDI DUBBED"))
+        assertFalse(XtreamClient.keepsIndianHindi("Midnight XXX", "FOR Adults"))
+    }
+
+    @Test
+    fun inbuiltAccountAndPortalStreamCandidatesAreConfiguredAndAndroidIcuSafe() {
+        val inbuilt = XtreamAccount.INBUILT
+        assertTrue("Inbuilt StarShare account must be configured out of the box", inbuilt.isConfigured)
+        assertEquals("http://livebox.pro:8080", inbuilt.normalizedOrigin)
+
+        // maxTV Stalker extension=ts URLs must try MPEG-TS first, then HLS fallback:
+        val tsFirst = XtreamClient.portalStreamsFor(
+            "http://new.maxtv.be:8080/play/live.php?mac=00:1A:79:EE:03:9F&stream=101&extension=ts&play_token=abc"
+        )
+        assertEquals(listOf("ts", "hls"), tsFirst.map { it.type })
+        assertTrue(tsFirst.all { XtreamClient.isPortalStream(it) })
+
+        val hlsFirst = XtreamClient.portalStreamsFor("http://edge.maxtv.be:8080/live/101/index.m3u8?token=xyz")
+        assertEquals(listOf("hls", "ts"), hlsFirst.map { it.type })
+
+        // Android ICU regex check: no Regex field on XtreamClient may contain unescaped '{' or '}' inside '[...]'.
+        for (field in XtreamClient::class.java.declaredFields) {
+            if (field.type == Regex::class.java) {
+                field.isAccessible = true
+                val regex = field.get(XtreamClient) as Regex
+                val pat = regex.pattern
+                var inCharClass = false
+                var escaped = false
+                for (ch in pat) {
+                    if (escaped) { escaped = false; continue }
+                    if (ch == '\\') { escaped = true; continue }
+                    if (ch == '[' && !inCharClass) { inCharClass = true; continue }
+                    if (ch == ']' && inCharClass) { inCharClass = false; continue }
+                    assertFalse(
+                        "Android ICU rejects unescaped '$ch' inside [...] in ${field.name}: $pat",
+                        inCharClass && (ch == '{' || ch == '}')
+                    )
+                }
+            }
+        }
     }
 }

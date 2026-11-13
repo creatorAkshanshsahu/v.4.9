@@ -147,6 +147,7 @@ class MainActivity : AppCompatActivity() {
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
     // maxTV: the Stalker portal section. Fetched the first time the tab opens, like the playlist.
     private var allPortal = listOf<Channel>(); private var portalLoaded = false; private var portalInFlight = false
+    private var portalFilterMode = XtreamClient.FILTER_INDIAN_HINDI
     private var portalMsg = "Loading maxTV channels…"; private var portalGenres = mapOf<String, String>()
     // TG TV: a plain M3U playlist with a section of its own, fetched the first time that tab opens.
     private var allPlaylist = listOf<Channel>(); private var playlistLoaded = false; private var playlistInFlight = false
@@ -378,6 +379,7 @@ class MainActivity : AppCompatActivity() {
         segStar = findViewById(R.id.segStar)
         searchBtn = findViewById(R.id.searchBtn)
         xtreamFilterMode = xtreamPrefs.getInt("filter_mode", XtreamClient.FILTER_INDIAN_HINDI)
+        portalFilterMode = prefs.getInt("portal_filter_mode", XtreamClient.FILTER_INDIAN_HINDI)
         findViewById<View>(R.id.navProfile)?.apply {
             isClickable = true
             setOnClickListener { showStarShareDialog() }
@@ -566,7 +568,22 @@ class MainActivity : AppCompatActivity() {
         // One guarded setup: a failure here leaves a usable app with a message, not a closed one.
         runCatching {
             layoutHero(); styleSegs(); fillHero(null); loadChannels()
-            if (!safeMode && xtreamAccount().isConfigured) loadXtreamCurrentMode(force = false)
+            if (!safeMode && xtreamAccount().isConfigured) {
+                // Warm only disk-cached StarShare channels at launch so cold boot stays instant; network sync runs when StarShare opens.
+                submit(io) {
+                    val cached = XtreamClient.loadLiveCache(xtreamCacheDir(), xtreamAccount().cacheKey)
+                    if (cached.isNotEmpty()) {
+                        val mapped = cached.map { ch ->
+                            Channel(id = ch.streamId, name = ch.name, category = ch.categoryName, logo = ch.logo, xtream = true)
+                        }
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed && allXtream.isEmpty()) {
+                                allXtream = mapped; seedAccents(mapped)
+                            }
+                        }
+                    }
+                }
+            }
         }.onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
         // Cyber-neon motion entrance (`streamr-cyber-logo-full-motion.mp4`), skippable by tap or any remote key.
@@ -853,14 +870,15 @@ class MainActivity : AppCompatActivity() {
         }
         navStyle(phoneSearchBtn, phoneSegBgs[phoneSegs.size], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
-            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; 6 -> "maxTV"
-            8 -> "OG & Platforms"; 9 -> "StarShare"; else -> "Live TV"
+            0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; 5 -> "TATA"; 6 -> "maxTV"
+            7 -> "TG TV"; 8 -> "OG & Platforms"; 9 -> "StarShare"; else -> "Live TV"
         }
         findViewById<TextView>(R.id.sectionKicker).apply {
             text = when (tab) {
                 0 -> "LIVE, RIGHT NOW"
                 1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · NATIVE CLEARKEY"
                 3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"; 6 -> "MAXTV PORTAL · NATIVE PLAYBACK"
+                7 -> "TG TV PLAYLIST · NATIVE PLAYBACK"
                 8 -> "THEOGPIRATEBOT · NETFLIX · PRIME · HOTSTAR · ANIME"
                 9 -> "STARSHARE · XTREAM CODES · NATIVE PLAYBACK"
                 else -> "TATA PLAYLIST · NATIVE CLEARKEY"
@@ -868,7 +886,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(sectionAccent())
         }
         val count = when (tab) {
-            0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; 5 -> tataJio.size; 6 -> allPortal.size; 7 -> allPlaylist.size
+            0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; 5 -> tataJio.size; 6 -> visiblePortalChannels().size; 7 -> allPlaylist.size
             9 -> if (xtreamMode == 0) visibleXtreamChannels().size else vodRowsFor(9).sumOf { it.tiles.size }
             else -> vodRowsFor(tab).sumOf { it.tiles.size }
         }
@@ -1084,7 +1102,7 @@ class MainActivity : AppCompatActivity() {
         // stutter on open and die when the JioTV tab was finally opened. It now loads when that tab is opened.
     }
 
-    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; 6 -> allPortal; 7 -> allPlaylist; 9 -> visibleXtreamChannels(); else -> all }
+    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; 6 -> visiblePortalChannels(); 7 -> allPlaylist; 9 -> visibleXtreamChannels(); else -> all }
 
     /** Loads the JioTV m3u8 playlist and builds a channel catalogue from it. */
     /**
@@ -1161,13 +1179,42 @@ class MainActivity : AppCompatActivity() {
         if (searchShown) updateResults()
     }
 
+    /** Quick playlist switcher across all Live TV sources (Allinone, 24/7, JioTV, TATA, maxTV, TG TV, StarShare). */
+    private fun playlistSwitcherRow(): Row = Row(
+        title = "Playlists",
+        tiles = listOf(
+            Tile.Action("Allinone Live\nMain live shelf", active = tab == 0) { switchTab(0) },
+            Tile.Action("24/7 Channels\nAlways-on shelf", active = tab == 1) { switchTab(1) },
+            Tile.Action("JioTV Playlist\nNative ClearKey", active = tab == 2) { switchTab(2) },
+            Tile.Action("TATA Playlist\nTATA Play channels", active = tab == 5) { switchTab(5) },
+            Tile.Action("maxTV Portal\nStalker live TV", active = tab == 6) { switchTab(6) },
+            Tile.Action("TG TV Playlist\nM3U direct streams", active = tab == 7) { switchTab(7) },
+            Tile.Action("StarShare\nXtream Live + VOD", active = tab == 9) { switchTab(9) }
+        )
+    )
+
     /** The site's second list, on its own tab: the site's order, then one row per category it declares. */
-    private fun tataRows(list: List<Channel>): List<Row> {
-        if (list.isEmpty()) return emptyList()
-        val out = ArrayList<Row>()
-        out.add(Row("TATA · Playlist", featuredChannels(list).map { Tile.Ch(it) }))
-        out.addAll(list.groupBy { it.category }.toSortedMap().map { (name, items) -> Row("TATA · $name", items.map { Tile.Ch(it) }) })
-        return out
+    private fun tataRows(list: List<Channel>): List<Row> = buildList {
+        add(playlistSwitcherRow())
+        if (list.isEmpty()) return@buildList
+        add(Row("TATA · Playlist", featuredChannels(list).map { Tile.Ch(it) }))
+        add(Row(FAV, favTiles()))
+        addAll(recentRow())
+        addAll(list.groupBy { it.category }.toSortedMap().map { (name, items) -> Row("TATA · $name", items.map { Tile.Ch(it) }) })
+    }
+
+    private fun visiblePortalChannels(): List<Channel> {
+        if (allPortal.isEmpty()) return emptyList()
+        val filtered = allPortal.filter { XtreamClient.keepsByFilter(it.name, it.category, portalFilterMode) }
+        return if (filtered.isNotEmpty() || portalFilterMode == XtreamClient.FILTER_ALL) filtered
+        else allPortal.filter { XtreamClient.keepsEnglishOrHindi(it.name, it.category) }.ifEmpty { allPortal }
+    }
+
+    private fun togglePortalFilter() {
+        portalFilterMode = (portalFilterMode + 1) % 3
+        prefs.edit().putInt("portal_filter_mode", portalFilterMode).apply()
+        Toast.makeText(this, "maxTV filter: ${XtreamClient.filterLabel(portalFilterMode)}", Toast.LENGTH_SHORT).show()
+        if (tab == 6) { refreshRows(); rowsView.scrollToPosition(0) }
     }
 
     /**
@@ -1175,8 +1222,8 @@ class MainActivity : AppCompatActivity() {
      * list is read the first time the tab opens, and each channel is exchanged for a fresh link on every
      * tune (`create_link`), because a portal link is short-lived.
      */
-    private fun loadPortalChannels() {
-        if (portalLoaded || portalInFlight) return
+    private fun loadPortalChannels(force: Boolean = false) {
+        if ((portalLoaded && !force) || portalInFlight) return
         portalInFlight = true
         portalMsg = "Loading maxTV channels…"
         if (tab == 6) updateStatus()
@@ -1191,18 +1238,17 @@ class MainActivity : AppCompatActivity() {
                 val channels = listed.map { c ->
                     Channel(
                         id = c.id, name = c.name,
-                        category = genres[c.genre]?.takeIf { it.isNotBlank() } ?: "maxTV",
+                        category = genres[c.genre]?.takeIf { it.isNotBlank() && it != "*" && !it.equals("All", true) } ?: "maxTV",
                         // The portal publishes logo paths relative to its own host.
                         logo = if (c.logo.startsWith("/")) account.origin + c.logo else c.logo,
                         portal = true, cmd = c.cmd
                     )
-                }.filter { PortalLanguages.keeps(it.name, it.category) }
+                }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     portalInFlight = false; portalLoaded = true
                     portalGenres = genres
-                    // An empty shelf must say why: every genre the filter saw was a regional one.
-                    portalMsg = if (channels.isEmpty()) "maxTV lists no English or Hindi channels." else portalMsg
+                    portalMsg = if (channels.isEmpty()) "maxTV returned no channels." else ""
                     applyPortal(channels)
                 }
             } catch (e: Exception) {
@@ -1225,12 +1271,37 @@ class MainActivity : AppCompatActivity() {
         if (searchShown) updateResults()
     }
 
-    /** The portal section: featured channels first, then one row per genre the portal names. */
+    /** The portal section: playlist switcher + filter controls, featured channels, then Indian-first genre shelves. */
     private fun portalRows(channels: List<Channel>): List<Row> = buildList {
-        if (channels.isNotEmpty()) add(Row("maxTV · Featured", featuredChannels(channels).map { Tile.Ch(it) }))
+        val visible = visiblePortalChannels()
+        add(
+            Row(
+                title = "maxTV",
+                tiles = listOf(
+                    Tile.Action(
+                        label = "Filter: ${XtreamClient.filterLabel(portalFilterMode)}\n" +
+                            if (allPortal.isNotEmpty()) "${visible.size} of ${allPortal.size} channels" else "Tap to switch filter",
+                        active = portalFilterMode == XtreamClient.FILTER_INDIAN_HINDI
+                    ) { togglePortalFilter() },
+                    Tile.Action(
+                        label = "Refresh maxTV\n" + if (portalInFlight) "Refreshing…" else "Reload portal channels"
+                    ) {
+                        portalLoaded = false
+                        loadPortalChannels(force = true)
+                    }
+                )
+            )
+        )
+        add(playlistSwitcherRow())
+        if (visible.isNotEmpty()) add(Row("maxTV · Featured", featuredChannels(visible).map { Tile.Ch(it) }))
         add(Row(FAV, favTiles()))
         addAll(recentRow())
-        addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+        val grouped = visible.groupBy { XtreamClient.displayCategoryName(it.category) }
+            .entries
+            .sortedWith(compareBy({ XtreamClient.categoryRank(it.key) }, { it.key.lowercase() }))
+        for ((name, items) in grouped) {
+            if (items.isNotEmpty()) add(Row(name, items.map { Tile.Ch(it) }))
+        }
     }
 
     /**
@@ -1277,6 +1348,7 @@ class MainActivity : AppCompatActivity() {
 
     /** The playlist section: its best channels first, then one row per group the file names. */
     private fun playlistRows(channels: List<Channel>): List<Row> = buildList {
+        add(playlistSwitcherRow())
         if (channels.isNotEmpty()) add(Row("TG TV · Featured", featuredChannels(channels).map { Tile.Ch(it) }))
         add(Row(FAV, favTiles()))
         addAll(recentRow())
@@ -1342,6 +1414,16 @@ class MainActivity : AppCompatActivity() {
             return inbuilt
         }
         return XtreamAccount(XtreamClient.DEFAULT_SERVER, "", "")
+    }
+
+    private fun xtreamEffectiveAccount(base: XtreamAccount = xtreamAccount()): XtreamAccount {
+        val info = xtreamAuthInfo
+        val canonUser = info?.canonicalUsername?.takeIf { it.isNotBlank() }
+            ?: xtreamPrefs.getString("canon_user_${base.cacheKey}", null)?.takeIf { it.isNotBlank() }
+            ?: base.username
+        val canonPass = info?.canonicalPassword?.takeIf { it.isNotBlank() }
+            ?: base.password
+        return base.copy(username = canonUser, password = canonPass)
     }
 
     private fun xtreamWorkingOrigin(account: XtreamAccount = xtreamAccount()): String =
@@ -1434,12 +1516,14 @@ class MainActivity : AppCompatActivity() {
                     xtreamPrefs.edit()
                         .putString("working_origin_${account.cacheKey}", info.workingOrigin)
                         .putString("allowed_formats_${account.cacheKey}", info.allowedFormats.joinToString(","))
+                        .putString("canon_user_${account.cacheKey}", info.canonicalUsername)
                         .apply()
                 }
+                val authedAccount = xtreamEffectiveAccount(account)
                 val origin = auth.workingOrigin
                 when (targetMode) {
                     0 -> {
-                        val live = XtreamClient.fetchLiveCatalogue(account, origin)
+                        val live = XtreamClient.fetchLiveCatalogue(authedAccount, origin)
                         XtreamClient.saveLiveCache(xtreamCacheDir(), account.cacheKey, live)
                         val mapped = live.map { ch ->
                             Channel(id = ch.streamId, name = ch.name, category = ch.categoryName, logo = ch.logo, xtream = true)
@@ -1454,7 +1538,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     1 -> {
-                        val vods = XtreamClient.fetchVodCatalogue(account, origin)
+                        val vods = XtreamClient.fetchVodCatalogue(authedAccount, origin)
                         val byId = vods.associateBy { it.streamId }
                         val vodRowsBuilt = buildXtreamVodRows(vods)
                         runOnUiThread {
@@ -1468,7 +1552,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     else -> {
-                        val series = XtreamClient.fetchSeriesCatalogue(account, origin)
+                        val series = XtreamClient.fetchSeriesCatalogue(authedAccount, origin)
                         val byId = series.associateBy { it.seriesId }
                         val seriesRowsBuilt = buildXtreamSeriesRows(series)
                         runOnUiThread {
@@ -1606,11 +1690,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playXtreamChannel(ch: Channel) {
-        val account = xtreamAccount()
-        if (!account.isConfigured) {
+        val base = xtreamAccount()
+        if (!base.isConfigured) {
             fail("StarShare account is not signed in.")
             return
         }
+        val account = xtreamEffectiveAccount(base)
         ++playToken
         resolveJob?.cancel(true)
         nativeProviders = emptyList(); nextNativeProvider = 0
@@ -1623,8 +1708,8 @@ class MainActivity : AppCompatActivity() {
         val streams = XtreamClient.liveStreamsFor(
             account = account,
             streamId = ch.id,
-            allowedFormats = xtreamAllowedFormats(),
-            workingOrigin = xtreamWorkingOrigin(account)
+            allowedFormats = xtreamAllowedFormats(base),
+            workingOrigin = xtreamWorkingOrigin(base)
         )
         val saved = prefs.getString("source_${ch.key}", null)
         val rememberedIdx = streams.indexOfFirst { sourceKey(it) == saved }.takeIf { it >= 0 } ?: 0
@@ -1634,26 +1719,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun playXtreamVod(title: Movies.Title) {
-        val account = xtreamAccount()
-        if (!account.isConfigured) { showStarShareDialog(); return }
+        val base = xtreamAccount()
+        if (!base.isConfigured) { showStarShareDialog(); return }
+        val account = xtreamEffectiveAccount(base)
         stopPreview()
         val parts = title.imdb.removePrefix("xtream_vod:").split(':')
         val streamId = parts.firstOrNull()?.toIntOrNull() ?: title.tmdb
         val ext = parts.getOrNull(1)?.ifBlank { "mp4" } ?: "mp4"
-        val (urls, labels) = XtreamClient.vodSourcesFor(account, streamId, ext, xtreamWorkingOrigin(account))
+        val (urls, labels) = XtreamClient.vodSourcesFor(account, streamId, ext, xtreamWorkingOrigin(base))
         MoviePlayerActivity.openDirect(this, streamId, title.name, urls, labels)
         overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     private fun openXtreamSeriesEpisodes(title: Movies.Title) {
-        val account = xtreamAccount()
-        if (!account.isConfigured) { showStarShareDialog(); return }
+        val base = xtreamAccount()
+        if (!base.isConfigured) { showStarShareDialog(); return }
+        val account = xtreamEffectiveAccount(base)
         stopPreview()
         val seriesId = title.imdb.removePrefix("xtream_series:").toIntOrNull() ?: title.tmdb
         Toast.makeText(this, "Loading episodes for ${title.name}…", Toast.LENGTH_SHORT).show()
         submit(io) {
             try {
-                val episodes = XtreamClient.fetchSeriesEpisodes(account, seriesId, xtreamWorkingOrigin(account))
+                val episodes = XtreamClient.fetchSeriesEpisodes(account, seriesId, xtreamWorkingOrigin(base))
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     if (episodes.isEmpty()) {
@@ -1671,7 +1758,7 @@ class MainActivity : AppCompatActivity() {
                                 account = account,
                                 episodeId = ep.episodeId,
                                 containerExtension = ep.containerExtension,
-                                workingOrigin = xtreamWorkingOrigin(account)
+                                workingOrigin = xtreamWorkingOrigin(base)
                             )
                             MoviePlayerActivity.openDirect(
                                 context = this,
@@ -2021,6 +2108,7 @@ class MainActivity : AppCompatActivity() {
         val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
+            add(playlistSwitcherRow())
             if (!alwaysOn) add(Row("Trending Now", trend, landscape = trendingTitles.isNotEmpty()))
             add(Row(FAV, favTiles()))
             addAll(recentRow())
@@ -2043,6 +2131,7 @@ class MainActivity : AppCompatActivity() {
             .filter { PortalLanguages.keeps(it.name, it.category) }
             .map { Tile.Ch(it) }
         return buildList {
+            add(playlistSwitcherRow())
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, jioFavs))
             if (jioRecent.isNotEmpty()) add(Row(RECENT, jioRecent))
@@ -2470,9 +2559,9 @@ class MainActivity : AppCompatActivity() {
                     // The hero can show a playlist tile; it must then play that tile, not the TG catalogue's first row.
                     val pool = when {
                         t.c.v2 -> allV2
-                        t.c.jio -> allJio
+                        t.c.jio -> if (tab == 5 && tataJio.isNotEmpty()) tataJio else allJio
                         t.c.xtream -> visibleXtreamChannels()
-                        t.c.portal -> allPortal
+                        t.c.portal -> visiblePortalChannels()
                         t.c.m3u -> allPlaylist
                         else -> all
                     }
@@ -2945,7 +3034,7 @@ class MainActivity : AppCompatActivity() {
                 rememberPortalEndpoint(portal)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
-                    nativeSources = listOf(portalStream(url))
+                    nativeSources = XtreamClient.portalStreamsFor(url)
                     serverIdx = 0
                     startNative()
                 }
@@ -2958,25 +3047,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    /**
-     * A portal link is a plain signed CDN address: no browser Origin or Referer is sent to it, only the
-     * set-top box User-Agent the portal expects for its own streams.
-     */
-    private fun portalStream(url: String) = TgStream(
-        label = "maxTV",
-        url = url,
-        type = when {
-            url.contains(".mpd", true) -> "dash"
-            url.contains(".mp4", true) -> "mp4"
-            // Portal live links are MPEG-TS inside HLS, and many carry no extension at all.
-            else -> "hls"
-        },
-        headers = mapOf("User-Agent" to StalkerProtocol.MAG_USER_AGENT),
-        requestOrigin = stalkerAccount().origin,
-        omitReferrer = true,
-        omitOrigin = true
-    )
 
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
@@ -3042,7 +3112,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Shared by full-screen playback and previews so headers, type, redirects and DRM cannot drift apart. */
     private fun nativeMediaSource(source: TgStream, trace: PlaybackDiagnostics.Attempt? = null): MediaSource {
-        if (XtreamClient.isXtreamStream(source)) {
+        if (XtreamClient.isXtreamStream(source) || (XtreamClient.isPortalStream(source) && source.type != "dash")) {
             return XtreamClient.liveMediaSource(source, liveCfg())
         }
         val data = Streams.factory(source)
@@ -3125,7 +3195,7 @@ class MainActivity : AppCompatActivity() {
         val sourceDrm = source.drm
         val trace = diagnostics.begin(
             if (source.requestOrigin == JjtvResolver.SITE) PlaybackDiagnostics.Provider.JJTV
-            else if (source.requestOrigin == JioM3uResolver.SITE || XtreamClient.isXtreamStream(source)) PlaybackDiagnostics.Provider.JIOM3U
+            else if (source.requestOrigin == JioM3uResolver.SITE || XtreamClient.isXtreamStream(source) || XtreamClient.isPortalStream(source)) PlaybackDiagnostics.Provider.JIOM3U
             else PlaybackDiagnostics.Provider.TG,
             when (source.type) {
                 "hls" -> PlaybackDiagnostics.Media.HLS
@@ -3544,8 +3614,6 @@ class MainActivity : AppCompatActivity() {
     /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
     private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
-        // Nothing else carries a portal channel: there is no second provider to try, only a fresh link.
-        if (ch.portal) { fail("$reason. Hold OK to ask the portal again."); return }
         startupBudget.recover(SystemClock.elapsedRealtime())
         providerWindow.recover(SystemClock.elapsedRealtime())
         releasePlayer()
@@ -3561,9 +3629,14 @@ class MainActivity : AppCompatActivity() {
             }
             is PlaybackRecovery.Action.MoreSources -> loadMoreNative(ch, action.fresh || nativePassFresh, reason)
             PlaybackRecovery.Action.Refresh -> {
-                // A playlist channel's token and key document both live behind the playlist lookup.
-                if (ch.jio) TgServers.invalidateJio() else TgServers.invalidate(ch.id, ch.v2)
-                resolveAndStart(ch, fresh = true)
+                // A playlist channel's token and key document both live behind the playlist lookup;
+                // a maxTV portal channel asks `create_link` for one fresh token.
+                if (ch.portal || ch.xtream || ch.m3u) {
+                    resolveAndStart(ch, fresh = true)
+                } else {
+                    if (ch.jio) TgServers.invalidateJio() else TgServers.invalidate(ch.id, ch.v2)
+                    resolveAndStart(ch, fresh = true)
+                }
             }
             PlaybackRecovery.Action.Unavailable -> fail("$reason. Hold OK to reload or choose another channel.")
         }

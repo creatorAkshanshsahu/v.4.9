@@ -57,12 +57,12 @@ internal data class XtreamAccount(
         }
 
     companion object {
-        /** Build-time pre-baked StarShare account injected via private CI secrets or Gradle properties. */
+        /** Build-time / inbuilt StarShare account so devices open channels with zero login prompt. */
         val INBUILT: XtreamAccount
             get() = XtreamClient.parseInput(
                 BuildConfig.STARSHARE_SERVER.ifBlank { XtreamClient.DEFAULT_SERVER },
-                BuildConfig.STARSHARE_USER,
-                BuildConfig.STARSHARE_PASS
+                BuildConfig.STARSHARE_USER.ifBlank { XtreamClient.DEFAULT_USER },
+                BuildConfig.STARSHARE_PASS.ifBlank { XtreamClient.DEFAULT_PASS }
             )
     }
 }
@@ -73,7 +73,9 @@ internal data class XtreamAuthInfo(
     val expDateSec: Long?,
     val activeConnections: Int,
     val maxConnections: Int,
-    val allowedFormats: List<String>
+    val allowedFormats: List<String>,
+    val canonicalUsername: String = "",
+    val canonicalPassword: String = ""
 ) {
     fun summary(): String {
         val parts = ArrayList<String>(3)
@@ -141,8 +143,11 @@ internal class XtreamHttpStream(
 
 internal object XtreamClient {
     const val DEFAULT_SERVER = "http://livebox.pro:8080"
+    const val DEFAULT_USER = "hud1234"
+    const val DEFAULT_PASS = "hud1234"
     const val PLAYER_USER_AGENT = "IPTVSmartersPlayer"
     const val XTREAM_ORIGIN_TAG = "https://xtream.local"
+    const val PORTAL_ORIGIN_TAG = "https://stalker.local"
     private const val MAX_CATALOGUE_ITEMS = 35_000
 
     val SERVER_PRESETS: List<Pair<String, String>> = listOf(
@@ -182,6 +187,26 @@ internal object XtreamClient {
                     .removeHeader("Origin")
                     .removeHeader("Referer")
                     .header("User-Agent", PLAYER_USER_AGENT)
+                    .header("Accept", "*/*")
+                    .header("Icy-MetaData", "1")
+                    .build()
+                chain.proceed(req)
+            }
+            .build()
+    }
+
+    private val stalkerPlaybackClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .addNetworkInterceptor { chain ->
+                val req = chain.request().newBuilder()
+                    .removeHeader("Origin")
+                    .removeHeader("Referer")
+                    .header("User-Agent", StalkerProtocol.MAG_USER_AGENT)
+                    .header("X-User-Agent", StalkerProtocol.DEVICE_USER_AGENT)
                     .header("Accept", "*/*")
                     .header("Icy-MetaData", "1")
                     .build()
@@ -351,7 +376,9 @@ internal object XtreamClient {
                         expDateSec = expSec,
                         activeConnections = activeCons,
                         maxConnections = maxCons,
-                        allowedFormats = formats.ifEmpty { listOf("ts", "m3u8") }
+                        allowedFormats = formats.ifEmpty { listOf("ts", "m3u8") },
+                        canonicalUsername = user.optString("username").trim().ifBlank { account.username.trim() },
+                        canonicalPassword = user.optString("password").trim().ifBlank { account.password.trim() }
                     )
                 }
             } catch (rejected: XtreamAuthRejectedException) {
@@ -681,38 +708,102 @@ internal object XtreamClient {
 
     fun isXtreamStream(source: TgStream): Boolean = source.requestOrigin == XTREAM_ORIGIN_TAG
 
+    fun isPortalStream(source: TgStream): Boolean = source.requestOrigin == PORTAL_ORIGIN_TAG
+
     fun dataSourceFactory(): DataSource.Factory =
         OkHttpDataSource.Factory(playbackClient).setUserAgent(PLAYER_USER_AGENT)
 
+    fun stalkerDataSourceFactory(): DataSource.Factory =
+        OkHttpDataSource.Factory(stalkerPlaybackClient).setUserAgent(StalkerProtocol.MAG_USER_AGENT)
+
     /**
-     * MediaSource for a StarShare Live TV candidate (`ts` with open-GOP non-IDR support, or `hls`).
+     * Candidate native stream descriptors for a Stalker / maxTV `create_link` URL.
+     * Stalker portals (`new.maxtv.be`, `livebox.pro/c`) commonly serve raw `MPEG-TS` (`extension=ts` or
+     * `/play/live.php?...`) even without a `.ts` path suffix, while some channels serve HLS `.m3u8`.
+     * Returning both in natural priority order lets ExoPlayer fall back automatically instead of failing
+     * with `#EXTM3U` missing header.
+     */
+    fun portalStreamsFor(url: String): List<TgStream> {
+        val clean = url.trim()
+        val headers = mapOf(
+            "User-Agent" to StalkerProtocol.MAG_USER_AGENT,
+            "X-User-Agent" to StalkerProtocol.DEVICE_USER_AGENT
+        )
+        val pathPart = clean.substringBefore('?').lowercase(Locale.ROOT)
+        val lower = clean.lowercase(Locale.ROOT)
+        if (pathPart.endsWith(".mpd")) {
+            return listOf(
+                TgStream("maxTV · DASH", clean, "dash", headers, requestOrigin = PORTAL_ORIGIN_TAG, omitReferrer = true, omitOrigin = true)
+            )
+        }
+        if (pathPart.endsWith(".mp4") || pathPart.endsWith(".mkv")) {
+            return listOf(
+                TgStream("maxTV · Stream", clean, "mp4", headers, requestOrigin = PORTAL_ORIGIN_TAG, omitReferrer = true, omitOrigin = true)
+            )
+        }
+        val tsStream = TgStream(
+            label = "maxTV · MPEG-TS",
+            url = clean,
+            type = "ts",
+            headers = headers,
+            requestOrigin = PORTAL_ORIGIN_TAG,
+            omitReferrer = true,
+            omitOrigin = true
+        )
+        val hlsStream = TgStream(
+            label = "maxTV · HLS",
+            url = clean,
+            type = "hls",
+            headers = headers,
+            requestOrigin = PORTAL_ORIGIN_TAG,
+            omitReferrer = true,
+            omitOrigin = true
+        )
+        val looksLikeHls = pathPart.endsWith(".m3u8") || "extension=m3u8" in lower || "output=m3u8" in lower || "type=m3u8" in lower
+        return if (looksLikeHls) listOf(hlsStream, tsStream) else listOf(tsStream, hlsStream)
+    }
+
+    /**
+     * MediaSource for a StarShare or Stalker/maxTV Live TV candidate (`ts` with open-GOP non-IDR support, or `hls`).
      */
     fun liveMediaSource(source: TgStream, liveCfg: MediaItem.LiveConfiguration): MediaSource {
-        val data = dataSourceFactory()
-        return if (source.type == "hls") {
-            val item = MediaItem.Builder()
-                .setUri(source.url)
-                .setLiveConfiguration(liveCfg)
-                .setMimeType(MimeTypes.APPLICATION_M3U8)
-                .build()
-            HlsMediaSource.Factory(data)
-                .setAllowChunklessPreparation(true)
-                .setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
-                .createMediaSource(item)
-        } else {
-            val extractors = DefaultExtractorsFactory()
-                .setTsExtractorFlags(
-                    DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
-                        DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
-                )
-            val item = MediaItem.Builder()
-                .setUri(source.url)
-                .setLiveConfiguration(liveCfg)
-                .setMimeType(MimeTypes.VIDEO_MP2T)
-                .build()
-            ProgressiveMediaSource.Factory(data, extractors)
-                .setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
-                .createMediaSource(item)
+        val data = if (isPortalStream(source)) stalkerDataSourceFactory() else dataSourceFactory()
+        return when (source.type) {
+            "hls" -> {
+                val item = MediaItem.Builder()
+                    .setUri(source.url)
+                    .setLiveConfiguration(liveCfg)
+                    .setMimeType(MimeTypes.APPLICATION_M3U8)
+                    .build()
+                HlsMediaSource.Factory(data)
+                    .setAllowChunklessPreparation(true)
+                    .setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+                    .createMediaSource(item)
+            }
+            "mp4" -> {
+                val item = MediaItem.Builder()
+                    .setUri(source.url)
+                    .setLiveConfiguration(liveCfg)
+                    .build()
+                DefaultMediaSourceFactory(data)
+                    .setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+                    .createMediaSource(item)
+            }
+            else -> {
+                val extractors = DefaultExtractorsFactory()
+                    .setTsExtractorFlags(
+                        DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
+                            DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
+                    )
+                val item = MediaItem.Builder()
+                    .setUri(source.url)
+                    .setLiveConfiguration(liveCfg)
+                    .setMimeType(MimeTypes.VIDEO_MP2T)
+                    .build()
+                ProgressiveMediaSource.Factory(data, extractors)
+                    .setLoadErrorHandlingPolicy(NativeLoadErrorPolicy())
+                    .createMediaSource(item)
+            }
         }
     }
 
@@ -765,7 +856,7 @@ internal object XtreamClient {
     /** Cleans noisy IPTV panel country prefixes like `|IN| HINDI ENTERTAINMENT` -> `HINDI ENTERTAINMENT` while preserving clarity. */
     fun displayCategoryName(category: String): String {
         val stripped = category.trim()
-            .replace(Regex("^[|\\[({\\s]*(?:IN|IND|INDIA|INDIAN|VIP)[|\\])}\\s:\\-–—]+", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^[|\\[\\(\\{\\s]*(?:IN|IND|INDIA|INDIAN|VIP)[|\\]\\)\\}\\s:\\-–—]+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("^[|:\\-–—\\s]+|[|:\\-–—\\s]+$"), "")
             .replace(Regex("\\s{2,}"), " ")
             .trim()
@@ -823,17 +914,18 @@ internal object XtreamClient {
     }
 
     private val ADULT_REGEX = Regex(
-        "\\b(?:XXX|ADULT|18\\+|PORN|PLAYBOY|BRAZZERS|EROTIC|ONLYFANS)\\b",
+        "\\b(?:XXX|ADULT|ADULTS|FOR\\s+ADULTS|18\\+|PORN|PLAYBOY|BRAZZERS|EROTIC|ONLYFANS)\\b",
         RegexOption.IGNORE_CASE
     )
 
     private val HINDI_EXPLICIT_REGEX = Regex(
-        "\\b(?:HINDI|BOLLYWOOD|HIN\\s*DUB|HINDI\\s*DUB(?:BED)?|DUAL\\s*AUDIO|DESI)\\b",
+        "\\b(?:HINDI|BOLLYWOOD|HIN\\s*DUB|HINDI\\s*DUB(?:BED)?|DUAL\\s*AUDIO|MULTI\\s*LANGUAGE\\s*\\|?\\s*DUBBED|DESI|BIGG\\s*BOSS|" +
+            "SHAH\\s*RUKH\\s*KHAN|SALMAN\\s*KHAN|AAMIR\\s*KHAN|AMITABH\\s*BACHCHAN|AKSHAY\\s*KUMAR|AJAY\\s*DEVGN|HRITHIK\\s*ROSHAN|RAJESH\\s*KHANNA|DILIP\\s*KUMAR|RAJ\\s*KAPOOR)\\b",
         RegexOption.IGNORE_CASE
     )
 
     private val INDIA_TAG_REGEX = Regex(
-        "(?:^|[|\\[({\\s:\\-])(?:IN|IND|INDIA|INDIAN|BHARAT|HINDUSTAN|TATA\\s*PLAY|TATA\\s*SKY|JIO(?:\\s*TV|\\s*CINEMA|\\s*HOTSTAR)?|AIRTEL|DISH\\s*TV|D2H|DOORDARSHAN|HOTSTAR|ZEE5|SONYLIV|SONY\\s*LIV|MX\\s*PLAYER|TVF)(?:$|[|\\])}\\s:\\-])",
+        "(?:^|[|\\[\\(\\{\\s:\\-])(?:IN|IND|INDIA|INDIAN|BHARAT|HINDUSTAN|TATA\\s*PLAY|TATA\\s*SKY|JIO(?:\\s*TV|\\s*CINEMA|\\s*HOTSTAR)?|AIRTEL|DISH\\s*TV|D2H|DOORDARSHAN|HOTSTAR|ZEE5|SONYLIV|SONY\\s*LIV|MX\\s*PLAYER|TVF)(?:$|[|\\]\\)\\}\\s:\\-])",
         RegexOption.IGNORE_CASE
     )
 
@@ -861,7 +953,7 @@ internal object XtreamClient {
     )
 
     private val FOREIGN_STRICT_REGEX = Regex(
-        "(?:^|[|\\[({\\s:\\-])(?:US|USA|UNITED\\s*STATES|UK|UNITED\\s*KINGDOM|BRITAIN|CA|CAN|CANADA|AU|AUS|AUSTRALIA|NZ|" +
+        "(?:^|[|\\[\\(\\{\\s:\\-])(?:US|USA|UNITED\\s*STATES|UK|UNITED\\s*KINGDOM|BRITAIN|CA|CAN|CANADA|AU|AUS|AUSTRALIA|NZ|" +
             "PK|PAK|PAKISTAN|BD|BAN|BANGLADESH|AF|AFG|AFGHAN|AFGHANISTAN|NP|NEPAL|LK|SL|SRI\\s*LANKA|" +
             "AR|ARA|ARAB|ARABIC|AE|UAE|SAUDI|QATAR|KUWAIT|OMAN|BAHRAIN|EGYPT|MOROCCO|ALGERIA|TUNISIA|IRAQ|SYRIA|LEBANON|JORDAN|OSN|SHAHID|MBC|ROTANA|" +
             "TR|TUR|TURKEY|TURKISH|IR|IRN|IRAN|PERSIAN|FARSI|KURD|KURDISH|IL|ISR|ISRAEL|HEBREW|" +
@@ -871,7 +963,7 @@ internal object XtreamClient {
             "SE|SWE|SWEDEN|NO|NOR|NORWAY|DK|DEN|DENMARK|FI|FIN|FINLAND|NORDIC|IE|IRL|IRELAND|" +
             "AFRICA|ZA|SOUTH\\s*AFRICA|DSTV|NIGERIA|KENYA|GHANA|ETHIOPIA|SOMALI|" +
             "PH|PHI|PHILIPPINES|MY|MALAYSIA|SG|SINGAPORE|ID|INDONESIA|TH|THAILAND|VN|VIETNAM|CN|CHINA|CHINESE|HK|HONG\\s*KONG|TW|TAIWAN|JP|JAPAN|KR|KOREA|" +
-            "CARIBBEAN|SURINAME|NFL|NBA|NHL|MLB|MLS|NASCAR|SPFL|EFL|LOI|GAAGO)(?:$|[|\\])}\\s:\\-])",
+            "CARIBBEAN|SURINAME|NFL|NBA|NHL|MLB|MLS|NASCAR|SPFL|EFL|LOI|GAAGO)(?:$|[|\\]\\)\\}\\s:\\-])",
         RegexOption.IGNORE_CASE
     )
 
