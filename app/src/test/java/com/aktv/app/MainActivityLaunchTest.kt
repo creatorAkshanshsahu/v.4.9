@@ -165,7 +165,38 @@ class MainActivityLaunchTest {
             val maxTexts = ArrayList<String>()
             collect(activity.window.decorView, maxTexts)
             assertTrue("maxTV featured playlist shelf must appear: $maxTexts", maxTexts.any { it.contains("maxTV · Featured Playlist") })
+            assertTrue("maxTV Portal Settings tile must show working 00:1A:79:EE:03:9F MAC: $maxTexts",
+                maxTexts.any { it.contains("00:1A:79:EE:03:9F") })
             assertTrue("No CrashLog report may be written when clicking maxTV", CrashLog.report(activity) == null)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `upgrading from 5_4_33 broken maxTV prefs automatically restores working EE_03_9F portal identity`() {
+        val app = RuntimeEnvironment.getApplication()
+        File(app.filesDir, "last-exit.txt").delete()
+        val prefs = app.getSharedPreferences("aktv", Context.MODE_PRIVATE)
+        prefs.edit()
+            .clear()
+            .putBoolean("portal_migrated_ba_df_d7", true)
+            .putString("portal_url", "http://new.maxtv.be/c/")
+            .putString("portal_mac", "00:1A:79:BA:DF:D7")
+            .putString("portal_endpoint", "http://new.maxtv.be/c/server/load.php")
+            .apply()
+
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create().start().resume()
+        try {
+            val activity = controller.get()
+            activity.findViewById<View>(R.id.segPortal).performClick()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+            measureAndLayout(activity)
+            val texts = ArrayList<String>()
+            collect(activity.window.decorView, texts)
+            assertTrue("Upgraded maxTV must restore 00:1A:79:EE:03:9F: $texts", texts.any { it.contains("00:1A:79:EE:03:9F") })
+            assertTrue("Broken 00:1A:79:BA:DF:D7 MAC must be purged", !texts.any { it.contains("00:1A:79:BA:DF:D7") })
+            assertTrue("Stale portal_endpoint must be cleared", prefs.getString("portal_endpoint", null) == null)
         } finally {
             controller.pause().stop().destroy()
         }

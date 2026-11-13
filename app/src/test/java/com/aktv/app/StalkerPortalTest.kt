@@ -169,9 +169,10 @@ class StalkerPortalTest {
     }
 
     @Test
-    fun `stale remembered endpoint falls back to discovery and updated maxTV defaults match active portal`() {
-        assertEquals("http://new.maxtv.be/c/", StalkerAccount.DEFAULT_PORTAL)
-        assertEquals("00:1A:79:BA:DF:D7", StalkerAccount.DEFAULT_MAC)
+    fun `stale remembered endpoint falls back to discovery and working maxTV defaults match bound serial`() {
+        assertEquals("http://new.maxtv.be/stalker_portal/c/", StalkerAccount.DEFAULT_PORTAL)
+        assertEquals("00:1A:79:EE:03:9F", StalkerAccount.DEFAULT_MAC)
+        assertEquals("92180365D21FE", StalkerAccount.DEFAULT_SERIAL)
 
         val staleRemembered = "http://portal.example/old/server/load.php"
         val http = FakeHttp { url ->
@@ -186,5 +187,6 @@ class StalkerPortalTest {
         val portal = StalkerPortal(account, http, knownEndpoint = staleRemembered)
         assertEquals(2, portal.channels().size)
         assertEquals("http://portal.example/stalker_portal/server/load.php", portal.workingEndpoint)
+        assertTrue(http.headers.last()["Cookie"].orEmpty().contains("timezone=Europe/London"))
     }
 }

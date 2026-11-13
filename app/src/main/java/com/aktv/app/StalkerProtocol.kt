@@ -45,7 +45,6 @@ internal object StalkerProtocol {
 
     /** True when the portal says the token is gone, so the caller has to handshake again. */
     fun expired(body: String): Boolean {
-        if (body.length > 64 * 1024) return false
         val root = raw(body) as? JSONObject ?: return false
         val js = root.optJSONObject("js") ?: root
         when (val flag = js.opt("not_valid")) {
@@ -59,7 +58,6 @@ internal object StalkerProtocol {
 
     /** The portal's own refusal text, when it sent one. */
     fun error(body: String): String? {
-        if (body.length > 256 * 1024) return null
         val root = raw(body) as? JSONObject ?: return null
         val js = root.optJSONObject("js") ?: root
         val text = js.optString("error").ifBlank { js.optString("msg") }
@@ -68,123 +66,22 @@ internal object StalkerProtocol {
         return text.takeIf { it.isNotEmpty() }
     }
 
-    /**
-     * `get_all_channels` / `get_ordered_list`: streams the `"data":[...]` array object-by-object instead
-     * of building a monolithic `JSONObject` DOM for 15–20 MB portal responses, avoiding OOM spikes on TVs.
-     */
+    /** `get_all_channels`: the `js.data` array of `{id, name, cmd, tv_genre_id, logo}`. */
     fun channels(body: String): List<StalkerChannel> {
-        val text = body.trim().removePrefix("/**/").trim()
-        if (text.isEmpty()) return emptyList()
-
-        // Fast streaming scan of the `"data"` array when present (typical `{"js":{"total_items":...,"data":[...]}}`).
-        val dataArrayStart = findDataArrayStart(text)
-        if (dataArrayStart >= 0) {
-            val out = ArrayList<StalkerChannel>(1024)
-            scanArrayObjects(text, dataArrayStart) { item ->
-                if (out.size >= MAX_PORTAL_CHANNELS) return@scanArrayObjects
-                parseChannelObject(item)?.let(out::add)
-            }
-            return out
-        }
-
-        // Fallback for non-standard shapes (`{"js":[...]}` or bare `[...]`).
-        val array = when (val root = raw(body)) {
-            is JSONArray -> root
-            is JSONObject -> root.optJSONObject("js")?.optJSONArray("data")
-                ?: root.optJSONArray("js")
-                ?: root.optJSONArray("data")
-            else -> null
-        } ?: return emptyList()
-        val out = ArrayList<StalkerChannel>(array.length().coerceAtMost(MAX_PORTAL_CHANNELS))
-        for (i in 0 until array.length()) {
-            if (out.size >= MAX_PORTAL_CHANNELS) break
-            val item = array.optJSONObject(i) ?: continue
-            parseChannelObject(item)?.let(out::add)
+        val js = envelope(body) ?: return emptyList()
+        val data = js.optJSONArray("data") ?: return emptyList()
+        val out = ArrayList<StalkerChannel>(data.length())
+        for (i in 0 until data.length()) {
+            val item = data.optJSONObject(i) ?: continue
+            val cmd = item.optString("cmd").trim()
+            val name = item.optString("name").ifBlank { item.optString("title") }.trim()
+            val id = item.optString("id").ifBlank { item.optString("ch_id") }.trim()
+            // A row without a name or without a handle cannot be shown or played.
+            if (cmd.isEmpty() || name.isEmpty()) continue
+            out.add(StalkerChannel(id.ifEmpty { name }, name, cmd,
+                item.optString("tv_genre_id").trim(), item.optString("logo").trim()))
         }
         return out
-    }
-
-    private fun parseChannelObject(item: JSONObject): StalkerChannel? {
-        val cmd = item.optString("cmd").trim()
-        val name = item.optString("name").ifBlank { item.optString("title") }.trim()
-        val id = item.optString("id").ifBlank { item.optString("ch_id") }.trim()
-        if (cmd.isEmpty() || name.isEmpty()) return null
-        return StalkerChannel(
-            id = id.ifEmpty { name },
-            name = name,
-            cmd = cmd,
-            genre = item.optString("tv_genre_id").trim(),
-            logo = item.optString("logo").trim()
-        )
-    }
-
-    private fun findDataArrayStart(text: String): Int {
-        var searchFrom = 0
-        while (true) {
-            val keyIdx = text.indexOf("\"data\"", searchFrom)
-            if (keyIdx < 0) return -1
-            var i = keyIdx + 6
-            while (i < text.length && text[i].isWhitespace()) i++
-            if (i < text.length && text[i] == ':') {
-                i++
-                while (i < text.length && text[i].isWhitespace()) i++
-                if (i < text.length && text[i] == '[') return i
-            }
-            searchFrom = keyIdx + 6
-        }
-    }
-
-    private inline fun scanArrayObjects(text: String, arrayOpenIdx: Int, onObject: (JSONObject) -> Unit) {
-        val sb = StringBuilder(512)
-        var depth = 0
-        var inString = false
-        var escape = false
-        var i = arrayOpenIdx + 1
-        val len = text.length
-        while (i < len) {
-            val c = text[i]
-            if (depth == 0) {
-                if (inString) {
-                    if (escape) escape = false
-                    else if (c == '\\') escape = true
-                    else if (c == '"') inString = false
-                } else {
-                    when (c) {
-                        '"' -> inString = true
-                        '{' -> {
-                            depth = 1
-                            sb.setLength(0)
-                            sb.append('{')
-                        }
-                        ']' -> return
-                    }
-                }
-            } else {
-                sb.append(c)
-                if (inString) {
-                    if (escape) escape = false
-                    else if (c == '\\') escape = true
-                    else if (c == '"') inString = false
-                } else {
-                    when (c) {
-                        '"' -> inString = true
-                        '{' -> depth++
-                        '}' -> {
-                            depth--
-                            if (depth == 0) {
-                                runCatching { JSONObject(sb.toString()) }.getOrNull()?.let(onObject)
-                                sb.setLength(0)
-                            }
-                        }
-                    }
-                }
-                if (sb.length > 256 * 1024) {
-                    depth = 0
-                    sb.setLength(0)
-                }
-            }
-            i++
-        }
     }
 
     /** `get_genres`: `[{id, title}]`, or the same array under `js`. */

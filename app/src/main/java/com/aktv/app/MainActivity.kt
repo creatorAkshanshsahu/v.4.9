@@ -147,13 +147,14 @@ class MainActivity : AppCompatActivity() {
 
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
     // maxTV: the Stalker portal playlist. Pre-cached on disk and sliced off the UI thread.
-    private var allPortal = listOf<Channel>(); private var portalLoaded = false; private var portalInFlight = false
+    private var allPortal = listOf<Channel>(); private var portalLoaded = false; private var portalInFlight = false; private var portalRetried = false
     private var portalFilterMode = XtreamClient.FILTER_ENGLISH_HINDI
     private var portalVisibleCached = listOf<Channel>()
     private var portalFeaturedCached = listOf<Channel>()
     private var portalCategoryRowsCached = listOf<Row>()
     private var portalMsg = "Loading maxTV playlist…"; private var portalGenres = mapOf<String, String>()
     private var portalDialog: AlertDialog? = null
+    private val portalIo = Executors.newSingleThreadExecutor()
     // TG TV: a plain M3U playlist with a section of its own, fetched the first time that tab opens.
     private var allPlaylist = listOf<Channel>(); private var playlistLoaded = false; private var playlistInFlight = false
     private var playlistMsg = "Loading TG TV channels…"
@@ -389,7 +390,7 @@ class MainActivity : AppCompatActivity() {
         searchBtn = findViewById(R.id.searchBtn)
         xtreamFilterMode = xtreamPrefs.getInt("filter_mode", XtreamClient.FILTER_INDIAN_HINDI)
         portalFilterMode = prefs.getInt("portal_filter_mode_v2", XtreamClient.FILTER_ENGLISH_HINDI)
-        migrateLegacyMaxTvAccountIfNeeded()
+        restoreWorkingMaxTvDefaultsIfNeeded()
         findViewById<View>(R.id.navProfile)?.apply {
             isClickable = true
             setOnClickListener { showStarShareDialog() }
@@ -609,7 +610,7 @@ class MainActivity : AppCompatActivity() {
                         val (cachedList, cachedGenres) = StalkerProtocol.loadCache(portalCacheDir(), pAcc.cacheKey)
                         if (cachedList.isNotEmpty()) {
                             val mapped = mapStalkerChannels(pAcc, cachedList, cachedGenres)
-                            val slice = computeChannelSlice(mapped, portalFilterMode, maxPerRow = 250)
+                            val slice = computePortalSlice(mapped, portalFilterMode, maxPerRow = 250)
                             seedAccents(slice.second)
                             runOnUiThread {
                                 if (!isFinishing && !isDestroyed && allPortal.isEmpty()) {
@@ -624,10 +625,10 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                // Quietly sync maxTV playlist in the background so it shows up ready on Live TV & maxTV.
+                // Quietly sync maxTV playlist on its dedicated thread so it shows up ready on Live TV & maxTV.
                 ui.postDelayed({
                     if (!isFinishing && !isDestroyed && !portalLoaded && !portalInFlight) loadPortalChannels()
-                }, 2_200)
+                }, 1_200)
             }
         }.onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
@@ -1291,6 +1292,39 @@ class MainActivity : AppCompatActivity() {
 
     private fun portalCacheDir() = File(filesDir, "portal")
 
+    /**
+     * Pure background helper for maxTV Stalker channels: uses `PortalLanguages.keeps` in English & Hindi
+     * mode (matching the working maxTV catalogue filter) and preserves portal genre rows cleanly off-UI.
+     */
+    private fun computePortalSlice(
+        raw: List<Channel>,
+        mode: Int,
+        maxPerRow: Int = 250
+    ): Triple<List<Channel>, List<Channel>, List<Row>> {
+        if (raw.isEmpty()) return Triple(emptyList(), emptyList(), emptyList())
+        val primary = when (mode) {
+            XtreamClient.FILTER_ALL -> raw
+            XtreamClient.FILTER_INDIAN_HINDI -> raw.filter { XtreamClient.keepsByFilter(it.name, it.category, mode) }
+            else -> raw.filter { PortalLanguages.keeps(it.name, it.category) }
+        }
+        val visible = primary.ifEmpty { raw.filter { PortalLanguages.keeps(it.name, it.category) }.ifEmpty { raw } }
+        val featured = featuredChannels(visible).take(40)
+        val grouped = LinkedHashMap<String, MutableList<Channel>>()
+        for (ch in visible) {
+            val cat = ch.category.trim().ifEmpty { "maxTV" }
+            grouped.getOrPut(cat) { ArrayList() }.add(ch)
+        }
+        val orderedCats = grouped.keys.sortedWith(compareBy({ XtreamClient.categoryRank(it) }, { it.lowercase() }))
+        val builtRows = ArrayList<Row>(orderedCats.size.coerceAtMost(80))
+        for (cat in orderedCats.take(80)) {
+            val items = grouped[cat].orEmpty()
+            if (items.isNotEmpty()) {
+                builtRows += Row(cat, items.take(maxPerRow).map { Tile.Ch(it) })
+            }
+        }
+        return Triple(visible, featured, builtRows)
+    }
+
     private fun mapStalkerChannels(
         account: StalkerAccount,
         listed: List<StalkerChannel>,
@@ -1306,7 +1340,7 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** Fast O(1) UI-thread accessor — filtering always happens on `io` via `computeChannelSlice`. */
+    /** Fast O(1) UI-thread accessor — filtering always happens off the main thread. */
     private fun visiblePortalChannels(): List<Channel> = portalVisibleCached
 
     private fun togglePortalFilter() {
@@ -1315,8 +1349,8 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "maxTV filter: ${XtreamClient.filterLabel(portalFilterMode)}", Toast.LENGTH_SHORT).show()
         val snapshot = allPortal
         val targetMode = portalFilterMode
-        submit(io) {
-            val slice = computeChannelSlice(snapshot, targetMode, maxPerRow = 250)
+        submit(portalIo) {
+            val slice = computePortalSlice(snapshot, targetMode, maxPerRow = 250)
             seedAccents(slice.second)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -1330,22 +1364,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The maxTV section: a Stalker portal playlist. Cached on disk for instant cold start and refreshed
-     * asynchronously so it appears both on the Live TV playlists shelf and on the dedicated maxTV tab.
+     * The maxTV section: a Stalker portal playlist. Runs on its dedicated `portalIo` executor so startup
+     * catalogue downloads never starve it, and caches on disk for instant cold start.
      */
     private fun loadPortalChannels(force: Boolean = false) {
+        if (force) portalRetried = false
         if ((portalLoaded && !force) || portalInFlight) return
         portalInFlight = true
-        portalMsg = "Loading maxTV playlist…"
+        portalMsg = "Loading maxTV channels…"
         if (tab == 6) updateStatus()
-        submit(io) {
+        submit(portalIo) {
             val account = stalkerAccount()
             // Paint disk-cached maxTV playlist first if memory is empty.
             if (allPortal.isEmpty() && !force) {
                 val (cachedList, cachedGenres) = StalkerProtocol.loadCache(portalCacheDir(), account.cacheKey)
                 if (cachedList.isNotEmpty()) {
                     val mapped = mapStalkerChannels(account, cachedList, cachedGenres)
-                    val slice = computeChannelSlice(mapped, portalFilterMode, maxPerRow = 250)
+                    val slice = computePortalSlice(mapped, portalFilterMode, maxPerRow = 250)
                     seedAccents(slice.second)
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed && allPortal.isEmpty()) {
@@ -1361,7 +1396,6 @@ class MainActivity : AppCompatActivity() {
             }
             try {
                 val portal = newPortal()
-                // Fetch genres alongside channels so Stalker genre IDs resolve cleanly to readable shelf titles.
                 val listed = portal.channels()
                 rememberPortalEndpoint(portal)
                 val genres = runCatching { portal.genres() }.getOrDefault(emptyMap())
@@ -1369,7 +1403,7 @@ class MainActivity : AppCompatActivity() {
                     StalkerProtocol.saveCache(portalCacheDir(), account.cacheKey, listed, genres)
                 }
                 val channels = mapStalkerChannels(account, listed, genres)
-                val slice = computeChannelSlice(channels, portalFilterMode, maxPerRow = 250)
+                val slice = computePortalSlice(channels, portalFilterMode, maxPerRow = 250)
                 seedAccents(slice.second)
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
@@ -1379,11 +1413,20 @@ class MainActivity : AppCompatActivity() {
                     applyPortal(channels, slice)
                 }
             } catch (e: Exception) {
+                // Drop any stale remembered endpoint so the next attempt performs full Stalker endpoint discovery.
+                prefs.edit().remove("portal_endpoint").apply()
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     portalInFlight = false; portalLoaded = false
-                    if (allPortal.isEmpty()) {
-                        portalMsg = "maxTV didn't load (${portalReason(e)}). Tap Portal Settings or Refresh to retry."
+                    if (allPortal.isEmpty() && !portalRetried) {
+                        portalRetried = true
+                        portalMsg = "Loading maxTV channels…"
+                        if (tab == 6) updateStatus()
+                        ui.postDelayed({
+                            if (!isFinishing && !isDestroyed && !portalLoaded && !portalInFlight) loadPortalChannels()
+                        }, 4_000)
+                    } else if (allPortal.isEmpty()) {
+                        portalMsg = "maxTV didn't load (${portalReason(e)}). Select this tab again or tap Refresh to retry."
                         if (tab == 6) { refreshRows(); updateStatus() }
                     }
                 }
@@ -2218,32 +2261,38 @@ class MainActivity : AppCompatActivity() {
         if (prefs.getString("portal_endpoint", null) != endpoint) prefs.edit().putString("portal_endpoint", endpoint).apply()
     }
 
-    /** Auto-upgrades stale default maxTV portal/MAC (`00:1A:79:EE:03:9F`) to the active `new.maxtv.be/c/` identity. */
-    private fun migrateLegacyMaxTvAccountIfNeeded() {
+    /**
+     * Restores the working Android maxTV device identity (`http://new.maxtv.be/stalker_portal/c/` +
+     * `00:1A:79:EE:03:9F`) if an earlier build (`5.4.33`) migrated prefs to the web embed MAC (`00:1A:79:BA:DF:D7`).
+     */
+    private fun restoreWorkingMaxTvDefaultsIfNeeded() {
+        if (prefs.getBoolean("portal_restored_ee_03_9f_v1", false)) return
         val savedMac = prefs.getString("portal_mac", null)?.trim()
         val savedUrl = prefs.getString("portal_url", null)?.trim()
-        val alreadyMigrated = prefs.getBoolean("portal_migrated_ba_df_d7", false)
-        if (!alreadyMigrated) {
-            val edit = prefs.edit().putBoolean("portal_migrated_ba_df_d7", true)
-            if (savedMac == null || savedMac.equals(StalkerAccount.LEGACY_MAC, ignoreCase = true)) {
-                edit.remove("portal_mac").remove("portal_endpoint")
-            }
-            if (savedUrl != null && savedUrl.equals(StalkerAccount.LEGACY_PORTAL, ignoreCase = true)) {
-                edit.remove("portal_url").remove("portal_endpoint")
-            }
-            edit.apply()
+        val hadBrokenMigration = prefs.getBoolean("portal_migrated_ba_df_d7", false)
+        val isBrokenMac = savedMac != null && savedMac.equals("00:1A:79:BA:DF:D7", ignoreCase = true)
+        val isBrokenUrl = savedUrl != null && (
+            savedUrl.equals("http://new.maxtv.be/c/", ignoreCase = true) ||
+                savedUrl.equals("http://new.maxtv.be/c", ignoreCase = true)
+            )
+        val edit = prefs.edit()
+            .putBoolean("portal_restored_ee_03_9f_v1", true)
+            .remove("portal_migrated_ba_df_d7")
+        if (hadBrokenMigration || isBrokenMac || isBrokenUrl) {
+            edit.remove("portal_endpoint")
+            if (hadBrokenMigration || isBrokenMac) edit.remove("portal_mac")
+            if (hadBrokenMigration || isBrokenUrl) edit.remove("portal_url")
+            runCatching { portalCacheDir().listFiles()?.forEach { it.delete() } }
         }
+        edit.apply()
     }
 
     /** The portal address and device identity, with the viewer's own values overriding the shipped defaults. */
     private fun stalkerAccount(): StalkerAccount {
         fun stored(key: String, fallback: String) = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
-        val rawMac = stored("portal_mac", StalkerAccount.DEFAULT_MAC).let {
-            if (it.equals(StalkerAccount.LEGACY_MAC, ignoreCase = true)) StalkerAccount.DEFAULT_MAC else it
-        }
         return StalkerAccount(
             portal = stored("portal_url", StalkerAccount.DEFAULT_PORTAL),
-            mac = rawMac,
+            mac = stored("portal_mac", StalkerAccount.DEFAULT_MAC),
             serial = stored("portal_serial", StalkerAccount.DEFAULT_SERIAL),
             deviceId = stored("portal_device", StalkerAccount.DEFAULT_DEVICE)
         )
@@ -2279,8 +2328,8 @@ class MainActivity : AppCompatActivity() {
                 setStroke(px(1).coerceAtLeast(1), 0x4400ECF7)
             }
         }
-        val urlInput = field("Portal URL (e.g. http://new.maxtv.be/c/)", current.portal)
-        val macInput = field("MAC Address (e.g. 00:1A:79:BA:DF:D7)", current.mac)
+        val urlInput = field("Portal URL (e.g. http://new.maxtv.be/stalker_portal/c/)", current.portal)
+        val macInput = field("MAC Address (e.g. 00:1A:79:EE:03:9F)", current.mac)
         container.addView(urlInput, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) })
         container.addView(macInput, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(12) })
 
@@ -3343,7 +3392,7 @@ class MainActivity : AppCompatActivity() {
                 rememberPortalEndpoint(portal)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
-                    nativeSources = XtreamClient.portalStreamsFor(url)
+                    nativeSources = listOf(portalStream(url))
                     serverIdx = 0
                     startNative()
                 }
@@ -3356,6 +3405,25 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    /**
+     * A portal stream is not a browser embed: it carries the set-top box user agent the portal expects and
+     * suppresses browser Referer/Origin headers that CDNs behind a portal reject.
+     */
+    private fun portalStream(url: String) = TgStream(
+        label = "maxTV",
+        url = url,
+        type = when {
+            url.contains(".mpd", true) -> "dash"
+            url.contains(".mp4", true) -> "mp4"
+            // Portal live links are MPEG-TS inside HLS, and many carry no extension at all.
+            else -> "hls"
+        },
+        headers = mapOf("User-Agent" to StalkerProtocol.MAG_USER_AGENT),
+        requestOrigin = stalkerAccount().origin,
+        omitReferrer = true,
+        omitOrigin = true
+    )
 
     private fun requestedProvider(ch: Channel) = requestedNativeProvider?.takeIf { it.first == ch.key }?.second
     private fun providerOrder(ch: Channel) = ChannelProviderOrder.playbackOrder(
@@ -3421,7 +3489,7 @@ class MainActivity : AppCompatActivity() {
 
     /** Shared by full-screen playback and previews so headers, type, redirects and DRM cannot drift apart. */
     private fun nativeMediaSource(source: TgStream, trace: PlaybackDiagnostics.Attempt? = null): MediaSource {
-        if (XtreamClient.isXtreamStream(source) || (XtreamClient.isPortalStream(source) && source.type != "dash")) {
+        if (XtreamClient.isXtreamStream(source)) {
             return XtreamClient.liveMediaSource(source, liveCfg())
         }
         val data = Streams.factory(source)
@@ -4738,7 +4806,7 @@ class MainActivity : AppCompatActivity() {
         diagnosticsDialog?.dismiss(); diagnosticsDialog = null; diagnosticsText = null
         xtreamDialog?.dismiss(); xtreamDialog = null
         portalDialog?.dismiss(); portalDialog = null
-        playbackIo.shutdownNow(); io.shutdownNow(); drmProbeIo.shutdownNow()
+        playbackIo.shutdownNow(); io.shutdownNow(); portalIo.shutdownNow(); drmProbeIo.shutdownNow()
         super.onDestroy()
     }
 

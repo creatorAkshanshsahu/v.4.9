@@ -28,10 +28,8 @@ internal data class StalkerAccount(
         }
 
     companion object {
-        const val DEFAULT_PORTAL = "http://new.maxtv.be/c/"
-        const val DEFAULT_MAC = "00:1A:79:BA:DF:D7"
-        const val LEGACY_PORTAL = "http://new.maxtv.be/stalker_portal/c/"
-        const val LEGACY_MAC = "00:1A:79:EE:03:9F"
+        const val DEFAULT_PORTAL = "http://new.maxtv.be/stalker_portal/c/"
+        const val DEFAULT_MAC = "00:1A:79:EE:03:9F"
         const val DEFAULT_SERIAL = "92180365D21FE"
         const val DEFAULT_DEVICE = "3610DEAFB556781F84CBC8A6AF876A8F20637668862B28DEECFACE00D67A6070"
         val DEFAULT = StalkerAccount(DEFAULT_PORTAL, DEFAULT_MAC, DEFAULT_SERIAL, DEFAULT_DEVICE)
@@ -92,7 +90,7 @@ internal object StalkerEndpoints {
  * command and its logo path. Four megabytes is a website player's budget, not a portal's: the first real
  * catalogue this app asked for was refused with "Player response too large".
  */
-internal const val STALKER_CATALOGUE_BYTES = 28 * 1024 * 1024
+internal const val STALKER_CATALOGUE_BYTES = 24 * 1024 * 1024
 
 /** The portal answered, but not with something this app can use. */
 class StalkerException(val status: Int? = null, val portalDetail: String = "") : IOException(
@@ -115,8 +113,8 @@ class StalkerException(val status: Int? = null, val portalDetail: String = "") :
 internal class StalkerPortal(
     private val account: StalkerAccount = StalkerAccount.DEFAULT,
     private val http: TgTransport = TgHttp(
-        readTimeoutSeconds = 25,
-        callTimeoutSeconds = 40,
+        readTimeoutSeconds = 20,
+        callTimeoutSeconds = 30,
         maxBodyBytes = STALKER_CATALOGUE_BYTES
     ),
     /** An address that already answered for this portal, usually from the last launch. */
@@ -139,29 +137,8 @@ internal class StalkerPortal(
         session()
         val body = request("itv", "get_all_channels", emptyMap())
         val list = StalkerProtocol.channels(body)
-        if (list.isNotEmpty()) return list
-        val explicitError = StalkerProtocol.error(body)
-        if (explicitError != null) throw StalkerException(portalDetail = explicitError)
-        // Fallback for Stalker panels that disable bulk get_all_channels and serve paginated get_ordered_list.
-        val paged = runCatching { fetchOrderedListFallback() }.getOrDefault(emptyList())
-        if (paged.isNotEmpty()) return paged
-        throw StalkerException(portalDetail = "The portal lists no channels")
-    }
-
-    private fun fetchOrderedListFallback(): List<StalkerChannel> {
-        val out = ArrayList<StalkerChannel>(512)
-        for (page in 1..12) {
-            val pageBody = request(
-                "itv",
-                "get_ordered_list",
-                linkedMapOf("genre" to "*", "force_ch_link_check" to "0", "fav" to "0", "sortby" to "number", "hd" to "0", "p" to page.toString())
-            )
-            val batch = StalkerProtocol.channels(pageBody)
-            if (batch.isEmpty()) break
-            out.addAll(batch)
-            if (batch.size < 14) break
-        }
-        return out
+        if (list.isEmpty()) throw StalkerException(portalDetail = StalkerProtocol.error(body) ?: "The portal lists no channels")
+        return list
     }
 
     /** Genre id to name. Best effort: a portal may refuse it without refusing the channels. */
@@ -198,7 +175,7 @@ internal class StalkerPortal(
     }
 
     private fun handshake() {
-        // A known address is handshaked first; if it moved or stopped answering, fall back to full discovery.
+        // A known address is handshaked first; if it moved or stopped answering, fall back to discovery.
         val known = endpoint
         if (known != null) {
             try {
@@ -290,7 +267,7 @@ internal class StalkerPortal(
 
     private fun headers(auth: Boolean): Map<String, String> {
         val headers = LinkedHashMap<String, String>()
-        headers["Cookie"] = "mac=${encode(account.mac)}; stb_lang=en; timezone=Asia/Kolkata"
+        headers["Cookie"] = "mac=${encode(account.mac)}; stb_lang=en; timezone=Europe/London"
         headers["User-Agent"] = StalkerProtocol.MAG_USER_AGENT
         headers["X-User-Agent"] = StalkerProtocol.DEVICE_USER_AGENT
         headers["Accept"] = "*/*"
