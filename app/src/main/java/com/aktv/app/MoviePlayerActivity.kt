@@ -66,10 +66,13 @@ class MoviePlayerActivity : Activity() {
                 .putExtra("tmdb", title.tmdb).putExtra("type", if (title.isSeries) "tv" else "movie")
                 .putExtra("season", if (title.isSeries) season else 0).putExtra("episode", if (title.isSeries) episode else 0)
                 .putExtra("name", title.name)
-                .putExtra("runtime", VodDurationGuard.parseMinutes(title.runtime))
                 .putExtra("episodes", (if (title.isSeries) episodes else emptyList()).take(2000)
                     .flatMap { listOf(it.season, it.episode) }.toIntArray())
-                .apply { if (!provider.isNullOrBlank()) putExtra("provider", provider) }
+                .apply {
+                    val rt = VodDurationGuard.parseMinutes(title.runtime)
+                    if (rt > 0) putExtra("runtime", rt)
+                    if (!provider.isNullOrBlank()) putExtra("provider", provider)
+                }
     }
 
     private val ui = Handler(Looper.getMainLooper())
