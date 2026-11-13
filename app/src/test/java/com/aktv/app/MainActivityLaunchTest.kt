@@ -95,6 +95,78 @@ class MainActivityLaunchTest {
         }
     }
 
+    @Test
+    fun `clicking StarShare and maxTV tabs with cached multi-thousand playlists never crashes or freezes`() {
+        val app = RuntimeEnvironment.getApplication()
+        File(app.filesDir, "last-exit.txt").delete()
+        app.getSharedPreferences("aktv", Context.MODE_PRIVATE).edit().clear().apply()
+
+        // Seed 3,000 StarShare channels & 1,000 maxTV channels on disk so clicking StarShare & maxTV exercises real shelves.
+        val starAccount = XtreamAccount.INBUILT
+        val starChannels = (1..3_000).map { i ->
+            val cat = when (i % 5) {
+                0 -> "|IN| HINDI ENTERTAINMENT"
+                1 -> "IN | SPORTS"
+                2 -> "UK | MOVIES"
+                3 -> "IN | TAMIL"
+                else -> "BOLLYWOOD MOVIES"
+            }
+            val name = when (i % 5) {
+                0 -> "Star Plus HD $i"
+                1 -> "Star Sports 1 HD $i"
+                2 -> "Sky Cinema $i"
+                3 -> "Star Vijay $i"
+                else -> "Sony Max HD $i"
+            }
+            XtreamLiveChannel(i.toString(), name, "", cat)
+        }
+        XtreamClient.saveLiveCache(File(app.filesDir, "xtream"), starAccount.cacheKey, starChannels)
+
+        val maxAccount = StalkerAccount.DEFAULT
+        val maxChannels = (1..1_000).map { i ->
+            StalkerChannel(i.toString(), "Star Gold HD $i", "ffmpeg http://new.maxtv.be/ch/$i", genre = "10", logo = "/logos/$i.png")
+        }
+        StalkerProtocol.saveCache(File(app.filesDir, "portal"), maxAccount.cacheKey, maxChannels, mapOf("10" to "Hindi Movies"))
+
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create().start().resume()
+        try {
+            val activity = controller.get()
+            // Wait briefly for background disk-cache warmup to populate slices.
+            val deadline = System.currentTimeMillis() + 5_000L
+            while (System.currentTimeMillis() < deadline) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(200))
+                val liveTexts = ArrayList<String>()
+                collect(activity.window.decorView, liveTexts)
+                if (liveTexts.any { it.contains("maxTV · Playlist") }) break
+                Thread.sleep(40)
+            }
+
+            // Live TV must expose maxTV as a playlist shelf!
+            val liveTexts = ArrayList<String>()
+            collect(activity.window.decorView, liveTexts)
+            assertTrue("Live TV must surface maxTV · Playlist shelf: $liveTexts", liveTexts.any { it.contains("maxTV · Playlist") })
+
+            // Click StarShare tab and verify zero crashes & Hindi/Sports shelves render cleanly.
+            activity.findViewById<View>(R.id.segStar).performClick()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            val starTexts = ArrayList<String>()
+            collect(activity.window.decorView, starTexts)
+            assertTrue("StarShare section title must appear: $starTexts", starTexts.any { it.contains("StarShare") })
+            assertTrue("StarShare featured shelf must appear: $starTexts", starTexts.any { it.contains("StarShare · Featured") })
+            assertTrue("No CrashLog report may be written when clicking StarShare", CrashLog.report(activity) == null)
+
+            // Click maxTV tab and verify playlist shelves render cleanly.
+            activity.findViewById<View>(R.id.segPortal).performClick()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+            val maxTexts = ArrayList<String>()
+            collect(activity.window.decorView, maxTexts)
+            assertTrue("maxTV featured playlist shelf must appear: $maxTexts", maxTexts.any { it.contains("maxTV · Featured Playlist") })
+            assertTrue("No CrashLog report may be written when clicking maxTV", CrashLog.report(activity) == null)
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
     private fun collect(view: View, out: MutableList<String>) {
         if (view is TextView) out.add(view.text.toString())
         if (view is ViewGroup) for (i in 0 until view.childCount) collect(view.getChildAt(i), out)

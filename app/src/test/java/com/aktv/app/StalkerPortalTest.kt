@@ -167,4 +167,24 @@ class StalkerPortalTest {
             assertEquals("Limit of connections exceeded", e.portalDetail)
         }
     }
+
+    @Test
+    fun `stale remembered endpoint falls back to discovery and updated maxTV defaults match active portal`() {
+        assertEquals("http://new.maxtv.be/c/", StalkerAccount.DEFAULT_PORTAL)
+        assertEquals("00:1A:79:BA:DF:D7", StalkerAccount.DEFAULT_MAC)
+
+        val staleRemembered = "http://portal.example/old/server/load.php"
+        val http = FakeHttp { url ->
+            when {
+                url.startsWith("$staleRemembered?") -> 404 to ""
+                url.contains("/stalker_portal/server/load.php") && "action=handshake" in url -> 200 to """{"js":{"token":"T2"}}"""
+                url.contains("/stalker_portal/server/load.php") && "action=get_profile" in url -> 200 to """{"js":{"id":"1"}}"""
+                url.contains("/stalker_portal/server/load.php") && "action=get_all_channels" in url -> 200 to catalogue
+                else -> 404 to ""
+            }
+        }
+        val portal = StalkerPortal(account, http, knownEndpoint = staleRemembered)
+        assertEquals(2, portal.channels().size)
+        assertEquals("http://portal.example/stalker_portal/server/load.php", portal.workingEndpoint)
+    }
 }

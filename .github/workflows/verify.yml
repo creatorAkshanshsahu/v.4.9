@@ -27,11 +27,21 @@ jobs:
       - name: Verify the preserved playback contracts
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Compile every variant and run the offline unit tests
+        env:
+          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER || secrets.STARSHARE_URL }}
+          STARSHARE_USER: ${{ secrets.STARSHARE_USER || secrets.STARSHARE_USERNAME }}
+          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
           # Keep the full log so a compiler error can be reported as an annotation, not only in this step.
-          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --console=plain 2>&1 \
-            | tee "$RUNNER_TEMP/aktv-gradle.log" | tail -80
+          env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
+            gradle testArm32DebugUnitTest testArm64DebugUnitTest --console=plain 2>&1 \
+            | tee "$RUNNER_TEMP/aktv-gradle.log" | tail -40
+          ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
+          ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
+          ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
+            gradle assembleArm32Release assembleArm64Release --no-daemon --console=plain 2>&1 \
+            | tee -a "$RUNNER_TEMP/aktv-gradle.log" | tail -40
       - name: Report deterministic tests
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
@@ -103,6 +113,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          NEW_CODE=$(python3 -c 'import json; print(json.load(open("out/update.json"))["versionCode"])')
+          EXISTING_CODE=$(gh release download latest -p update.json -O - 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("versionCode", 0))' 2>/dev/null || echo 0)
+          if [ "${EXISTING_CODE:-0}" -ge "$NEW_CODE" ]; then
+            echo "Skipping Verify latest publish: existing versionCode ($EXISTING_CODE) >= current ($NEW_CODE)"
+            exit 0
+          fi
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
             out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \

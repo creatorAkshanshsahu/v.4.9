@@ -166,6 +166,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          NEW_CODE=$(python3 -c 'import json; print(json.load(open("out/update.json"))["versionCode"])')
+          EXISTING_CODE=$(gh release download latest -p update.json -O - 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("versionCode", 0))' 2>/dev/null || echo 0)
+          if [ "${EXISTING_CODE:-0}" -gt "$NEW_CODE" ]; then
+            echo "Skipping latest release publish: existing versionCode ($EXISTING_CODE) > current ($NEW_CODE)"
+            exit 0
+          fi
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
             out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \

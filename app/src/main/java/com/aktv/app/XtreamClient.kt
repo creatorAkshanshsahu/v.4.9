@@ -28,6 +28,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -59,11 +60,13 @@ internal data class XtreamAccount(
     companion object {
         /** Build-time / inbuilt StarShare account so devices open channels with zero login prompt. */
         val INBUILT: XtreamAccount
-            get() = XtreamClient.parseInput(
-                BuildConfig.STARSHARE_SERVER.ifBlank { XtreamClient.DEFAULT_SERVER },
-                BuildConfig.STARSHARE_USER.ifBlank { XtreamClient.DEFAULT_USER },
-                BuildConfig.STARSHARE_PASS.ifBlank { XtreamClient.DEFAULT_PASS }
-            )
+            get() = runCatching {
+                XtreamClient.parseInput(
+                    BuildConfig.STARSHARE_SERVER.ifBlank { XtreamClient.DEFAULT_SERVER },
+                    BuildConfig.STARSHARE_USER.ifBlank { XtreamClient.DEFAULT_USER },
+                    BuildConfig.STARSHARE_PASS.ifBlank { XtreamClient.DEFAULT_PASS }
+                )
+            }.getOrDefault(XtreamAccount(XtreamClient.DEFAULT_SERVER, XtreamClient.DEFAULT_USER, XtreamClient.DEFAULT_PASS))
     }
 }
 
@@ -166,53 +169,69 @@ internal object XtreamClient {
         "starshare.live"
     )
 
+    private fun safeBuildHttp(builder: OkHttpClient.Builder): OkHttpClient = synchronized(XtreamClient) {
+        try {
+            builder.build()
+        } catch (_: IllegalArgumentException) {
+            val tmf = javax.net.ssl.TrustManagerFactory.getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm())
+            tmf.init(null as java.security.KeyStore?)
+            val tm = tmf.trustManagers.filterIsInstance<javax.net.ssl.X509TrustManager>().first()
+            val ctx = javax.net.ssl.SSLContext.getInstance("TLS")
+            ctx.init(null, arrayOf(tm), null)
+            builder.sslSocketFactory(ctx.socketFactory, tm).build()
+        }
+    }
+
     private val apiClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(40, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .build()
+        safeBuildHttp(
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(40, TimeUnit.SECONDS)
+                .callTimeout(60, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+        )
     }
 
     private val playbackClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .addNetworkInterceptor { chain ->
-                val req = chain.request().newBuilder()
-                    .removeHeader("Origin")
-                    .removeHeader("Referer")
-                    .header("User-Agent", PLAYER_USER_AGENT)
-                    .header("Accept", "*/*")
-                    .header("Icy-MetaData", "1")
-                    .build()
-                chain.proceed(req)
-            }
-            .build()
+        safeBuildHttp(
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .addNetworkInterceptor { chain ->
+                    val req = chain.request().newBuilder()
+                        .removeHeader("Origin")
+                        .removeHeader("Referer")
+                        .header("User-Agent", PLAYER_USER_AGENT)
+                        .header("Accept", "*/*")
+                        .header("Icy-MetaData", "1")
+                        .build()
+                    chain.proceed(req)
+                }
+        )
     }
 
     private val stalkerPlaybackClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(20, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .addNetworkInterceptor { chain ->
-                val req = chain.request().newBuilder()
-                    .removeHeader("Origin")
-                    .removeHeader("Referer")
-                    .header("User-Agent", StalkerProtocol.MAG_USER_AGENT)
-                    .header("X-User-Agent", StalkerProtocol.DEVICE_USER_AGENT)
-                    .header("Accept", "*/*")
-                    .header("Icy-MetaData", "1")
-                    .build()
-                chain.proceed(req)
-            }
-            .build()
+        safeBuildHttp(
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .addNetworkInterceptor { chain ->
+                    val req = chain.request().newBuilder()
+                        .removeHeader("Origin")
+                        .removeHeader("Referer")
+                        .header("User-Agent", StalkerProtocol.MAG_USER_AGENT)
+                        .header("X-User-Agent", StalkerProtocol.DEVICE_USER_AGENT)
+                        .header("Accept", "*/*")
+                        .header("Icy-MetaData", "1")
+                        .build()
+                    chain.proceed(req)
+                }
+        )
     }
 
     val defaultTransport: XtreamTransport = XtreamTransport { url, headers ->
@@ -319,72 +338,96 @@ internal object XtreamClient {
         return out.toList()
     }
 
+    private fun credentialVariants(account: XtreamAccount): List<Pair<String, String>> {
+        val primary = account.username.trim() to account.password.trim()
+        if (!primary.first.equals(DEFAULT_USER, ignoreCase = true)) {
+            return listOf(primary)
+        }
+        return linkedSetOf(
+            primary,
+            "hud1234" to "hud1234",
+            "Hud1234" to "Hud1234",
+            "Hud1234" to "hud1234"
+        ).toList()
+    }
+
     fun authenticate(
         account: XtreamAccount,
         transport: XtreamTransport = defaultTransport
     ): XtreamAuthInfo {
         require(account.isConfigured) { "Enter your StarShare server URL, username and password." }
         var lastError: Exception? = null
+        val variants = credentialVariants(account)
         for (origin in candidateOrigins(account.server)) {
-            val url = apiUrl(origin, account.username, account.password, action = null)
-            try {
-                transport.openReader(url, emptyMap()).use { resp ->
-                    if (resp.code in 401..403) {
-                        throw XtreamException("Server refused request (HTTP ${resp.code})", resp.code)
-                    }
-                    if (resp.code !in 200..299) {
-                        lastError = XtreamException("Server unavailable (HTTP ${resp.code})", resp.code)
-                        return@use
-                    }
-                    val body = resp.reader.readText().trim()
-                    if (!body.startsWith("{")) {
-                        lastError = XtreamException("Server did not return Xtream JSON")
-                        return@use
-                    }
-                    val root = JSONObject(body)
-                    val user = root.optJSONObject("user_info")
-                        ?: run {
-                            lastError = XtreamException("Invalid Xtream response from $origin")
+            var originFailedBeforeJson = false
+            for ((variantIdx, creds) in variants.withIndex()) {
+                val (tryUser, tryPass) = creds
+                val url = apiUrl(origin, tryUser, tryPass, action = null)
+                try {
+                    transport.openReader(url, emptyMap()).use { resp ->
+                        if (resp.code in 401..403) {
+                            throw XtreamException("Server refused request (HTTP ${resp.code})", resp.code)
+                        }
+                        if (resp.code !in 200..299) {
+                            lastError = XtreamException("Server unavailable (HTTP ${resp.code})", resp.code)
+                            originFailedBeforeJson = true
                             return@use
                         }
-                    val authVal = user.opt("auth")
-                    val authed = authVal == 1 || authVal == "1" || authVal == true ||
-                        user.optString("status").equals("Active", ignoreCase = true) && !user.has("auth")
-                    if (!authed) {
-                        // Credentials themselves were rejected by a live Xtream panel — fail immediately.
-                        val msg = user.optString("message").takeIf { it.isNotBlank() }
-                            ?: "Invalid StarShare username or password."
-                        throw XtreamAuthRejectedException(msg)
-                    }
-                    val status = user.optString("status", "Active")
-                    if (status.isNotBlank() && !status.equals("Active", ignoreCase = true)) {
-                        throw XtreamAuthRejectedException("StarShare account is $status.")
-                    }
-                    val expSec = user.optString("exp_date").toLongOrNull()
-                        ?: user.optLong("exp_date", -1L).takeIf { it > 0L }
-                    val activeCons = user.optString("active_cons").toIntOrNull() ?: user.optInt("active_cons", 0)
-                    val maxCons = user.optString("max_connections").toIntOrNull() ?: user.optInt("max_connections", 0)
-                    val formats = ArrayList<String>()
-                    user.optJSONArray("allowed_output_formats")?.let { arr ->
-                        for (i in 0 until arr.length()) {
-                            arr.optString(i)?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }?.let { formats += it }
+                        val body = resp.reader.readText().trim()
+                        if (!body.startsWith("{")) {
+                            lastError = XtreamException("Server did not return Xtream JSON")
+                            originFailedBeforeJson = true
+                            return@use
                         }
+                        val root = JSONObject(body)
+                        val user = root.optJSONObject("user_info")
+                            ?: run {
+                                lastError = XtreamException("Invalid Xtream response from $origin")
+                                originFailedBeforeJson = true
+                                return@use
+                            }
+                        val authVal = user.opt("auth")
+                        val authed = authVal == 1 || authVal == "1" || authVal == true ||
+                            user.optString("status").equals("Active", ignoreCase = true) && !user.has("auth")
+                        if (!authed) {
+                            if (variantIdx < variants.lastIndex) return@use
+                            // Credentials themselves were rejected by a live Xtream panel — fail immediately.
+                            val msg = user.optString("message").takeIf { it.isNotBlank() }
+                                ?: "Invalid StarShare username or password."
+                            throw XtreamAuthRejectedException(msg)
+                        }
+                        val status = user.optString("status", "Active")
+                        if (status.isNotBlank() && !status.equals("Active", ignoreCase = true)) {
+                            throw XtreamAuthRejectedException("StarShare account is $status.")
+                        }
+                        val expSec = user.optString("exp_date").toLongOrNull()
+                            ?: user.optLong("exp_date", -1L).takeIf { it > 0L }
+                        val activeCons = user.optString("active_cons").toIntOrNull() ?: user.optInt("active_cons", 0)
+                        val maxCons = user.optString("max_connections").toIntOrNull() ?: user.optInt("max_connections", 0)
+                        val formats = ArrayList<String>()
+                        user.optJSONArray("allowed_output_formats")?.let { arr ->
+                            for (i in 0 until arr.length()) {
+                                arr.optString(i)?.trim()?.lowercase(Locale.ROOT)?.takeIf { it.isNotEmpty() }?.let { formats += it }
+                            }
+                        }
+                        return XtreamAuthInfo(
+                            workingOrigin = origin,
+                            status = status.ifBlank { "Active" },
+                            expDateSec = expSec,
+                            activeConnections = activeCons,
+                            maxConnections = maxCons,
+                            allowedFormats = formats.ifEmpty { listOf("ts", "m3u8") },
+                            canonicalUsername = user.optString("username").trim().ifBlank { tryUser },
+                            canonicalPassword = user.optString("password").trim().ifBlank { tryPass }
+                        )
                     }
-                    return XtreamAuthInfo(
-                        workingOrigin = origin,
-                        status = status.ifBlank { "Active" },
-                        expDateSec = expSec,
-                        activeConnections = activeCons,
-                        maxConnections = maxCons,
-                        allowedFormats = formats.ifEmpty { listOf("ts", "m3u8") },
-                        canonicalUsername = user.optString("username").trim().ifBlank { account.username.trim() },
-                        canonicalPassword = user.optString("password").trim().ifBlank { account.password.trim() }
-                    )
+                } catch (rejected: XtreamAuthRejectedException) {
+                    throw XtreamException(rejected.message ?: "Authentication failed")
+                } catch (e: Exception) {
+                    if (lastError == null) lastError = e
+                    originFailedBeforeJson = true
                 }
-            } catch (rejected: XtreamAuthRejectedException) {
-                throw XtreamException(rejected.message ?: "Authentication failed")
-            } catch (e: Exception) {
-                if (lastError == null) lastError = e
+                if (originFailedBeforeJson) break
             }
         }
         val msg = lastError?.message?.let(::redactUrl) ?: "Could not reach StarShare server"
@@ -440,7 +483,7 @@ internal object XtreamClient {
                 val rating = obj.optString("rating").trim().takeIf { it.isNotEmpty() && it != "0" && it != "0.0" }.orEmpty()
                 val year = extractYear(obj.optString("year").ifBlank { obj.optString("releasedate") }, name)
                 val ext = obj.optString("container_extension", "mp4").trim().lowercase(Locale.ROOT)
-                    .takeIf { it.matches(Regex("[a-z0-9]{2,5}")) } ?: "mp4"
+                    .takeIf { it.matches(EXT_REGEX) } ?: "mp4"
                 items += XtreamVodItem(id, name, poster, catName, rating, year, ext)
             }
         }
@@ -524,7 +567,7 @@ internal object XtreamClient {
             ?: ep.optString("episode_num").toIntOrNull()?.takeIf { it > 0 } ?: (out.count { it.season == season } + 1)
         val title = cleanTitle(ep.optString("title")).ifBlank { "Episode $epNum" }
         val ext = ep.optString("container_extension", "mp4").trim().lowercase(Locale.ROOT)
-            .takeIf { it.matches(Regex("[a-z0-9]{2,5}")) } ?: "mp4"
+            .takeIf { it.matches(EXT_REGEX) } ?: "mp4"
         out += XtreamEpisodeItem(id, season, epNum, title, ext)
     }
 
@@ -834,8 +877,12 @@ internal object XtreamClient {
         else -> "All Channels"
     }
 
+    private val displayCatCache = ConcurrentHashMap<String, String>(256)
+    private val catRankCache = ConcurrentHashMap<String, Int>(256)
+
     /** Ranks Indian Hindi Entertainment, Movies, Sports/Cricket, News, Kids, Knowledge, Music, and Devotional shelves in natural order. */
     fun categoryRank(category: String): Int {
+        catRankCache[category]?.let { return it }
         val lower = displayCategoryName(category).lowercase(Locale.ROOT)
         val rawLower = category.lowercase(Locale.ROOT)
         val isIndia = INDIA_TAG_REGEX.containsMatchIn(rawLower) || lower.contains("hindi") || lower.contains("bollywood")
@@ -850,23 +897,48 @@ internal object XtreamClient {
             lower.contains("spiritual") || lower.contains("devotional") || lower.contains("religious") || lower.contains("bhakti") -> 7
             else -> 9
         }
-        return if (isIndia) base else base + 12
+        val computed = if (isIndia) base else base + 12
+        if (catRankCache.size < 2048) catRankCache[category] = computed
+        return computed
     }
 
     /** Cleans noisy IPTV panel country prefixes like `|IN| HINDI ENTERTAINMENT` -> `HINDI ENTERTAINMENT` while preserving clarity. */
     fun displayCategoryName(category: String): String {
+        displayCatCache[category]?.let { return it }
         val stripped = category.trim()
-            .replace(Regex("^[|\\[\\(\\{\\s]*(?:IN|IND|INDIA|INDIAN|VIP)[|\\]\\)\\}\\s:\\-–—]+", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("^[|:\\-–—\\s]+|[|:\\-–—\\s]+$"), "")
-            .replace(Regex("\\s{2,}"), " ")
+            .replace(DISPLAY_CAT_PREFIX_REGEX, "")
+            .replace(DISPLAY_CAT_TRIM_REGEX, "")
+            .replace(MULTI_SPACE_REGEX, " ")
             .trim()
-        return stripped.ifBlank { category.trim().ifBlank { "Indian TV" } }
+        val res = stripped.ifBlank { category.trim().ifBlank { "Indian TV" } }
+        if (displayCatCache.size < 2048) displayCatCache[category] = res
+        return res
     }
 
     fun keepsByFilter(name: String, category: String, mode: Int): Boolean = when (mode) {
         FILTER_INDIAN_HINDI -> keepsIndianHindi(name, category)
         FILTER_ENGLISH_HINDI -> keepsEnglishOrHindi(name, category)
         else -> !ADULT_REGEX.containsMatchIn("$category $name")
+    }
+
+    // Cached per-category classification for keepsIndianHindi:
+    // -1 = adult (always drop), -2 = foreign category (drop unless explicit Hindi or cricket in name),
+    // -3 = non-Hindi regional category (drop unless explicit Hindi in name),
+    //  1 = India/Hindi/Cricket category, 0 = neutral category.
+    private val catHindiClassCache = ConcurrentHashMap<String, Int>(256)
+
+    private fun classifyCategoryForHindi(category: String): Int {
+        catHindiClassCache[category]?.let { return it }
+        val cls = when {
+            ADULT_REGEX.containsMatchIn(category) -> -1
+            HINDI_EXPLICIT_REGEX.containsMatchIn(category) || CRICKET_REGEX.containsMatchIn(category) -> 1
+            REGIONAL_NON_HINDI_REGEX.containsMatchIn(category) -> -3
+            INDIA_TAG_REGEX.containsMatchIn(category) -> 1
+            FOREIGN_STRICT_REGEX.containsMatchIn(category) -> -2
+            else -> 0
+        }
+        if (catHindiClassCache.size < 2048) catHindiClassCache[category] = cls
+        return cls
     }
 
     /**
@@ -877,31 +949,36 @@ internal object XtreamClient {
      * Punjabi, Odia, Assamese, Urdu, etc. unless Hindi-dubbed).
      */
     fun keepsIndianHindi(name: String, category: String): Boolean {
-        val combined = "$category $name"
-        if (ADULT_REGEX.containsMatchIn(combined)) return false
+        val catClass = classifyCategoryForHindi(category)
+        if (catClass == -1) return false
+        if (ADULT_REGEX.containsMatchIn(name)) return false
 
-        val explicitHindi = HINDI_EXPLICIT_REGEX.containsMatchIn(combined)
-
-        // 1. Exclude non-Hindi regional Indian languages & regional-only channels unless explicitly Hindi / Hindi-dubbed.
-        if (!explicitHindi && REGIONAL_NON_HINDI_REGEX.containsMatchIn(combined)) return false
-
-        // 2. Exclude foreign countries/regions (US, UK, CA, PK, BD, AR, EU, etc.) unless explicitly India/Hindi or Cricket.
-        val isCricket = CRICKET_REGEX.containsMatchIn(combined)
-        if (!explicitHindi && !INDIA_TAG_REGEX.containsMatchIn(category) && !isCricket) {
-            if (FOREIGN_STRICT_REGEX.containsMatchIn(category) || FOREIGN_STRICT_REGEX.containsMatchIn(name)) {
-                return false
-            }
+        if (catClass == -2) {
+            // Foreign-tagged category (UK/US/AR/PK/EU/etc.): only keep if channel itself is explicitly Hindi/Dual-Audio or Cricket.
+            return HINDI_EXPLICIT_REGEX.containsMatchIn(name) || CRICKET_REGEX.containsMatchIn(name)
         }
-        // Even inside unmarked categories, drop channels explicitly prefixed PK / BD / UK / US / AR (unless Cricket).
+        if (catClass == -3) {
+            // Regional non-Hindi category (Tamil/Telugu/Malayalam/etc.): only keep if channel is explicitly Hindi/Dual-Audio.
+            return HINDI_EXPLICIT_REGEX.containsMatchIn(name)
+        }
+
+        val explicitHindi = HINDI_EXPLICIT_REGEX.containsMatchIn(name) || HINDI_EXPLICIT_REGEX.containsMatchIn(category)
+        if (!explicitHindi && REGIONAL_NON_HINDI_REGEX.containsMatchIn(name)) return false
+
+        val isCricket = CRICKET_REGEX.containsMatchIn(name) || CRICKET_REGEX.containsMatchIn(category)
+        if (!explicitHindi && catClass != 1 && !isCricket) {
+            if (FOREIGN_STRICT_REGEX.containsMatchIn(name)) return false
+        }
         if (!explicitHindi && !isCricket && FOREIGN_CHANNEL_PREFIX_REGEX.containsMatchIn(name.trim())) {
             return false
         }
 
-        // 3. Keep if tagged India / Hindi / Bollywood / Dual Audio, Indian DTH/OTT, Indian Sports/Cricket, or known pan-India Hindi/Dual-Audio network.
         return explicitHindi ||
-            INDIA_TAG_REGEX.containsMatchIn(combined) ||
+            catClass == 1 ||
+            INDIA_TAG_REGEX.containsMatchIn(name) ||
             isCricket ||
-            INDIAN_SPORTS_REGEX.containsMatchIn(combined) ||
+            INDIAN_SPORTS_REGEX.containsMatchIn(name) ||
+            INDIAN_SPORTS_REGEX.containsMatchIn(category) ||
             INDIAN_BROADCASTER_REGEX.containsMatchIn(name)
     }
 
@@ -925,7 +1002,7 @@ internal object XtreamClient {
     )
 
     private val INDIA_TAG_REGEX = Regex(
-        "(?:^|[|\\[\\(\\{\\s:\\-])(?:IN|IND|INDIA|INDIAN|BHARAT|HINDUSTAN|TATA\\s*PLAY|TATA\\s*SKY|JIO(?:\\s*TV|\\s*CINEMA|\\s*HOTSTAR)?|AIRTEL|DISH\\s*TV|D2H|DOORDARSHAN|HOTSTAR|ZEE5|SONYLIV|SONY\\s*LIV|MX\\s*PLAYER|TVF)(?:$|[|\\]\\)\\}\\s:\\-])",
+        "(?:^|[|\\[(\\s:\\-])(?:IN|IND|INDIA|INDIAN|BHARAT|HINDUSTAN|TATA\\s*PLAY|TATA\\s*SKY|JIO(?:\\s*TV|\\s*CINEMA|\\s*HOTSTAR)?|AIRTEL|DISH\\s*TV|D2H|DOORDARSHAN|HOTSTAR|ZEE5|SONYLIV|SONY\\s*LIV|MX\\s*PLAYER|TVF)(?:$|[|\\])\\s:\\-])",
         RegexOption.IGNORE_CASE
     )
 
@@ -953,7 +1030,7 @@ internal object XtreamClient {
     )
 
     private val FOREIGN_STRICT_REGEX = Regex(
-        "(?:^|[|\\[\\(\\{\\s:\\-])(?:US|USA|UNITED\\s*STATES|UK|UNITED\\s*KINGDOM|BRITAIN|CA|CAN|CANADA|AU|AUS|AUSTRALIA|NZ|" +
+        "(?:^|[|\\[(\\s:\\-])(?:US|USA|UNITED\\s*STATES|UK|UNITED\\s*KINGDOM|BRITAIN|CA|CAN|CANADA|AU|AUS|AUSTRALIA|NZ|" +
             "PK|PAK|PAKISTAN|BD|BAN|BANGLADESH|AF|AFG|AFGHAN|AFGHANISTAN|NP|NEPAL|LK|SL|SRI\\s*LANKA|" +
             "AR|ARA|ARAB|ARABIC|AE|UAE|SAUDI|QATAR|KUWAIT|OMAN|BAHRAIN|EGYPT|MOROCCO|ALGERIA|TUNISIA|IRAQ|SYRIA|LEBANON|JORDAN|OSN|SHAHID|MBC|ROTANA|" +
             "TR|TUR|TURKEY|TURKISH|IR|IRN|IRAN|PERSIAN|FARSI|KURD|KURDISH|IL|ISR|ISRAEL|HEBREW|" +
@@ -963,7 +1040,7 @@ internal object XtreamClient {
             "SE|SWE|SWEDEN|NO|NOR|NORWAY|DK|DEN|DENMARK|FI|FIN|FINLAND|NORDIC|IE|IRL|IRELAND|" +
             "AFRICA|ZA|SOUTH\\s*AFRICA|DSTV|NIGERIA|KENYA|GHANA|ETHIOPIA|SOMALI|" +
             "PH|PHI|PHILIPPINES|MY|MALAYSIA|SG|SINGAPORE|ID|INDONESIA|TH|THAILAND|VN|VIETNAM|CN|CHINA|CHINESE|HK|HONG\\s*KONG|TW|TAIWAN|JP|JAPAN|KR|KOREA|" +
-            "CARIBBEAN|SURINAME|NFL|NBA|NHL|MLB|MLS|NASCAR|SPFL|EFL|LOI|GAAGO)(?:$|[|\\]\\)\\}\\s:\\-])",
+            "CARIBBEAN|SURINAME|NFL|NBA|NHL|MLB|MLS|NASCAR|SPFL|EFL|LOI|GAAGO)(?:$|[|\\])\\s:\\-])",
         RegexOption.IGNORE_CASE
     )
 
@@ -1031,10 +1108,21 @@ internal object XtreamClient {
         out
     }.getOrDefault(emptyList())
 
+    private val EXT_REGEX = Regex("[a-z0-9]{2,5}")
+    private val DISPLAY_CAT_PREFIX_REGEX = Regex("^[|\\[(\\s]*(?:IN|IND|INDIA|INDIAN|VIP)[|\\])\\s:\\-–—]+", RegexOption.IGNORE_CASE)
+    private val DISPLAY_CAT_TRIM_REGEX = Regex("^[|:\\-–—\\s]+|[|:\\-–—\\s]+$")
+    private val MULTI_SPACE_REGEX = Regex("\\s{2,}")
+    private val REDACT_PATH_REGEX = Regex("(/(?:live|movie|series)/)[^/\\s]+/[^/\\s]+/")
+    private val REDACT_QUERY_REGEX = Regex("([?&](?:username|password|u|p)=)[^&\\s]+", RegexOption.IGNORE_CASE)
+    private val CLEAN_TITLE_REGEX = Regex("^(?:[A-Z]{2,5}\\s*[|:\\-]\\s*)+")
+    private val CLEAN_CAT_PIPE_REGEX = Regex("^\\|+\\s*|\\s*\\|+$")
+    private val YEAR_WORD_REGEX = Regex("\\b(19\\d{2}|20\\d{2})\\b")
+    private val YEAR_PAREN_REGEX = Regex("\\((19\\d{2}|20\\d{2})\\)")
+
     /** Redacts Xtream credentials from any URL before displaying or logging errors. */
     fun redactUrl(text: String): String = text
-        .replace(Regex("(/(?:live|movie|series)/)[^/\\s]+/[^/\\s]+/"), "$1***:***/")
-        .replace(Regex("([?&](?:username|password|u|p)=)[^&\\s]+", RegexOption.IGNORE_CASE), "$1***")
+        .replace(REDACT_PATH_REGEX, "$1***:***/")
+        .replace(REDACT_QUERY_REGEX, "$1***")
 
     private fun apiUrl(origin: String, username: String, password: String, action: String?): String {
         val base = origin.trimEnd('/')
@@ -1051,18 +1139,18 @@ internal object XtreamClient {
         URLEncoder.encode(value.trim(), "UTF-8").replace("+", "%20")
 
     private fun cleanTitle(raw: String): String = raw.trim()
-        .replace(Regex("^(?:[A-Z]{2,5}\\s*[|:\\-]\\s*)+"), "")
+        .replace(CLEAN_TITLE_REGEX, "")
         .trim()
         .ifBlank { raw.trim() }
 
     private fun cleanCategory(raw: String): String = raw.trim()
-        .replace(Regex("^\\|+\\s*|\\s*\\|+$"), "")
-        .replace(Regex("\\s{2,}"), " ")
+        .replace(CLEAN_CAT_PIPE_REGEX, "")
+        .replace(MULTI_SPACE_REGEX, " ")
         .ifBlank { "StarShare" }
 
     private fun extractYear(rawDate: String, fallbackTitle: String): String {
-        Regex("\\b(19\\d{2}|20\\d{2})\\b").find(rawDate)?.let { return it.groupValues[1] }
-        Regex("\\((19\\d{2}|20\\d{2})\\)").find(fallbackTitle)?.let { return it.groupValues[1] }
+        YEAR_WORD_REGEX.find(rawDate)?.let { return it.groupValues[1] }
+        YEAR_PAREN_REGEX.find(fallbackTitle)?.let { return it.groupValues[1] }
         return ""
     }
 }
