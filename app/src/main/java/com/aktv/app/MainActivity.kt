@@ -1088,16 +1088,16 @@ class MainActivity : AppCompatActivity() {
             if (allJio.isEmpty()) {
                 val cached = try { TgServers.cachedJioCatalogue() } catch (_: Exception) { emptyList() }
                 if (cached.isNotEmpty()) {
-                    val channels = cached.map { e ->
+                    val channels = cached.filter { PortalLanguages.keepsJio(it) }.map { e ->
                         Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
                     }
-                    runOnUiThread { applyJio(channels, fromCache = true) }
+                    if (channels.isNotEmpty()) runOnUiThread { applyJio(channels, fromCache = true) }
                 }
             }
             // The site's two lists are independent: one being refused must not take the other with it.
             try {
                 val entries = TgServers.jioCatalogue()
-                val channels = entries.map { e ->
+                val channels = entries.filter { PortalLanguages.keepsJio(it) }.map { e ->
                     Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
                 }
                 require(channels.isNotEmpty()) { "empty JioTV playlist" }
@@ -1371,10 +1371,19 @@ class MainActivity : AppCompatActivity() {
      * their native stream, ClearKey document and cookie, so a tile here never borrows another provider.
      */
     private fun jioRows(channels: List<Channel>): List<Row> {
+        val jioFavs = favs.mapNotNull { channelFor(it) }
+            .filter { PortalLanguages.keeps(it.name, it.category) }
+            .map { Tile.Ch(it) }
+            .ifEmpty { listOf(Tile.Hint) }
+        val jioRecent = prefs.getString("recent_ch", "")!!.split(",")
+            .filter { it.isNotEmpty() }
+            .mapNotNull { channelFor(it) }
+            .filter { PortalLanguages.keeps(it.name, it.category) }
+            .map { Tile.Ch(it) }
         return buildList {
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
-            add(Row(FAV, favTiles()))
-            addAll(recentRow())
+            add(Row(FAV, jioFavs))
+            if (jioRecent.isNotEmpty()) add(Row(RECENT, jioRecent))
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
         }
     }

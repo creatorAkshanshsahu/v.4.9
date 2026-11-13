@@ -68,7 +68,8 @@ internal object JioM3uProtocol {
         val licenseKey: String?,       // raw KODIPROP license_key value (URL or keyid:key)
         val licenseType: String,       // "clearkey" or ""
         val userAgent: String?,        // EXTVLCOPT override or null
-        val cookie: String?            // EXTHTTP cookie or null
+        val cookie: String?,           // EXTHTTP cookie or null
+        val language: String = ""      // optional tvg-language attribute on #EXTINF
     )
 
     // #EXTINF:-1 tvg-id="143" group-title="English" tvg-logo="…",CNBC TV18 Prime
@@ -101,21 +102,36 @@ internal object JioM3uProtocol {
     fun parse(body: String, base: String = PLAYLIST): List<Entry> {
         val lines = body.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
         val entries = ArrayList<Entry>(200)
+        var preLicenseKey: String? = null
+        var preLicenseType = ""
+        var preUserAgent: String? = null
+        var preCookie: String? = null
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
             val ext = parseExtinf(line)
-            if (ext == null) { i++; continue }
-            val (id, name, category, logo) = ext
+            if (ext == null) {
+                kodiLicenseType.matchEntire(line)?.let { preLicenseType = it.groupValues[1] }
+                kodiLicenseKey.matchEntire(line)?.let { preLicenseKey = it.groupValues[1] }
+                extvlcUserAgent.matchEntire(line)?.let { preUserAgent = it.groupValues[1] }
+                extHttpCookie.matchEntire(line)?.let { preCookie = it.groupValues[1] }
+                if (mediaUrl.matches(line)) {
+                    preLicenseKey = null; preLicenseType = ""; preUserAgent = null; preCookie = null
+                }
+                i++
+                continue
+            }
+            val (id, name, category, logo, language) = ext
 
-            var licenseKey: String? = null
-            var licenseType = ""
-            var userAgent: String? = null
-            var cookie: String? = null
+            var licenseKey: String? = preLicenseKey
+            var licenseType = preLicenseType
+            var userAgent: String? = preUserAgent
+            var cookie: String? = preCookie
+            preLicenseKey = null; preLicenseType = ""; preUserAgent = null; preCookie = null
             var url: String? = null
 
             var j = i + 1
-            while (j < lines.size && !mediaUrl.matches(lines[j])) {
+            while (j < lines.size && !mediaUrl.matches(lines[j]) && !lines[j].startsWith("#EXTINF", true)) {
                 val l = lines[j]
                 kodiLicenseType.matchEntire(l)?.let { licenseType = it.groupValues[1] }
                 kodiLicenseKey.matchEntire(l)?.let { licenseKey = it.groupValues[1] }
@@ -130,7 +146,7 @@ internal object JioM3uProtocol {
             if (url != null) {
                 // Some lists carry the channel number only in the address; some carry no id at all.
                 val key = id.ifBlank { Regex("[?&]id=(\\d{1,10})").find(url)?.groupValues?.get(1).orEmpty() }
-                if (key.isNotBlank()) entries.add(Entry(key, name, category, logo, url, licenseKey, licenseType, userAgent, cookie))
+                if (key.isNotBlank()) entries.add(Entry(key, name, category, logo, url, licenseKey, licenseType, userAgent, cookie, language))
             }
             i = j
         }
@@ -143,7 +159,7 @@ internal object JioM3uProtocol {
      * pattern silently produced **zero** entries for it - which is exactly why the TATA section stayed empty
      * while the JioTV one worked.
      */
-    private fun parseExtinf(line: String): Quad? {
+    private fun parseExtinf(line: String): ExtInfMeta? {
         if (!line.startsWith("#EXTINF", true)) return null
         val comma = line.lastIndexOf(',')
         if (comma < 0 || comma == line.lastIndex) return null
@@ -152,12 +168,13 @@ internal object JioM3uProtocol {
         val head = line.substring(0, comma)
         val attrs = attribute.findAll(head).associate { it.groupValues[1].lowercase() to it.groupValues[2].trim() }
         val id = attrs["tvg-id"].orEmpty().ifBlank { attrs["tvg-chno"].orEmpty() }.ifBlank { attrs["channel-id"].orEmpty() }
-        return Quad(id, name, attrs["group-title"].orEmpty(), attrs["tvg-logo"].orEmpty())
+        val language = attrs["tvg-language"].orEmpty().ifBlank { attrs["language"].orEmpty() }
+        return ExtInfMeta(id, name, attrs["group-title"].orEmpty(), attrs["tvg-logo"].orEmpty(), language)
     }
 
     private val attribute = Regex("""([A-Za-z0-9_-]+)="([^"]*)"""")
 
-    private data class Quad(val id: String, val name: String, val category: String, val logo: String)
+    private data class ExtInfMeta(val id: String, val name: String, val category: String, val logo: String, val language: String)
 
     private fun resolveUrl(raw: String, page: String): String? = try {
         URI(page).resolve(raw).let { uri ->

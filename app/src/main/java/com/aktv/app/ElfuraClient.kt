@@ -44,10 +44,14 @@ internal object ElfuraClient {
         "source-7", "source-8", "source-9", "source-10", "source-11",
         "source-12", "source-13", "source-14", "source-15", "source-16", "source-17"
     )
-    private val PRIORITY_LANES = listOf(
-        "source-1", "source-2", "source-3", "source-8",
-        "source-12", "source-13", "source-14", "source-4", "source-5"
+    private val TMDB_EXACT_LANES = setOf(
+        "source-1", "source-8", "source-12", "source-13", "source-14"
     )
+    private val PRIORITY_LANES = listOf(
+        "source-1", "source-8", "source-13", "source-14",
+        "source-12", "source-2", "source-3", "source-4", "source-5"
+    )
+    private const val MAX_SUBTITLES = 4
     private val SOURCE_ID_REGEX = Regex("^source-[1-9]\\d{0,3}$")
 
     private val BOOT_JSON = Regex(
@@ -408,11 +412,81 @@ internal object ElfuraClient {
     }
 
     private fun collectCandidates(payload: JSONObject, dest: MutableList<JSONObject>) {
-        payload.optJSONObject("primary")?.let { dest.add(it) }
+        payload.optJSONObject("primary")?.let { primary ->
+            val tagged = runCatching { JSONObject(primary.toString()).put("_elfuraPrimary", true) }.getOrDefault(primary)
+            dest.add(tagged)
+        }
         val arr = payload.optJSONArray("sources") ?: return
         for (i in 0 until minOf(arr.length(), 48)) {
             arr.optJSONObject(i)?.let { dest.add(it) }
         }
+    }
+
+    private fun laneTier(item: JSONObject): Int {
+        val sourceId = cleanText(item.opt("sourceId"), 32).lowercase(Locale.US)
+        val isPrimary = item.optBoolean("_elfuraPrimary", false)
+        return when {
+            isPrimary && (sourceId.isEmpty() || sourceId in TMDB_EXACT_LANES) -> 0
+            sourceId in TMDB_EXACT_LANES -> 1
+            isPrimary -> 2
+            else -> 3
+        }
+    }
+
+    private fun expandElfuraMovieBox(base: FrostSource): List<FrostSource> {
+        val parsed = base.url.toHttpUrlOrNull() ?: return listOf(base)
+        val refHeaders = mapOf(
+            "User-Agent" to VidLinkClient.MOVIEBOX_USER_AGENT,
+            "Referer" to VidLinkClient.MOVIEBOX_REFERER,
+            "Origin" to VidLinkClient.MOVIEBOX_ORIGIN
+        )
+        val noRefHeaders = mapOf(
+            "User-Agent" to VidLinkClient.MOVIEBOX_USER_AGENT
+        )
+        val out = ArrayList<FrostSource>(3)
+        if (parsed.host.equals("bcdn.hakunaymatata.com", ignoreCase = true)) {
+            val mirrorUrl = parsed.newBuilder().host("bcdnxw.hakunaymatata.com").build().toString()
+            out += FrostSource(
+                provider = base.provider,
+                identity = "${base.identity}:mb-xw",
+                url = mirrorUrl,
+                format = base.format,
+                quality = base.quality,
+                language = base.language,
+                hevc = base.hevc,
+                headers = refHeaders,
+                subtitles = base.subtitles,
+                credentialOrigin = mirrorUrl,
+                scraperName = base.scraperName
+            )
+        }
+        out += FrostSource(
+            provider = base.provider,
+            identity = base.identity,
+            url = base.url,
+            format = base.format,
+            quality = base.quality,
+            language = base.language,
+            hevc = base.hevc,
+            headers = refHeaders,
+            subtitles = base.subtitles,
+            credentialOrigin = base.url,
+            scraperName = base.scraperName
+        )
+        out += FrostSource(
+            provider = base.provider,
+            identity = "${base.identity}:mb-noref",
+            url = base.url,
+            format = base.format,
+            quality = base.quality,
+            language = base.language,
+            hevc = base.hevc,
+            headers = noRefHeaders,
+            subtitles = base.subtitles,
+            credentialOrigin = base.url,
+            scraperName = base.scraperName
+        )
+        return out
     }
 
     internal fun buildSources(
@@ -431,13 +505,8 @@ internal object ElfuraClient {
             if (!session?.pltoken.isNullOrBlank()) put("X-Playback-Token", session!!.pltoken)
         }
 
-        val movieBoxHeaders = mapOf(
-            "User-Agent" to TgHttp.USER_AGENT,
-            "Referer" to VidLinkClient.MOVIEBOX_REFERER
-        )
-
-        val direct = ArrayList<FrostSource>()
-        val proxied = ArrayList<FrostSource>()
+        data class RankedSource(val tier: Int, val proxied: Boolean, val source: FrostSource)
+        val ranked = ArrayList<RankedSource>()
         val seen = HashSet<String>()
 
         for ((idx, item) in candidates.withIndex()) {
@@ -452,28 +521,33 @@ internal object ElfuraClient {
             val sourceLabel = normalizeSourceName(
                 cleanText(item.opt("label"), 40).ifBlank { cleanText(item.opt("sourceId"), 32) }
             )
+            val tier = laneTier(item)
             val multiAudio = item.optBoolean("multiAudio", false)
             val lang = if (multiAudio) "Multi-Audio" else readableLanguage(cleanText(item.opt("audioLang") ?: item.opt("language"), 32))
             val subs = parseSubtitles(item.optJSONArray("subtitles") ?: item.optJSONArray("tracks"), baseUrl, nonce)
             val baseId = cleanText(item.opt("id"), 96).ifBlank { "elfura-$idx" }
-            val mainHeaders = if (VidLinkClient.isMovieBoxCdn(mainUrl)) movieBoxHeaders else headers
 
             if (seen.add("${mainUrl}|${format.name}|$lang")) {
-                direct.add(
-                    FrostSource(
-                        provider = FrostProvider.OG,
-                        identity = digest("og|elfura|$baseId|$mainUrl|${format.name}|$lang"),
-                        url = mainUrl,
-                        format = format,
-                        quality = quality,
-                        language = lang,
-                        hevc = item.opt("hevc") as? Boolean,
-                        headers = mainHeaders,
-                        subtitles = subs,
-                        credentialOrigin = origin,
-                        scraperName = sourceLabel
-                    )
+                val baseSource = FrostSource(
+                    provider = FrostProvider.OG,
+                    identity = digest("og|elfura|$baseId|$mainUrl|${format.name}|$lang"),
+                    url = mainUrl,
+                    format = format,
+                    quality = quality,
+                    language = lang,
+                    hevc = item.opt("hevc") as? Boolean,
+                    headers = headers,
+                    subtitles = subs,
+                    credentialOrigin = origin,
+                    scraperName = sourceLabel
                 )
+                if (VidLinkClient.isMovieBoxCdn(mainUrl)) {
+                    for (variant in expandElfuraMovieBox(baseSource)) {
+                        ranked.add(RankedSource(tier, proxied = false, source = variant))
+                    }
+                } else {
+                    ranked.add(RankedSource(tier, proxied = false, source = baseSource))
+                }
             }
 
             // Separate dubbed stream variants published under `audioTracks`
@@ -490,19 +564,23 @@ internal object ElfuraClient {
                         .ifBlank { readableLanguage(cleanText(track.opt("lang"), 32)) }
                         .ifBlank { lang }
                     if (seen.add("${trackUrl}|${trackFormat.name}|$trackLang")) {
-                        direct.add(
-                            FrostSource(
-                                provider = FrostProvider.OG,
-                                identity = digest("og|elfura|$baseId|audio-$a|$trackUrl|$trackLang"),
-                                url = trackUrl,
-                                format = trackFormat,
-                                quality = quality,
-                                language = trackLang,
-                                hevc = null,
-                                headers = headers,
-                                subtitles = subs,
-                                credentialOrigin = origin,
-                                scraperName = sourceLabel
+                        ranked.add(
+                            RankedSource(
+                                tier,
+                                proxied = false,
+                                source = FrostSource(
+                                    provider = FrostProvider.OG,
+                                    identity = digest("og|elfura|$baseId|audio-$a|$trackUrl|$trackLang"),
+                                    url = trackUrl,
+                                    format = trackFormat,
+                                    quality = quality,
+                                    language = trackLang,
+                                    hevc = null,
+                                    headers = headers,
+                                    subtitles = subs,
+                                    credentialOrigin = origin,
+                                    scraperName = sourceLabel
+                                )
                             )
                         )
                     }
@@ -514,45 +592,53 @@ internal object ElfuraClient {
             if (parsedMain != null && sameOrigin(parsedMain, baseUrl) && parsedMain.encodedPath.startsWith("/api/")) {
                 val proxyUrl = decorateUrl(rawUrl, baseUrl, nonce, forceProxy = true)
                 if (proxyUrl != null && proxyUrl != mainUrl && seen.add("${proxyUrl}|${format.name}|$lang")) {
-                    proxied.add(
-                        FrostSource(
-                            provider = FrostProvider.OG,
-                            identity = digest("og|elfura|$baseId|proxy|$proxyUrl|${format.name}|$lang"),
-                            url = proxyUrl,
-                            format = format,
-                            quality = quality,
-                            language = lang,
-                            hevc = item.opt("hevc") as? Boolean,
-                            headers = headers,
-                            subtitles = subs,
-                            credentialOrigin = origin,
-                            scraperName = if (sourceLabel.isBlank()) "Elfura Proxy" else "$sourceLabel Proxy"
+                    ranked.add(
+                        RankedSource(
+                            tier,
+                            proxied = true,
+                            source = FrostSource(
+                                provider = FrostProvider.OG,
+                                identity = digest("og|elfura|$baseId|proxy|$proxyUrl|${format.name}|$lang"),
+                                url = proxyUrl,
+                                format = format,
+                                quality = quality,
+                                language = lang,
+                                hevc = item.opt("hevc") as? Boolean,
+                                headers = headers,
+                                subtitles = subs,
+                                credentialOrigin = origin,
+                                scraperName = if (sourceLabel.isBlank()) "Elfura Proxy" else "$sourceLabel Proxy"
+                            )
                         )
                     )
                 }
             }
         }
 
-        // Prioritize Hindi / Multi-Audio / adaptive streams ahead of progressive MP4, then append `p=1` proxy mirrors.
-        val orderedDirect = direct.sortedWith(
-            compareBy<FrostSource>(
-                { if (it.format == VodFormat.MP4) 1 else 0 },
+        // Preserve TMDB-verified & primary lanes ahead of secondary fuzzy title-scraper lanes so a
+        // fuzzy HLS scraper (e.g. Source 2 returning a 1-min anime clip) never jumps ahead of the
+        // primary full-length movie stream (e.g. Source 13). Keep each tier's `p=1` proxy right
+        // after its direct stream before falling down to lower-confidence lanes.
+        val ordered = ranked.sortedWith(
+            compareBy<RankedSource>(
+                { it.tier },
+                { if (it.proxied) 1 else 0 },
+                { if (it.source.format == VodFormat.MP4) 1 else 0 },
                 {
                     when {
-                        it.language.equals("Multi-Audio", ignoreCase = true) -> 0
-                        it.language.contains("Hindi", ignoreCase = true) -> 0
+                        it.source.language.equals("Multi-Audio", ignoreCase = true) -> 0
+                        it.source.language.contains("Hindi", ignoreCase = true) -> 0
                         else -> 1
                     }
                 }
             )
         )
-        return (orderedDirect + proxied).take(48)
+        return ordered.map { it.source }.take(48)
     }
 
     private fun parseSubtitles(array: JSONArray?, baseUrl: HttpUrl, nonce: String): List<FrostSubtitle> {
         if (array == null) return emptyList()
         val result = ArrayList<FrostSubtitle>()
-        var defaultAssigned = false
         for (i in 0 until minOf(array.length(), 40)) {
             val sub = array.optJSONObject(i) ?: continue
             val rawUrl = cleanText(sub.opt("url") ?: sub.opt("file") ?: sub.opt("src"), 16_384)
@@ -562,12 +648,28 @@ internal object ElfuraClient {
             val lang = rawLang.takeIf { it.matches(Regex("[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*")) }
             val label = cleanText(sub.opt("label") ?: sub.opt("name"), 48)
                 .ifBlank { readableLanguage(rawLang).ifBlank { lang ?: "Subtitles" } }
-            val isDefault = sub.optBoolean("default", false) ||
-                (!defaultAssigned && (lang?.startsWith("en", ignoreCase = true) == true || label.startsWith("English", ignoreCase = true)))
-            if (isDefault) defaultAssigned = true
-            result.add(FrostSubtitle(url, label, lang, mime, isDefault))
+            val explicitDefault = sub.optBoolean("default", false)
+            result.add(FrostSubtitle(url, label, lang, mime, explicitDefault))
         }
-        return result.distinctBy { it.url }
+        val unique = result.distinctBy { it.url }
+        val trimmed = if (unique.size <= MAX_SUBTITLES) unique else {
+            val preferred = unique.filter { sub ->
+                val l = sub.language.orEmpty()
+                l.startsWith("en", ignoreCase = true) || l.startsWith("hi", ignoreCase = true) ||
+                    sub.label.contains("English", ignoreCase = true) || sub.label.contains("Hindi", ignoreCase = true)
+            }
+            (preferred + unique).distinctBy { it.url }.take(MAX_SUBTITLES)
+        }
+        val hasEnglish = trimmed.any {
+            it.language?.startsWith("en", ignoreCase = true) == true || it.label.startsWith("English", ignoreCase = true)
+        }
+        var defaultAssigned = false
+        return trimmed.mapIndexed { idx, sub ->
+            val isEng = sub.language?.startsWith("en", ignoreCase = true) == true || sub.label.startsWith("English", ignoreCase = true)
+            val isDefault = !defaultAssigned && (sub.default || (if (hasEnglish) isEng else idx == 0))
+            if (isDefault) defaultAssigned = true
+            FrostSubtitle(sub.url, sub.label, sub.language, sub.mime, isDefault)
+        }
     }
 
     private fun detectFormat(type: String, url: String): VodFormat? {

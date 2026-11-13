@@ -102,4 +102,44 @@ class VodPreflightTest {
         // verify() only ever probes the head of the list; this asserts the budget itself, not the network.
         assertEquals(VodPreflight.MAX_CANDIDATES, many.take(VodPreflight.MAX_CANDIDATES).size)
     }
+
+    @Test fun `one-minute VOD anime decoy playlist is detected while full movies and live playlists pass`() {
+        val oneMinAnime = "#EXTM3U\n#EXT-X-VERSION:3\n" +
+            (0 until 6).joinToString("") { "#EXTINF:10.0,\nseg$it.ts\n" } + "#EXT-X-ENDLIST\n"
+        assertEquals(60.0, VodPreflight.vodPlaylistDurationSeconds(oneMinAnime) ?: -1.0, 0.01)
+        assertTrue(VodPreflight.isShortVodPlaylist(oneMinAnime, 210))
+
+        val fullMovie = "#EXTM3U\n#EXT-X-VERSION:3\n" +
+            (0 until 650).joinToString("") { "#EXTINF:10.0,\nseg$it.ts\n" } + "#EXT-X-ENDLIST\n"
+        assertFalse(VodPreflight.isShortVodPlaylist(fullMovie, 210))
+
+        // Live/sliding playlists without #EXT-X-ENDLIST are never treated as short clips
+        val sliding = "#EXTM3U\n#EXTINF:6.0,\nlive0.ts\n#EXTINF:6.0,\nlive1.ts\n"
+        assertFalse(VodPreflight.isShortVodPlaylist(sliding, 210))
+    }
+
+    @Test fun `duration guard skips 1-minute clip on 108m documentary while allowing genuine short films`() {
+        assertEquals(108, VodDurationGuard.parseMinutes("108m"))
+        assertEquals(108, VodDurationGuard.parseMinutes("1h 48m"))
+        // 60s anime clip on 108m "Look at Me: XXXTENTACION" -> bogus!
+        assertTrue(VodDurationGuard.isBogusShortClip(isSeries = false, expectedRuntimeMinutes = 108, durationMs = 60_000L, hasAlternativeSources = true))
+        // Real 1h 53m stream -> valid!
+        assertFalse(VodDurationGuard.isBogusShortClip(isSeries = false, expectedRuntimeMinutes = 108, durationMs = 6_807_000L, hasAlternativeSources = true))
+        // Genuine 6m short film -> valid!
+        assertFalse(VodDurationGuard.isBogusShortClip(isSeries = false, expectedRuntimeMinutes = 6, durationMs = 360_000L, hasAlternativeSources = true))
+        // Last remaining source is never discarded
+        assertFalse(VodDurationGuard.isBogusShortClip(isSeries = false, expectedRuntimeMinutes = 108, durationMs = 60_000L, hasAlternativeSources = false))
+    }
+
+    @Test fun `TMDB-exact VidLink and Source 13 rank ahead of fuzzy OG Source 2`() {
+        val fuzzy2 = FrostSource(FrostProvider.OG, "og-s2", "https://embed.theogpiratebot.online/api/v1/stream?t=s2",
+            VodFormat.HLS, "1080p", "Original", null, emptyMap(), emptyList(), scraperName = "Source 2")
+        val vidlink = FrostSource(FrostProvider.OG, "og-vl", "https://bcdnxw.hakunaymatata.com/resource/720.mp4",
+            VodFormat.MP4, "720p", "Original", false, emptyMap(), emptyList(), scraperName = "VidLink")
+        val source13 = FrostSource(FrostProvider.OG, "og-s13", "https://bcdnxw.hakunaymatata.com/resource/720b.mp4",
+            VodFormat.MP4, "720p", "Original", false, emptyMap(), emptyList(), scraperName = "Source 13")
+
+        val ordered = VodSourceOrder.prioritize(listOf(fuzzy2, vidlink, source13))
+        assertEquals(listOf("og-vl", "og-s13", "og-s2"), ordered.map { it.identity })
+    }
 }

@@ -131,4 +131,45 @@ class VidLinkClientTest {
         assertEquals("1080p", sources.first().quality)
         assertTrue("2160p must remain selectable in sources list", sources.any { it.quality == "2160p" })
     }
+
+    @Test
+    fun `Look at Me XXXTentacion prefers faststart resource 720p native UA and trims 12 captions`() {
+        val json = """
+            {
+              "sourceId": "mwVault",
+              "stream": {
+                "id": "primary",
+                "type": "file",
+                "qualities": {
+                  "480": {"type": "mp4", "url": "https://bcdn.hakunaymatata.com/resource/705d1630.mp4?sign=sd", "size": "535830875", "codecName": "h264"},
+                  "720": {"type": "mp4", "url": "https://bcdn.hakunaymatata.com/resource/dfd32731.mp4?sign=hd", "size": "722381126", "codecName": "h264"},
+                  "1080": {"type": "mp4", "url": "https://bcdn.hakunaymatata.com/extto/adf88ecd.mp4?sign=fhd", "size": "2245442970", "codecName": "h264"}
+                },
+                "captions": [
+                  {"id": "1", "url": "https://cacdn.hakunaymatata.com/sub/ar.srt", "language": "Arabic", "type": "srt"},
+                  {"id": "2", "url": "https://cacdn.hakunaymatata.com/sub/bn.srt", "language": "Bengali", "type": "srt"},
+                  {"id": "3", "url": "https://cacdn.hakunaymatata.com/sub/en.srt", "language": "English", "type": "srt"},
+                  {"id": "4", "url": "https://cacdn.hakunaymatata.com/sub/fil.srt", "language": "Filipino", "type": "srt"},
+                  {"id": "5", "url": "https://cacdn.hakunaymatata.com/sub/fr.srt", "language": "French", "type": "srt"},
+                  {"id": "6", "url": "https://cacdn.hakunaymatata.com/sub/ha.srt", "language": "Hausa", "type": "srt"},
+                  {"id": "7", "url": "https://cacdn.hakunaymatata.com/sub/id.srt", "language": "Indonesian", "type": "srt"},
+                  {"id": "8", "url": "https://cacdn.hakunaymatata.com/sub/pa.srt", "language": "Punjabi", "type": "srt"},
+                  {"id": "9", "url": "https://cacdn.hakunaymatata.com/sub/pt.srt", "language": "Portuguese", "type": "srt"},
+                  {"id": "10", "url": "https://cacdn.hakunaymatata.com/sub/ru.srt", "language": "Russian", "type": "srt"},
+                  {"id": "11", "url": "https://cacdn.hakunaymatata.com/sub/sw.srt", "language": "Swahili", "type": "srt"},
+                  {"id": "12", "url": "https://cacdn.hakunaymatata.com/sub/ur.srt", "language": "Urdu", "type": "srt"}
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val sources = VidLinkClient.parseResponse(json)
+        val first = sources.first()
+        assertEquals("720p", first.quality)
+        assertTrue(first.url.startsWith("https://bcdnxw.hakunaymatata.com/resource/dfd32731.mp4"))
+        assertEquals(VidLinkClient.MOVIEBOX_USER_AGENT, first.headers["User-Agent"])
+        assertEquals(1, first.subtitles.size)
+        assertEquals("en", first.subtitles.single().language)
+        assertTrue("Heavy 2.25 GB 1080p /extto/ remains selectable", sources.any { it.quality == "1080p" })
+    }
 }

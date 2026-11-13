@@ -80,6 +80,7 @@ internal class VidLinkClient(
             .header("Accept", "application/json, text/plain, */*")
             .header("Origin", origin)
             .header("Referer", "$origin/")
+            .header("x-playback-environment", "webkit")
             .build()
         return runCatching {
             client.newCall(req).execute().use { resp ->
@@ -115,6 +116,9 @@ internal class VidLinkClient(
         const val ENC_DEC_API = "https://enc-dec.app/api/enc-vidlink"
         const val MOVIEBOX_REFERER = "https://movieboxonline.net/"
         const val MOVIEBOX_ORIGIN = "https://movieboxonline.net"
+        const val MOVIEBOX_USER_AGENT = "okhttp/4.12.0"
+        private const val MAX_CAPTIONS = 3
+        private const val HEAVY_MP4_BYTES = 1_500_000_000L
         private const val MAX_JSON_BYTES = 512_000
         private const val TOKEN_TTL_SECONDS = 480L
 
@@ -160,15 +164,17 @@ internal class VidLinkClient(
         fun movieBoxVariants(source: FrostSource): List<FrostSource> {
             val parsed = source.url.toHttpUrlOrNull() ?: return listOf(source)
             val cleanHeaders = source.headers.filterKeys {
-                !it.equals("referer", ignoreCase = true) && !it.equals("origin", ignoreCase = true)
-            }
+                !it.equals("referer", ignoreCase = true) &&
+                    !it.equals("origin", ignoreCase = true) &&
+                    !it.equals("user-agent", ignoreCase = true)
+            } + mapOf("User-Agent" to MOVIEBOX_USER_AGENT)
             val mbHeaders = cleanHeaders + mapOf(
                 "referer" to MOVIEBOX_REFERER,
                 "origin" to MOVIEBOX_ORIGIN
             )
             val out = ArrayList<FrostSource>(3)
-            // `bcdn.hakunaymatata.com` throttles burst Range probes on some edges; `bcdnxw` is its
-            // unthrottled edge mirror with identical signed paths.
+            // `bcdn.hakunaymatata.com` throttles burst Range probes or desktop browser UAs on some edges;
+            // `bcdnxw` is its unthrottled edge mirror with identical signed paths.
             if (parsed.host.equals("bcdn.hakunaymatata.com", ignoreCase = true)) {
                 val mirrorUrl = parsed.newBuilder().host("bcdnxw.hakunaymatata.com").build().toString()
                 out += FrostSource(
@@ -185,6 +191,21 @@ internal class VidLinkClient(
                     scraperName = source.scraperName
                 )
             }
+            // Referer-less native UA variant next: `bcdn.hakunaymatata.com` detector edges reject
+            // browser Referer headers with HTTP 429 while serving HTTP 206 to `okhttp/4.12.0`.
+            out += FrostSource(
+                provider = source.provider,
+                identity = "${source.identity}:mb-noref",
+                url = source.url,
+                format = source.format,
+                quality = source.quality,
+                language = source.language,
+                hevc = source.hevc,
+                headers = cleanHeaders,
+                subtitles = source.subtitles,
+                credentialOrigin = source.url,
+                scraperName = source.scraperName
+            )
             out += FrostSource(
                 provider = source.provider,
                 identity = "${source.identity}:mb-ref",
@@ -196,19 +217,6 @@ internal class VidLinkClient(
                 headers = mbHeaders,
                 subtitles = source.subtitles,
                 credentialOrigin = source.url,
-                scraperName = source.scraperName
-            )
-            out += FrostSource(
-                provider = source.provider,
-                identity = "${source.identity}:mb-noref",
-                url = source.url,
-                format = source.format,
-                quality = source.quality,
-                language = source.language,
-                hevc = source.hevc,
-                headers = cleanHeaders,
-                subtitles = source.subtitles,
-                credentialOrigin = source.credentialOrigin,
                 scraperName = source.scraperName
             )
             return out
@@ -258,6 +266,7 @@ internal class VidLinkClient(
                     val url: String,
                     val format: VodFormat,
                     val hevc: Boolean?,
+                    val heavyProgressive: Boolean,
                     val headers: Map<String, String>
                 )
                 val entries = ArrayList<QualityEntry>()
@@ -282,12 +291,19 @@ internal class VidLinkClient(
                         url.substringBefore('?').endsWith(".mpd", ignoreCase = true) || typeHint == "dash" -> VodFormat.DASH
                         else -> VodFormat.MP4
                     }
+                    val sizeBytes = qObj.optString("size").trim().toLongOrNull() ?: qObj.optLong("size", 0L)
+                    // Raw `/extto/` torrent remuxes and >1.5 GB progressive MP4s often decode frame 1 and
+                    // stall buffering on mobile/TV; rank web-faststart `/resource/` encodes first while
+                    // keeping heavy 1080p/4K files selectable in Change source.
+                    val heavyProgressive = format == VodFormat.MP4 && (
+                        url.contains("/extto/", ignoreCase = true) || sizeBytes > HEAVY_MP4_BYTES
+                    )
                     val qHeaders = parseHeaders(qObj.optJSONObject("headers"))
-                    entries += QualityEntry(rank, label, url, format, hevc, qHeaders)
+                    entries += QualityEntry(rank, label, url, format, hevc, heavyProgressive, qHeaders)
                 }
-                // Prefer 1080p/720p H.264/AVC ahead of multi-GB 4K progressive MP4s for fast mobile/TV start; keep 4K selectable.
                 entries.sortWith(
                     compareByDescending<QualityEntry> { it.hevc != true }
+                        .thenByDescending { !it.heavyProgressive }
                         .thenByDescending { if (it.rank in 720..1080) it.rank + 2000 else it.rank }
                 )
                 for (entry in entries) {
@@ -315,8 +331,8 @@ internal class VidLinkClient(
 
         private fun parseCaptions(arr: JSONArray?): List<FrostSubtitle> {
             if (arr == null) return emptyList()
-            val raw = ArrayList<Triple<String, String, String>>()
-            var hasEnglish = false
+            data class RawCaption(val url: String, val label: String, val mime: String, val langCode: String)
+            val raw = ArrayList<RawCaption>()
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
                 val url = obj.optString("url").trim()
@@ -329,22 +345,27 @@ internal class VidLinkClient(
                     type == "ass" || type == "ssa" || path.endsWith(".ass") || path.endsWith(".ssa") -> "text/x-ssa"
                     else -> "text/vtt"
                 }
-                if (label.equals("English", ignoreCase = true) || label.startsWith("en", ignoreCase = true)) {
-                    hasEnglish = true
-                }
-                raw += Triple(url, label, mime)
-            }
-            var defaultAssigned = false
-            return raw.distinctBy { it.first }.mapIndexed { idx, (url, label, mime) ->
                 val isEng = label.equals("English", ignoreCase = true) || label.startsWith("en", ignoreCase = true)
-                val isDef = !defaultAssigned && (if (hasEnglish) isEng else idx == 0)
-                if (isDef) defaultAssigned = true
+                val isHin = label.contains("हिन्दी") || label.equals("Hindi", ignoreCase = true) || label.startsWith("hi", ignoreCase = true)
                 val langCode = when {
                     isEng -> "en"
-                    label.contains("हिन्दी") || label.equals("Hindi", ignoreCase = true) -> "hi"
+                    isHin -> "hi"
                     else -> label.take(12)
                 }
-                FrostSubtitle(url = url, label = label, language = langCode, mime = mime, default = isDef)
+                raw += RawCaption(url, label, mime, langCode)
+            }
+            val unique = raw.distinctBy { it.url }
+            // Media3 MergingMediaSource downloads every attached sidecar subtitle in parallel at prepare()
+            // and aborts playback if any one returns 403/404/429. Keep only English & Hindi tracks when
+            // present (capped at MAX_CAPTIONS) so 12+ foreign SRTs never burst-throttle `cacdn`.
+            val preferred = unique.filter { it.langCode == "en" || it.langCode == "hi" }
+            val chosen = (if (preferred.isNotEmpty()) preferred else unique).take(MAX_CAPTIONS)
+            val hasEnglish = chosen.any { it.langCode == "en" }
+            var defaultAssigned = false
+            return chosen.mapIndexed { idx, cap ->
+                val isDef = !defaultAssigned && (if (hasEnglish) cap.langCode == "en" else idx == 0)
+                if (isDef) defaultAssigned = true
+                FrostSubtitle(url = cap.url, label = cap.label, language = cap.langCode, mime = cap.mime, default = isDef)
             }
         }
 

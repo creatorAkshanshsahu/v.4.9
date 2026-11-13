@@ -55,7 +55,11 @@ internal object VodPreflight {
      * Bounded by [MAX_CANDIDATES], runs with [CONCURRENCY] workers, never throws, never keeps a body.
      * An empty result means "no evidence", not "dead": the caller keeps the original order then.
      */
-    fun verify(sources: List<FrostSource>, timeoutMs: Long = TIMEOUT_MS): Set<String> {
+    fun verify(
+        sources: List<FrostSource>,
+        timeoutMs: Long = TIMEOUT_MS,
+        minDurationSeconds: Int = 0
+    ): Set<String> {
         val candidates = sources.take(MAX_CANDIDATES)
         if (candidates.isEmpty()) return emptySet()
         val pool = Executors.newFixedThreadPool(minOf(CONCURRENCY, candidates.size)) { runnable ->
@@ -63,7 +67,7 @@ internal object VodPreflight {
         }
         return try {
             val pending: List<Pair<FrostSource, Future<Boolean>>> = candidates.map { source ->
-                source to pool.submit(Callable { probe(source, timeoutMs) })
+                source to pool.submit(Callable { probe(source, timeoutMs, minDurationSeconds) })
             }
             pending.mapNotNull { (source, future) ->
                 val answered = try {
@@ -79,9 +83,9 @@ internal object VodPreflight {
         }
     }
 
-    private data class Answer(val code: Int, val contentType: String, val body: String)
+    private data class Answer(val code: Int, val contentType: String, val body: String, val totalBytes: Long = -1L)
 
-    private fun probe(source: FrostSource, timeoutMs: Long): Boolean {
+    private fun probe(source: FrostSource, timeoutMs: Long, minDurationSeconds: Int = 0): Boolean {
         val client = try {
             FrostHttp.client(source).newBuilder()
                 .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
@@ -92,21 +96,72 @@ internal object VodPreflight {
             return false
         }
         // A progressive file has no manifest to read: one short ranged answer is the whole check.
-        if (source.format == VodFormat.MP4) return fetch(client, source.url, ranged = true)?.code in 200..299
+        if (source.format == VodFormat.MP4) {
+            val mp4 = fetch(client, source.url, ranged = true) ?: return false
+            if (mp4.code !in 200..299) return false
+            if (minDurationSeconds >= 180 && mp4.totalBytes in 1L..8_000_000L) return false
+            return true
+        }
         val manifest = fetch(client, source.url, ranged = false) ?: return false
         if (manifest.code !in 200..299) return false
         if (!looksLikeManifest(manifest.contentType, manifest.body)) return false
+        if (minDurationSeconds > 0 && isShortVodPlaylist(manifest.body, minDurationSeconds)) return false
         val target = manifestTargets(source.format, source.url, manifest.body).firstOrNull() ?: return true
+        if (source.format == VodFormat.HLS && looksLikePlaylistUrl(target, manifest.body)) {
+            val child = fetch(client, target, ranged = false) ?: return false
+            if (child.code !in 200..299) return false
+            if (!looksLikeManifest(child.contentType, child.body)) return false
+            if (minDurationSeconds > 0 && isShortVodPlaylist(child.body, minDurationSeconds)) return false
+            val segTarget = manifestTargets(VodFormat.HLS, target, child.body).firstOrNull() ?: return true
+            val seg = fetch(client, segTarget, ranged = true) ?: return false
+            return seg.code in 200..299
+        }
         // A signed segment that no longer answers means the manifest outlived its own content.
         val media = fetch(client, target, ranged = true) ?: return false
         return media.code in 200..299
     }
+
+    private fun looksLikePlaylistUrl(target: String, parentBody: String): Boolean {
+        val clean = target.substringBefore('?').substringBefore('#').lowercase()
+        return clean.endsWith(".m3u8") || clean.endsWith(".m3u") || parentBody.contains("#EXT-X-STREAM-INF", true)
+    }
+
+    /**
+     * Static HLS VOD playlists (`#EXT-X-ENDLIST`) advertise every segment duration via `#EXTINF`.
+     * When a fuzzy title scraper returns a 60-second anime clip or 22-second bumper for a feature
+     * film, rejecting it here prevents the player from ever opening the wrong video.
+     */
+    fun vodPlaylistDurationSeconds(body: String): Double? {
+        if (!body.contains("#EXTM3U", true) || !body.contains("#EXT-X-ENDLIST", true)) return null
+        var sum = 0.0
+        var count = 0
+        for (match in EXTINF_DURATION.findAll(body)) {
+            val secs = match.groupValues[1].toDoubleOrNull() ?: continue
+            if (secs >= 0.0) {
+                sum += secs
+                count++
+            }
+        }
+        return if (count > 0) sum else null
+    }
+
+    fun isShortVodPlaylist(body: String, minDurationSeconds: Int): Boolean {
+        if (minDurationSeconds <= 0) return false
+        val total = vodPlaylistDurationSeconds(body) ?: return false
+        return total > 0.0 && total < minDurationSeconds.toDouble()
+    }
+
+    private val EXTINF_DURATION = Regex("#EXTINF:\\s*([0-9]+(?:\\.[0-9]+)?)")
+    private val CONTENT_RANGE_TOTAL = Regex("/(\\d{1,16})\\s*$")
 
     private fun fetch(client: OkHttpClient, url: String, ranged: Boolean): Answer? = try {
         val request = Request.Builder().url(url).apply {
             if (ranged) header("Range", "bytes=0-1023")
         }.build()
         client.newCall(request).execute().use { response ->
+            val totalBytes = CONTENT_RANGE_TOTAL.find(response.header("Content-Range").orEmpty())
+                ?.groupValues?.get(1)?.toLongOrNull()
+                ?: if (!ranged) response.header("Content-Length")?.toLongOrNull() ?: -1L else -1L
             val body = response.body
             val text = if (body == null) "" else try {
                 body.byteStream().use { stream ->
@@ -122,7 +177,7 @@ internal object VodPreflight {
             } catch (_: Exception) {
                 ""
             }
-            Answer(response.code, response.header("Content-Type").orEmpty(), text)
+            Answer(response.code, response.header("Content-Type").orEmpty(), text, totalBytes)
         }
     } catch (_: Exception) {
         null

@@ -347,4 +347,48 @@ class ElfuraClientTest {
             assertEquals(VidLinkClient.MOVIEBOX_REFERER, mbSource.headers["Referer"])
         }
     }
+
+    @Test
+    fun `primary full-length MovieBox stream stays ahead of fuzzy Source 2 HLS scraper clip`() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody("""{"pltoken":"tok-934042","nonce":"n-934042"}"""))
+            server.enqueue(
+                MockResponse().setBody(
+                    """{
+                        "ok": true,
+                        "primary": {
+                            "id": "mb-934042",
+                            "sourceId": "source-13",
+                            "label": "Source 13",
+                            "type": "mp4",
+                            "quality": "720p",
+                            "audioLang": "en",
+                            "url": "https://bcdn.hakunaymatata.com/resource/dfd32731e10b3840e90ab233014d2af7.mp4?sign=ok"
+                        },
+                        "sources": [
+                            {
+                                "id": "fuzzy-anime",
+                                "sourceId": "source-2",
+                                "label": "Source 2",
+                                "type": "hls",
+                                "quality": "1080p",
+                                "audioLang": "ja",
+                                "url": "/api/v1/stream?t=wrong_anime_short"
+                            }
+                        ]
+                    }"""
+                )
+            )
+
+            val sources = ElfuraClient.resolve(FrostTitle(934042, "movie"), server.url("/"), OkHttpClient())
+            assertTrue(sources.size >= 3)
+            // Primary Source 13 (real documentary on bcdnxw mirror) must precede fuzzy Source 2 HLS!
+            val first = sources.first()
+            assertEquals("Source 13", first.scraperName)
+            assertTrue(first.url.startsWith("https://bcdnxw.hakunaymatata.com/resource/dfd32731"))
+            assertEquals(VidLinkClient.MOVIEBOX_USER_AGENT, first.headers["User-Agent"])
+            val fuzzyIdx = sources.indexOfFirst { it.scraperName.startsWith("Source 2") }
+            assertTrue("Fuzzy Source 2 must rank behind primary Source 13", fuzzyIdx >= 3)
+        }
+    }
 }
