@@ -54,12 +54,19 @@ jobs:
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Test stream resolution and build both APKs
         env:
-          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER }}
-          STARSHARE_USER: ${{ secrets.STARSHARE_USER }}
-          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS }}
+          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER || secrets.STARSHARE_URL }}
+          STARSHARE_USER: ${{ secrets.STARSHARE_USER || secrets.STARSHARE_USERNAME }}
+          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
-          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then
+            echo "StarShare inbuilt secret status: configured"
+          else
+            echo "StarShare inbuilt secret status: not set"
+          fi
+          env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
+            gradle testArm32DebugUnitTest testArm64DebugUnitTest --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+          gradle assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee -a "$RUNNER_TEMP/aktv-gradle.log"
       - name: Report deterministic tests for both APK variants
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
