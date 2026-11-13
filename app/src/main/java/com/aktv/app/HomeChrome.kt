@@ -80,9 +80,9 @@ internal object HomeChrome {
         // Mark plus wordmark, as in the site header — the mark is no longer hidden.
         root.findViewById<View>(R.id.brandMark).apply {
             visibility = View.VISIBLE
-            // 40dp beside the wordmark on TV, as the design file asks; a touch smaller when compact.
-            layoutParams.width = px(if (m.compact) 30 else 40)
-            layoutParams.height = px(if (m.compact) 30 else 40)
+            // Square crimson-framed cyber badge beside the wordmark on TV; scaled cleanly when compact.
+            layoutParams.width = px(if (m.compact) 32 else 42)
+            layoutParams.height = px(if (m.compact) 32 else 42)
             (layoutParams as ViewGroup.MarginLayoutParams).marginEnd = px(if (m.compact) 8 else 12)
         }
         root.findViewById<View>(R.id.railTagline).visibility = View.GONE
@@ -192,12 +192,12 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.heroChips).let {
             (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 8 else 20)
         }
-        // The hero logo sits at the card's top-right, small, the way the site shows a title mark.
+        // The hero logo sits at the card's top-right, square for the 1:1 crimson cyber badge.
         root.findViewById<View>(R.id.heroLogo).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                width = px(if (m.compact) 84 else 104); height = px(if (m.compact) 54 else 66)
+                width = px(if (m.compact) 58 else 78); height = px(if (m.compact) 58 else 78)
                 gravity = android.view.Gravity.TOP or android.view.Gravity.END
-                topMargin = px(nav) + px(24)
+                topMargin = px(nav) + px(if (m.compact) 14 else 22)
                 marginEnd = px(if (m.compact) 20 else 48)
             }
         }

@@ -30,7 +30,7 @@ import android.widget.FrameLayout
 
 /**
  * Full-screen skippable cyber-neon STREAMR entrance playing `R.raw.streamr_intro_video`
- * (`streamr-cyber-logo-full-motion.mp4`), with a deterministic vector/drawable fallback for
+ * (`streamr-cyber-logo-credit-motion.mp4`), with a deterministic vector/drawable fallback for
  * reduced-motion, headless preview rendering, or constrained decoders.
  */
 class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : FrameLayout(context, attrs) {
@@ -336,32 +336,19 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         textureView?.alpha = if (videoRendering) (1f - exit) else 0f
 
         // Pure obsidian-black ground so the motion MP4 blends edge-to-edge without any seam.
-        backgroundPaint.color = Color.argb(alpha, 2, 1, 7)
+        backgroundPaint.color = Color.argb(alpha, 0, 0, 0)
         canvas.drawRect(0f, 0f, w, h, backgroundPaint)
 
         // When hardware video frames are actively rendering, let the full-motion logo take center stage.
         if (!videoRendering) {
-            val step = (44f * dp).coerceAtLeast(28f)
-            gridPaint.color = Color.argb((alpha * 0.08f).toInt(), 0, 236, 247)
-            var gx = 0f
-            while (gx <= w) {
-                canvas.drawLine(gx, 0f, gx, h, gridPaint)
-                gx += step
-            }
-            var gy = 0f
-            while (gy <= h) {
-                canvas.drawLine(0f, gy, w, gy, gridPaint)
-                gy += step
-            }
-
             val cx = w / 2f
-            val cy = h * 0.46f
+            val cy = h * 0.47f
             val radius = minOf(w, h) * 0.56f
             glowPaint.shader = RadialGradient(
                 cx, cy, radius.coerceAtLeast(1f),
                 intArrayOf(
-                    Color.argb((alpha * 0.26f).toInt(), 255, 0, 208),
-                    Color.argb((alpha * 0.16f).toInt(), 0, 236, 247),
+                    Color.argb((alpha * 0.22f).toInt(), 255, 0, 208),
+                    Color.argb((alpha * 0.14f).toInt(), 0, 236, 247),
                     Color.TRANSPARENT
                 ),
                 floatArrayOf(0f, 0.52f, 1f),
@@ -372,31 +359,17 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
             val appear = (progress / 0.24f).coerceIn(0f, 1f)
             val settle = (progress / 0.45f).coerceIn(0f, 1f)
             val scale = 0.94f + 0.06f * settle
-            val shortScreen = h < 420f * dp
 
-            val iconSize = minOf(w * 0.22f, h * (if (shortScreen) 0.34f else 0.32f)) * scale
-            val iconCenterY = h * (if (shortScreen) 0.33f else 0.34f)
-            iconRect.set(cx - iconSize / 2f, iconCenterY - iconSize / 2f, cx + iconSize / 2f, iconCenterY + iconSize / 2f)
-            iconMark?.let {
-                it.alpha = (alpha * appear).toInt()
-                it.setBounds(iconRect.left.toInt(), iconRect.top.toInt(), iconRect.right.toInt(), iconRect.bottom.toInt())
-                it.draw(canvas)
-            }
-
-            val wordW = minOf(w * 0.62f, 520f * dp) * scale
-            val ratio = (fullLogo?.intrinsicHeight ?: 340).toFloat() / (fullLogo?.intrinsicWidth ?: 1024).coerceAtLeast(1)
+            // Matches streamr-cyber-logo-credit-motion.mp4: full STREAMR + "BY AKSHANSH SAHU" lockup centered on black.
+            val wordW = minOf(w * 0.82f, 760f * dp) * scale
+            val ratio = (fullLogo?.intrinsicHeight ?: 278).toFloat() / (fullLogo?.intrinsicWidth ?: 1200).coerceAtLeast(1)
             val wordH = wordW * ratio
-            val wordTop = iconRect.bottom + (if (shortScreen) 4f else 10f) * dp
-            wordRect.set(cx - wordW / 2f, wordTop, cx + wordW / 2f, wordTop + wordH)
+            wordRect.set(cx - wordW / 2f, cy - wordH / 2f, cx + wordW / 2f, cy + wordH / 2f)
             fullLogo?.let {
                 it.alpha = (alpha * appear).toInt()
                 it.setBounds(wordRect.left.toInt(), wordRect.top.toInt(), wordRect.right.toInt(), wordRect.bottom.toInt())
                 it.draw(canvas)
             }
-
-            bylinePaint.textSize = 10.5f * dp
-            bylinePaint.alpha = (alpha * appear * 0.85f).toInt()
-            canvas.drawText("CYBER CINEMA  ·  LIVE TV", cx, minOf(wordRect.bottom + 20f * dp, h * 0.84f), bylinePaint)
         }
     }
 

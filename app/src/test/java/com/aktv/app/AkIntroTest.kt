@@ -53,10 +53,11 @@ class AkIntroTest {
 
     @Test fun `cyber motion entrance video is bundled as a valid H264 MP4 asset`() {
         val bytes = RuntimeEnvironment.getApplication().resources.openRawResource(R.raw.streamr_intro_video).use { it.readBytes() }
-        assertTrue("Expected full motion MP4 (> 500 KB), got ${bytes.size}", bytes.size > 500_000)
+        assertTrue("Expected credit motion MP4 (> 2 MB), got ${bytes.size}", bytes.size > 2_000_000)
         val header = String(bytes, 4, 4, Charsets.US_ASCII)
         assertEquals("ftyp", header)
         val ascii = String(bytes, Charsets.ISO_8859_1)
         assertTrue("Expected H.264 avc1 track inside streamr_intro_video.mp4", ascii.contains("avc1"))
+        assertTrue("Expected AAC mp4a audio track inside streamr_intro_video.mp4", ascii.contains("mp4a"))
     }
 }
