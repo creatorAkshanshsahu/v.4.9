@@ -1,10 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { DirectPlayCandidate } from "@/lib/live-gateway";
 
 export interface AudioTrackOption {
   index: number;
   label: string;
+}
+
+interface ShakaRequest {
+  uris: string[];
+  headers: Record<string, string>;
+}
+
+interface ShakaResponse {
+  uri: string;
+  data: ArrayBuffer;
+  headers: Record<string, string>;
+}
+
+interface ShakaNetworkingEngine {
+  registerRequestFilter: (filter: (type: number, request: ShakaRequest) => void) => void;
+  registerResponseFilter: (filter: (type: number, response: ShakaResponse) => void) => void;
 }
 
 interface ShakaPlayerInstance {
@@ -16,6 +33,7 @@ interface ShakaPlayerInstance {
   getAudioLanguages: () => string[];
   selectAudioLanguage: (language: string, role?: string) => void;
   getAudioLanguage: () => string;
+  getNetworkingEngine?: () => ShakaNetworkingEngine | null;
 }
 
 export interface ChannelDrm {
@@ -63,6 +81,11 @@ declare global {
         new (): ShakaPlayerInstance;
         isBrowserSupported: () => boolean;
       };
+      net?: {
+        NetworkingEngine?: {
+          RequestType?: { MANIFEST?: number; SEGMENT?: number };
+        };
+      };
       polyfill: { installAll: () => void };
       log?: { setLevel: (level: number) => void };
       LogLevel?: { NONE: number };
@@ -87,15 +110,14 @@ declare global {
  *
  * Shaka accepts either 32 hex chars or 22-char unpadded base64url, and decides
  * which by *length alone*: exactly 22 means "base64", anything else goes through
- * a hex parser. A 16-byte key encoded as base64url is 22 chars, but a 16-byte
- * key id we already emit is 22 only when unpadded — and a padded 24-char form, or
- * a 32-char base64 string, fails the length test and gets parsed as hex, quietly
- * producing a wrong key. Converting everything to hex removes the ambiguity.
+ * a hex parser. Converting everything (including UUID forms with hyphens) to 32
+ * lowercase hex chars removes any ambiguity.
  */
 function toHexKeyId(value: string): string | null {
   const v = (value ?? "").trim();
   if (!v) return null;
-  if (/^[0-9a-fA-F]{32}$/.test(v)) return v.toLowerCase();
+  const cleanUuid = v.replace(/-/g, "");
+  if (/^[0-9a-fA-F]{32}$/.test(cleanUuid)) return cleanUuid.toLowerCase();
   const normalised = v.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
   if (!/^[A-Za-z0-9+/]+$/.test(normalised)) return null;
   const padded = normalised + "===".slice((normalised.length + 3) % 4);
@@ -124,10 +146,23 @@ function parseKeyHeader(value: string | null): Array<{ kid: string; k: string }>
   return out;
 }
 
+/** Ensure `no-referrer` is active in `document.head` so Jio CDN never sees a third-party Referer (HTTP 451). */
+function ensureNoReferrerMeta(): void {
+  if (typeof document === "undefined") return;
+  let meta = document.querySelector('meta[name="referrer"]') as HTMLMetaElement | null;
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = "referrer";
+    document.head.appendChild(meta);
+  }
+  if (meta.content !== "no-referrer") meta.content = "no-referrer";
+}
+
 let scriptsPromise: Promise<void> | null = null;
 
 function ensurePlayerEnginesLoaded(): Promise<void> {
   if (typeof window === "undefined") return Promise.resolve();
+  ensureNoReferrerMeta();
   if (window.mpegts && window.Hls && window.shaka) return Promise.resolve();
   if (scriptsPromise) return scriptsPromise;
 
@@ -173,8 +208,16 @@ export function LiveVideoSurface({
   const [statusMsg, setStatusMsg] = useState<string | null>("Connecting to live stream…");
   const [hasError, setHasError] = useState(false);
   const [localRetry, setLocalRetry] = useState(0);
-  /** Set when Shaka has named a concrete fault; the no-video timer must not overwrite it. */
+  /** Set when a concrete fault has already been reported; the 15s timer must never overwrite it. */
   const specificErrorRef = useRef(false);
+  /** True when playing directly against upstream CDN from the browser (no server segment log). */
+  const directModeRef = useRef(false);
+
+  const reportError = (msg: string) => {
+    specificErrorRef.current = true;
+    setHasError(true);
+    setStatusMsg(msg);
+  };
 
   const clearOverlayIfRendering = () => {
     const el = videoRef.current;
@@ -210,21 +253,25 @@ export function LiveVideoSurface({
         setHasError(true);
         settled = true;
         clearInterval(poll);
-        // A specific refusal from Shaka is worth more than anything this timer can infer.
-        // Overwriting it with "no video arrived" is how a 450 turned into a mystery.
+        // Never overwrite a specific HTTP/Shaka/HLS error with a generic watchdog guess.
         if (specificErrorRef.current) return;
-        // Ask the gateway what the CDN actually answered for the segments the player
-        // requested. Without that, "no video arrived" is six different faults wearing one
-        // message, and every round trip becomes a guess.
+        // When streaming browser-direct to cdn.jio.com, segments never pass through /api/live/segment.
+        if (directModeRef.current) {
+          setStatusMsg(
+            "Direct CDN stream is taking too long to deliver video frames. Press Retry to switch token/server.",
+          );
+          return;
+        }
         const asked = `/api/live/diagnose?id=${encodeURIComponent(channelId)}`;
         void fetch(asked)
           .then((r) => (r.ok ? r.json() : null))
           .then((report: unknown) => {
+            if (specificErrorRef.current) return;
             const segs = (report as { recentSegments?: Array<{ status?: number; bytes?: number }> } | null)
               ?.recentSegments;
             if (!segs || segs.length === 0) {
               setStatusMsg(
-                "The player requested no segments at all, so the manifest it received could not be used.",
+                "The stream started but no video segments arrived in time. Press Retry to reconnect.",
               );
               return;
             }
@@ -244,15 +291,17 @@ export function LiveVideoSurface({
             );
           })
           .catch(() => {
-            setStatusMsg(
-              "The stream started but no video arrived. The channel's segments were refused or the format is unsupported.",
-            );
+            if (!specificErrorRef.current) {
+              setStatusMsg(
+                "The stream started but no video arrived. The channel's segments were refused or the format is unsupported.",
+              );
+            }
           });
         return;
       }
       settled = true;
       clearInterval(poll);
-    }, 15000);
+    }, 18000);
 
     check();
     return () => {
@@ -322,25 +371,193 @@ export function LiveVideoSurface({
       }
     };
 
-    // DASH + ClearKey through Shaka. Shaka wants each key as 32 hex chars or as
-    // *unpadded* 22-char base64url; a 32-char base64url string (which is what a
-    // default_KID produces) is silently misread as hex, so normalise both forms
-    // to hex and let Shaka encode them itself.
+    const syncShakaAudioAndPlay = async (player: ShakaPlayerInstance) => {
+      if (cancelled) return;
+      const langs = player.getAudioLanguages() ?? [];
+      if (langs.length > 1) {
+        const hindi = langs.find((l) => /^hi/i.test(l));
+        if (hindi) player.selectAudioLanguage(hindi);
+      }
+      const opts: AudioTrackOption[] = langs.map((name, idx) => ({ index: idx, label: name }));
+      onAudioTracksChange?.(opts, Math.max(langs.indexOf(player.getAudioLanguage() ?? ""), 0));
+      await safePlay();
+    };
+
+    /**
+     * Browser-direct playback against `jiotvmblive.cdn.jio.com` / `jiotvpllive.cdn.jio.com`.
+     *
+     * Cloudflare Workers (`AS13335`) are geo/ASN-blocked on media streams (`HTTP 403` on maxTV,
+     * `HTTP 450/451` on Jio CDN), whereas the viewer's own Indian browser IP receives `200 OK`
+     * with `Access-Control-Allow-Origin: *` when:
+     *   1. `no-referrer` is set,
+     *   2. Shaka's `registerRequestFilter` appends `?__hdnea__=<token>` to MANIFEST & SEGMENT URIs,
+     *   3. ClearKey hex pairs are normalized and bound to the MPD's `cenc:default_KID`.
+     */
+    const tryBrowserDirect = async (forceRefresh: boolean): Promise<boolean> => {
+      if (cancelled || !videoRef.current) return false;
+      ensureNoReferrerMeta();
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 9000);
+      let candidates: DirectPlayCandidate[] = [];
+      try {
+        const q = `/api/live/direct-config?id=${encodeURIComponent(channelId)}&name=${encodeURIComponent(channelName)}${forceRefresh ? "&refresh=1" : ""}`;
+        const res = await fetch(q, { signal: ctrl.signal });
+        if (!res.ok) return false;
+        const data = (await res.json().catch(() => null)) as { candidates?: DirectPlayCandidate[] } | null;
+        if (!data || !Array.isArray(data.candidates) || data.candidates.length === 0) return false;
+        candidates = data.candidates;
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+
+      if (cancelled || !videoRef.current) return false;
+
+      const shaka = window.shaka;
+      const manifestType = shaka?.net?.NetworkingEngine?.RequestType?.MANIFEST ?? 0;
+      const segmentType = shaka?.net?.NetworkingEngine?.RequestType?.SEGMENT ?? 1;
+
+      for (const cand of candidates) {
+        if (cancelled || !videoRef.current) return false;
+
+        if (cand.container === "hls") {
+          directModeRef.current = true;
+          const signedHls = cand.cookie
+            ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
+            : cand.url;
+          startHls(signedHls, true);
+          return true;
+        }
+
+        if (!shaka) continue;
+        shaka.polyfill.installAll();
+        if (!shaka.Player.isBrowserSupported()) continue;
+        shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
+
+        const normalizedKeys: Record<string, string> = {};
+        for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
+          const kid = toHexKeyId(rawKid);
+          const k = toHexKeyId(rawK);
+          if (kid && k) normalizedKeys[kid] = k;
+        }
+
+        // Mirror TgPlayer's failover: try `{ url, cookie }` first, then `{ url, cookie: "" }`.
+        const cookieAttempts = cand.cookie ? [cand.cookie, ""] : [""];
+        for (const activeCookie of cookieAttempts) {
+          if (cancelled || !videoRef.current) return false;
+          cleanup();
+          directModeRef.current = true;
+          onContainerDetected?.("DASH");
+
+          const player = new shaka.Player();
+          shakaRef.current = player;
+          player.configure({
+            drm: {
+              ...(Object.keys(normalizedKeys).length ? { clearKeys: normalizedKeys } : {}),
+              advanced: {},
+            },
+            streaming: {
+              lowLatencyMode: true,
+              rebufferingGoal: 2,
+              bufferingGoal: 20,
+              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
+            },
+            manifest: {
+              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
+            },
+          });
+
+          const net = player.getNetworkingEngine?.();
+          if (net && activeCookie) {
+            net.registerRequestFilter((type, request) => {
+              if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
+                const u = request.uris[0];
+                if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
+                  const base = u.split("?")[0]!;
+                  request.uris[0] = `${base}?${activeCookie}`;
+                }
+              }
+            });
+          }
+
+          if (net && Object.keys(normalizedKeys).length > 0) {
+            net.registerResponseFilter((type, response) => {
+              if (type !== manifestType || !response.data) return;
+              try {
+                let xml = new TextDecoder().decode(response.data);
+                if (!/<MPD[\s>]/i.test(xml)) return;
+                const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
+                  .map((m) => toHexKeyId(m[1]!))
+                  .filter((x): x is string => Boolean(x));
+                const pairs = Object.entries(normalizedKeys);
+                if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
+                  const expanded: Record<string, string> = { ...normalizedKeys };
+                  for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
+                  player.configure({ drm: { clearKeys: expanded, advanced: {} } });
+                }
+                // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
+                xml = xml.replace(
+                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
+                  "",
+                );
+                xml = xml.replace(
+                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
+                  "",
+                );
+                response.data = new TextEncoder().encode(xml).buffer;
+              } catch {
+                // leave manifest untouched if decoding fails
+              }
+            });
+          }
+
+          try {
+            await player.attach(videoRef.current);
+            await player.load(cand.url);
+            if (cancelled) return false;
+
+            // Attach runtime error handler after initial manifest+init load succeeds.
+            player.addEventListener("error", (event) => {
+              if (cancelled) return;
+              const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
+              const code = detail?.detail?.code;
+              const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
+              const numeric = payload.find((d): d is number => typeof d === "number");
+              const status = code === 1001 ? numeric : undefined;
+              reportError(
+                status
+                  ? `Direct CDN segment returned HTTP ${status}. Press Retry to refresh token.`
+                  : `Live stream interrupted${code ? ` (Shaka ${code})` : ""}. Press Retry.`,
+              );
+            });
+
+            await syncShakaAudioAndPlay(player);
+            return true;
+          } catch {
+            // Try next cookie mode / next server candidate!
+          }
+        }
+      }
+
+      directModeRef.current = false;
+      return false;
+    };
+
     const startDash = (url: string, matched?: Array<{ kid: string; k: string }>) => {
       if (cancelled || !videoRef.current) return;
       cleanup();
+      directModeRef.current = false;
       const shaka = window.shaka;
       if (!shaka) {
-        setHasError(true);
-        setStatusMsg("DASH playback engine did not load.");
+        reportError("DASH playback engine did not load.");
         return;
       }
       onContainerDetected?.("DASH");
       try {
         shaka.polyfill.installAll();
         if (!shaka.Player.isBrowserSupported()) {
-          setHasError(true);
-          setStatusMsg("This browser cannot play protected DASH streams.");
+          reportError("This browser cannot play protected DASH streams.");
           return;
         }
         shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
@@ -358,7 +575,6 @@ export function LiveVideoSurface({
         player.configure({
           drm: {
             ...(Object.keys(clearKeys).length ? { clearKeys } : {}),
-            // Jio's CDN serves a clear-key licence; never block on a server cert.
             advanced: {},
           },
           streaming: {
@@ -375,15 +591,11 @@ export function LiveVideoSurface({
           const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
           const code = detail?.detail?.code;
           const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
-          // Shaka passes positional arguments, not named fields: BAD_HTTP_STATUS is
-          // [uris, status]. Searching for an object with `.status` never matched anything.
           const uris = payload.find((d): d is string[] => Array.isArray(d) && typeof d[0] === "string");
           const numeric = payload.find((d): d is number => typeof d === "number");
           const status = code === 1001 ? numeric : undefined;
           const firstUri = uris?.[0];
-          setHasError(true);
-          specificErrorRef.current = true;
-          setStatusMsg(
+          reportError(
             status
               ? `The CDN refused a segment (HTTP ${status}).${firstUri ? ` ${firstUri.split("?")[0]}` : ""}`
               : code === 6001 || code === 6002
@@ -396,25 +608,16 @@ export function LiveVideoSurface({
           try {
             await player.attach(videoRef.current!);
             await player.load(url);
-            if (cancelled) return;
-            const langs = player.getAudioLanguages() ?? [];
-            if (langs.length > 1) {
-              const hindi = langs.find((l) => /^hi/i.test(l));
-              if (hindi) player.selectAudioLanguage(hindi);
-            }
-            const opts: AudioTrackOption[] = langs.map((name, idx) => ({ index: idx, label: name }));
-            onAudioTracksChange?.(opts, Math.max(langs.indexOf(player.getAudioLanguage() ?? ""), 0));
-            await safePlay();
+            await syncShakaAudioAndPlay(player);
           } catch {
             if (!cancelled) {
-              setHasError(true);
-              setStatusMsg("DASH playback failed to start.");
+              const rescued = await tryBrowserDirect(true);
+              if (!rescued && !cancelled) reportError("DASH playback failed to start.");
             }
           }
         })();
       } catch {
-        setHasError(true);
-        setStatusMsg("DASH playback failed to start.");
+        reportError("DASH playback failed to start.");
       }
     };
 
@@ -452,17 +655,31 @@ export function LiveVideoSurface({
         hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
           const d = data as { fatal?: boolean } | undefined;
           if (d?.fatal && !cancelled) {
-            if (!triedDirectFallback && directUrl && url !== directUrl) {
-              startHls(directUrl, true);
+            if (!triedDirectFallback) {
+              void (async () => {
+                if (await tryBrowserDirect(false)) return;
+                if (!cancelled && directUrl && url !== directUrl) {
+                  startHls(directUrl, true);
+                  return;
+                }
+                if (!cancelled) {
+                  reportError(
+                    activeSource === "jio"
+                      ? "This JioTV stream was interrupted. Press Retry to reload it with a fresh CDN token."
+                      : activeSource === "tgtv"
+                        ? "This TG TV stream was interrupted. Press Retry to reconnect."
+                        : "Live HLS stream interrupted. Press Retry to request a fresh stream token.",
+                  );
+                }
+              })();
               return;
             }
-            setHasError(true);
-            setStatusMsg(
+            reportError(
               activeSource === "jio"
                 ? "This JioTV stream was interrupted. Press Retry to reload it with a fresh CDN token."
                 : activeSource === "tgtv"
                   ? "This TG TV stream was interrupted. Press Retry to reconnect."
-                  : "Live HLS stream interrupted. Press Retry to request a fresh maxTV token.",
+                  : "Live HLS stream interrupted. Press Retry to request a fresh stream token.",
             );
           }
         });
@@ -470,14 +687,14 @@ export function LiveVideoSurface({
         videoRef.current.src = url;
         void safePlay();
       } else {
-        setHasError(true);
-        setStatusMsg("HLS playback is not supported in this browser.");
+        reportError("HLS playback is not supported in this browser.");
       }
     };
 
     const startMpegTs = (url: string, fallbackToHls: boolean) => {
       if (cancelled || !videoRef.current) return;
       cleanup();
+      directModeRef.current = false;
       onAudioTracksChange?.([], -1);
       if (!window.mpegts || !window.mpegts.isSupported()) {
         startHls(streamUrl(".m3u8"));
@@ -499,22 +716,37 @@ export function LiveVideoSurface({
         if (cancelled) return;
         if (fallbackToHls) startHls(streamUrl(".m3u8"));
         else {
-          setHasError(true);
-          setStatusMsg("Stream interrupted. Click Retry to request a fresh maxTV link.");
+          void (async () => {
+            if (await tryBrowserDirect(false)) return;
+            if (!cancelled) reportError("Stream interrupted. Click Retry to request a fresh live link.");
+          })();
         }
       });
     };
 
     async function run() {
       specificErrorRef.current = false;
+      directModeRef.current = false;
       setHasError(false);
       setStatusMsg(`Connecting to ${channelName}…`);
       await ensurePlayerEnginesLoaded();
       if (cancelled) return;
 
+      const forceRefresh = localRetry > 0 || reloadNonce > 0;
+      const preferDirectFirst =
+        activeSource === "jio" ||
+        activeSource === "tgtv" ||
+        /^(?:jio|tg):/i.test(channelId);
+
+      // JioTV and TG TV streams must play directly from the viewer's browser IP because
+      // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
+      if (preferDirectFirst) {
+        const startedDirect = await tryBrowserDirect(forceRefresh);
+        if (startedDirect || cancelled) return;
+      }
+
       const probeCtrl = new AbortController();
       const timer = setTimeout(() => probeCtrl.abort(), 8000);
-      // DASH manifests are not MPEG-TS: ask for the container the catalogue advertised.
       const wantDash = (container || "").toLowerCase() === "dash";
       const probeExt = wantDash ? ".mpd" : ".ts";
       try {
@@ -523,13 +755,18 @@ export function LiveVideoSurface({
         if (!res.ok) {
           const j = (await res.json().catch(() => ({}))) as { error?: string };
           probeCtrl.abort();
+          // When maxTV/Cloudflare Worker proxy gets HTTP 403/502, rescue the channel immediately
+          // via Browser-Direct CDN playback matched by channel name/ID!
+          if (!cancelled) {
+            const rescued = await tryBrowserDirect(forceRefresh);
+            if (rescued || cancelled) return;
+          }
           if (!cancelled && directUrl) {
             startHls(directUrl, true);
             return;
           }
           if (!cancelled) {
-            setHasError(true);
-            setStatusMsg(j.error || `Stream unavailable (HTTP ${res.status})`);
+            reportError(j.error || `Stream unavailable (HTTP ${res.status})`);
           }
           return;
         }
@@ -542,6 +779,8 @@ export function LiveVideoSurface({
       } catch {
         clearTimeout(timer);
         if (!cancelled) {
+          const rescued = await tryBrowserDirect(forceRefresh);
+          if (rescued || cancelled) return;
           if (directUrl) startHls(directUrl, true);
           else if (wantDash) startDash(streamUrl(".mpd"));
           else startMpegTs(streamUrl(".ts"), true);

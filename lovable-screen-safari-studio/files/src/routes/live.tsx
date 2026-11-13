@@ -22,6 +22,7 @@ export const Route = createFileRoute("/live")({
   head: () => ({
     meta: [
       { title: "Live TV — Streamr" },
+      { name: "referrer", content: "no-referrer" },
       { name: "description", content: "Watch maxTV & StarShare live channels with Hindi audio & OG embed codes." },
       { property: "og:title", content: "Live TV — Streamr" },
       { property: "og:description", content: "Watch maxTV & StarShare live channels with Hindi audio & OG embed codes." },

@@ -21,6 +21,14 @@ export interface LiveChannelItem {
   mediaType?: "hls" | "dash" | "mp4";
 }
 
+export interface DirectPlayCandidate {
+  label: string;
+  url: string;
+  cookie: string;
+  clearKeys: Record<string, string>;
+  container: "dash" | "hls";
+}
+
 export interface LiveChannelDto {
   id: string;
   source: "maxtv" | "starshare" | "jio" | "tgtv";
@@ -31,7 +39,7 @@ export interface LiveChannelDto {
   embedUrl: string;
   iframeCode: string;
   streamUrl: string;
-  /** Optional direct HTTPS HLS stream URL for browser-side fallback if proxy ASN is geo-blocked. */
+  /** Optional direct HTTPS stream URL for browser-side fallback if proxy ASN is geo-blocked. */
   directUrl?: string;
   /** Present only for DRM channels; the page hands these straight to Shaka. */
   drm?: { type: "clearkey"; keys: Array<{ kid: string; k: string }> };
@@ -1375,7 +1383,28 @@ async function loadJioCached(cfg: GatewayConfig, force = false): Promise<LiveCha
     jioCache.error = null;
     return live;
   } catch (e) {
-    jioCache.error = e instanceof Error ? e.message : String(e);
+    const primaryError = e instanceof Error ? e.message : String(e);
+    // On Cloudflare Workers, allinonereborn2.online often blocks datacenter IPs (HTTP 403/415/450),
+    // whereas giotv-6op.pages.dev/jstr4web.json serves the 1,176-channel Jio catalogue over Pages CDN.
+    const gioFallback = await loadGioTvRawCached(force).catch(() => []);
+    if (gioFallback.length > 0) {
+      const mapped: LiveChannelItem[] = gioFallback.map((g) => ({
+        id: `jio:${g.id}`,
+        rawId: g.id,
+        source: "jio" as const,
+        name: g.name,
+        category: g.category || "JioTV",
+        logo: g.logo,
+        cmd: g.urls[0]!,
+        mediaType: jioMediaType(g.urls[0]!),
+        ...(g.keys.length ? { drm: { type: "clearkey" as const, keys: g.keys } } : {}),
+      }));
+      jioCache.items = mapped;
+      jioCache.fetchedAt = Date.now();
+      jioCache.error = null;
+      return mapped;
+    }
+    jioCache.error = primaryError;
     return jioCache.items;
   }
 }
@@ -1494,6 +1523,732 @@ async function loadStarshareCached(cfg: GatewayConfig, force = false): Promise<L
   }
 }
 
+// ---------- Browser-Direct GioTV / Jstr4Web + TG TV Live RPC Resolvers ----------
+//
+// Why this exists:
+// Lovable deploys `screen-safari-studio` onto Cloudflare Workers (`AS13335`). Upstream media CDNs
+// (`new.maxtv.be` media edges -> HTTP 403, `jiotvmblive.cdn.jio.com` / `jiotvpllive.cdn.jio.com` /
+// `allinonereborn2.online` -> HTTP 450/451) block Cloudflare Worker datacenter egress IPs whenever
+// video manifests or segments are proxied server-side.
+//
+// Meanwhile, `jiotvmblive.cdn.jio.com` and `jiotvpllive.cdn.jio.com` send `Access-Control-Allow-Origin: *`
+// and accept direct HTTPS requests from the viewer's own Indian residential browser IP when:
+//   1. `Referer` is suppressed (`no-referrer`),
+//   2. `__hdnea__=...` is appended to MANIFEST and SEGMENT URLs via Shaka's `registerRequestFilter`, and
+//   3. ClearKey hex pairs are configured on `shaka.Player`.
+//
+// The metadata endpoints below (`giotv-6op.pages.dev` and `livetgtv.lovable.app/_serverFn/...`) answer
+// `200 OK` even from Cloudflare Worker datacenter IPs, supplying fresh tokens + ClearKeys in ~150ms.
+
+const BROWSER_METADATA_UA =
+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
+const GIOTV_SITE = "https://giotv-6op.pages.dev";
+const GIOTV_CATALOGUE_URLS = [
+  "https://giotv-6op.pages.dev/jstr4web.json",
+  "https://jjtvxweb.pages.dev/jstr4web.json",
+];
+const GIOTV_REGULAR_COOKIES_URL = "https://allinonereborn2.online/jstrweb2/cookies.json";
+const GIOTV_STAR_COOKIES_URL = "https://giotv-6op.pages.dev/cookie.json";
+const TG_LIVE_SITE = "https://livetgtv.lovable.app";
+const TG_INITIAL_SERVER_FN = "211ba18c9fcbaf4e68e5bb262905070b60b7ed4ffe802d16fbbed00150f1c024";
+
+interface GioTvChannelRecord {
+  id: string;
+  name: string;
+  category: string;
+  logo: string;
+  urls: string[];
+  keys: ClearKeyPair[];
+}
+
+const gioTvRawCache: { items: GioTvChannelRecord[]; fetchedAt: number } = {
+  items: [],
+  fetchedAt: 0,
+};
+
+const gioCookieCache: {
+  regular: { value: string; until: number } | null;
+  starBody: { raw: string; until: number } | null;
+} = {
+  regular: null,
+  starBody: null,
+};
+
+let tgVerifiedFnId: string = TG_INITIAL_SERVER_FN;
+let tgDiscoveredAt = 0;
+const tgChannelCache = new Map<string, { until: number; candidates: DirectPlayCandidate[] }>();
+
+function extractHdneaToken(raw: string | undefined | null): string {
+  if (!raw) return "";
+  const m = /(?:^|[?;&\s])(__hdnea__=[^;\s&"'<>]+)/.exec(String(raw).trim());
+  return m?.[1] ?? "";
+}
+
+function hdneaExpiryMs(tokenOrCookie: string): number | null {
+  const tok = extractHdneaToken(tokenOrCookie) || tokenOrCookie;
+  if (!tok) return null;
+  try {
+    const decoded = decodeURIComponent(tok);
+    const m = /(?:^|~)exp=(\d+)(?:~|$)/.exec(decoded);
+    if (!m?.[1]) return null;
+    const sec = Number.parseInt(m[1], 10);
+    return Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickFreshestHdnea(values: string[]): string {
+  const now = Date.now();
+  const candidates = values.map((v) => extractHdneaToken(v)).filter(Boolean);
+  if (candidates.length === 0) return "";
+  candidates.sort((a, b) => {
+    const expA = hdneaExpiryMs(a);
+    const expB = hdneaExpiryMs(b);
+    const rank = (exp: number | null) => (exp === null ? 1 : exp > now + 10_000 ? 2 : 0);
+    const rDiff = rank(expB) - rank(expA);
+    if (rDiff !== 0) return rDiff;
+    return (expB ?? Number.MIN_SAFE_INTEGER) - (expA ?? Number.MIN_SAFE_INTEGER);
+  });
+  return candidates[0]!;
+}
+
+function toHex16(raw: string | undefined | null): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  const cleanUuid = v.replace(/-/g, "");
+  if (/^[0-9a-fA-F]{32}$/.test(cleanUuid)) return cleanUuid.toLowerCase();
+  const norm = v.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+  if (!/^[A-Za-z0-9+/]+$/.test(norm)) return null;
+  const padded = norm + "===".slice((norm.length + 3) % 4);
+  try {
+    const bin = atob(padded);
+    if (bin.length !== 16) return null;
+    let hex = "";
+    for (let i = 0; i < 16; i++) hex += bin.charCodeAt(i).toString(16).padStart(2, "0");
+    return hex;
+  } catch {
+    return null;
+  }
+}
+
+function pairsToHexRecord(pairs: ClearKeyPair[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of pairs) {
+    const kid = toHex16(p.kid);
+    const k = toHex16(p.k);
+    if (kid && k) out[kid] = k;
+  }
+  return out;
+}
+
+function parseGioTvCatalogue(body: string): GioTvChannelRecord[] {
+  const trimmed = body.replace(/^\uFEFF/, "").trim();
+  if (!trimmed || trimmed.startsWith("<")) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: GioTvChannelRecord[] = [];
+  const seen = new Set<string>();
+  for (const raw of parsed) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const id = String(item["id"] ?? item["channel_id"] ?? "").trim();
+    const name = String(item["name"] ?? item["channel_name"] ?? "").trim();
+    if (!id || !/^\d{1,10}$/.test(id) || !name || seen.has(id)) continue;
+
+    const urls: string[] = [];
+    for (const field of ["url", "url1", "url2", "url3"]) {
+      const val = item[field];
+      if (typeof val === "string" && /^https?:\/\//i.test(val.trim())) {
+        const normalized = val.trim().replace("bpk-tv//", "bpk-tv/");
+        if (!urls.includes(normalized)) urls.push(normalized);
+      }
+    }
+    if (urls.length === 0) continue;
+
+    const keys: ClearKeyPair[] = [];
+    if (Array.isArray(item["keys"])) {
+      for (const kp of item["keys"] as unknown[]) {
+        if (!kp || typeof kp !== "object") continue;
+        const rec = kp as Record<string, unknown>;
+        const kid = toHex16(String(rec["keyId"] ?? rec["kid"] ?? ""));
+        const k = toHex16(String(rec["key"] ?? rec["k"] ?? ""));
+        if (kid && k) keys.push({ kid, k });
+      }
+    }
+    if (keys.length === 0) {
+      const kid = toHex16(String(item["keyId"] ?? item["kid"] ?? ""));
+      const k = toHex16(String(item["key"] ?? item["k"] ?? ""));
+      if (kid && k) keys.push({ kid, k });
+    }
+
+    seen.add(id);
+    out.push({
+      id,
+      name,
+      category: String(item["category"] ?? "Live TV").trim() || "Live TV",
+      logo: String(item["logo"] ?? "").trim(),
+      urls,
+      keys,
+    });
+  }
+  return out;
+}
+
+async function loadGioTvRawCached(force = false): Promise<GioTvChannelRecord[]> {
+  if (!force && gioTvRawCache.items.length > 0 && Date.now() - gioTvRawCache.fetchedAt < CATALOGUE_TTL_MS) {
+    return gioTvRawCache.items;
+  }
+  for (const candidateUrl of GIOTV_CATALOGUE_URLS) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 9000);
+    try {
+      const res = await fetch(candidateUrl, {
+        headers: {
+          "User-Agent": BROWSER_METADATA_UA,
+          Accept: "application/json, */*",
+          "Cache-Control": "no-cache",
+        },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) continue;
+      const text = await res.text();
+      const parsed = parseGioTvCatalogue(text);
+      if (parsed.length > 0) {
+        gioTvRawCache.items = parsed;
+        gioTvRawCache.fetchedAt = Date.now();
+        return parsed;
+      }
+    } catch {
+      // try next mirror
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return gioTvRawCache.items;
+}
+
+function isJioStarPlUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase() === "jiotvpllive.cdn.jio.com";
+  } catch {
+    return false;
+  }
+}
+
+async function fetchGioRegularCookie(force = false): Promise<string> {
+  if (!force && gioCookieCache.regular && gioCookieCache.regular.until > Date.now()) {
+    return gioCookieCache.regular.value;
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(GIOTV_REGULAR_COOKIES_URL, {
+      headers: { "User-Agent": BROWSER_METADATA_UA, Accept: "application/json, */*", "Cache-Control": "no-cache" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return gioCookieCache.regular?.value ?? "";
+    const data = (await res.json()) as unknown;
+    const rawCookies: string[] = [];
+    if (Array.isArray(data)) {
+      for (const row of data) {
+        if (row && typeof row === "object" && typeof (row as Record<string, unknown>)["cookie"] === "string") {
+          rawCookies.push((row as Record<string, string>)["cookie"]!);
+        }
+      }
+    } else if (data && typeof data === "object" && typeof (data as Record<string, unknown>)["cookie"] === "string") {
+      rawCookies.push((data as Record<string, string>)["cookie"]!);
+    }
+    const chosen = pickFreshestHdnea(rawCookies);
+    if (chosen) {
+      const exp = hdneaExpiryMs(chosen);
+      const until = Math.min(Date.now() + 60_000, exp ? exp - 10_000 : Date.now() + 60_000);
+      if (until > Date.now()) gioCookieCache.regular = { value: chosen, until };
+    }
+    return chosen;
+  } catch {
+    return gioCookieCache.regular?.value ?? "";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchGioStarCookieForChannel(channelId: string, force = false): Promise<string> {
+  let raw = !force && gioCookieCache.starBody && gioCookieCache.starBody.until > Date.now()
+    ? gioCookieCache.starBody.raw
+    : "";
+  if (!raw) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 7000);
+    try {
+      const res = await fetch(GIOTV_STAR_COOKIES_URL, {
+        headers: {
+          "User-Agent": BROWSER_METADATA_UA,
+          Origin: GIOTV_SITE,
+          Accept: "application/json, */*",
+          "Cache-Control": "no-cache",
+        },
+        signal: ctrl.signal,
+      });
+      if (res.ok) {
+        raw = await res.text();
+        gioCookieCache.starBody = { raw, until: Date.now() + 45_000 };
+      }
+    } catch {
+      raw = gioCookieCache.starBody?.raw ?? "";
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (!raw) return "";
+  try {
+    const root = JSON.parse(raw) as Record<string, unknown>;
+    const found: string[] = [];
+    for (const bucket of ["successful_results", "failed_results"]) {
+      const arr = root[bucket];
+      if (!Array.isArray(arr)) continue;
+      for (const entry of arr) {
+        if (!entry || typeof entry !== "object") continue;
+        const item = entry as Record<string, unknown>;
+        if (String(item["channel_id"] ?? "") !== String(channelId)) continue;
+        const errDetails = item["error_details"] as Record<string, unknown> | undefined;
+        const finalUrl = String(errDetails?.["final_url"] ?? item["final_url"] ?? "");
+        const tok = extractHdneaToken(finalUrl);
+        if (tok) found.push(tok);
+      }
+    }
+    return pickFreshestHdnea(found);
+  } catch {
+    return "";
+  }
+}
+
+/** Decode TanStack Start Seroval / `application/x-tss-framed` RPC payloads (mirrors `TgProtocol.kt`). */
+function decodeTgSerovalNode(node: unknown, refs: Map<number, unknown>, depth = 0): unknown {
+  if (depth > 48 || node === null || node === undefined) return node;
+  if (Array.isArray(node)) return node.map((x) => decodeTgSerovalNode(x, refs, depth + 1));
+  if (typeof node !== "object") return node;
+  const obj = node as Record<string, unknown>;
+  const tag = obj["t"];
+  if (tag && typeof tag === "object" && "f" in obj) return decodeTgSerovalNode(tag, refs, depth + 1);
+  if (typeof tag !== "number") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = decodeTgSerovalNode(v, refs, depth + 1);
+    return out;
+  }
+  const id = typeof obj["i"] === "number" ? (obj["i"] as number) : undefined;
+  switch (tag) {
+    case 0:
+    case 1:
+    case 3:
+      return obj["s"];
+    case 2:
+      return obj["s"] === 2 ? true : obj["s"] === 3 ? false : null;
+    case 4:
+      return id !== undefined ? (refs.get(id) ?? null) : null;
+    case 9: {
+      const arr: unknown[] = [];
+      if (id !== undefined) refs.set(id, arr);
+      const items = Array.isArray(obj["a"]) ? (obj["a"] as unknown[]) : [];
+      for (const it of items) arr.push(decodeTgSerovalNode(it, refs, depth + 1));
+      return arr;
+    }
+    case 10:
+    case 11: {
+      const mapObj: Record<string, unknown> = {};
+      if (id !== undefined) refs.set(id, mapObj);
+      const props = (obj["p"] && typeof obj["p"] === "object" ? obj["p"] : {}) as Record<string, unknown>;
+      const keys = Array.isArray(props["k"]) ? (props["k"] as unknown[]) : [];
+      const vals = Array.isArray(props["v"]) ? (props["v"] as unknown[]) : [];
+      const len = Math.min(keys.length, vals.length);
+      for (let i = 0; i < len; i++) {
+        const k = typeof keys[i] === "object" ? String(decodeTgSerovalNode(keys[i], refs, depth + 1)) : String(keys[i]);
+        mapObj[k] = decodeTgSerovalNode(vals[i], refs, depth + 1);
+      }
+      return mapObj;
+    }
+    case 12:
+      return obj["s"] === true || obj["s"] === 1 ? decodeTgSerovalNode(obj["f"], refs, depth + 1) : null;
+    case 21:
+      return decodeTgSerovalNode(obj["f"], refs, depth + 1);
+    case 23: {
+      const a = Array.isArray(obj["a"]) ? (obj["a"] as unknown[]) : [];
+      return decodeTgSerovalNode(a[1], refs, depth + 1);
+    }
+    default:
+      return null;
+  }
+}
+
+function parseTgFramedOrJsonRecords(bytes: Uint8Array, contentType: string): unknown[] {
+  const ct = contentType.split(";")[0]!.trim().toLowerCase();
+  if (ct === "application/x-tss-framed") {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const dec = new TextDecoder();
+    const out: unknown[] = [];
+    let pos = 0;
+    while (pos + 9 <= bytes.byteLength) {
+      const kind = view.getUint8(pos);
+      const stream = view.getInt32(pos + 1, false);
+      const length = view.getInt32(pos + 5, false);
+      pos += 9;
+      if (length < 0 || pos + length > bytes.byteLength) break;
+      if (kind === 0 && stream === 0) {
+        try {
+          out.push(JSON.parse(dec.decode(bytes.subarray(pos, pos + length))));
+        } catch {
+          // ignore malformed frame
+        }
+      }
+      pos += length;
+    }
+    return out;
+  }
+  const text = new TextDecoder().decode(bytes).replace(/^\uFEFF/, "").trim();
+  if (!text) return [];
+  try {
+    return [JSON.parse(text)];
+  } catch {
+    const out: unknown[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      const t = line.trim();
+      if (t.startsWith("{") || t.startsWith("[")) {
+        try {
+          out.push(JSON.parse(t));
+        } catch {
+          // ignore line
+        }
+      }
+    }
+    return out;
+  }
+}
+
+async function discoverTgServerFn(force = false): Promise<string[]> {
+  if (!force && tgVerifiedFnId && Date.now() - tgDiscoveredAt < 10 * 60_000) {
+    return [tgVerifiedFnId];
+  }
+  const found = new Set<string>();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 7000);
+  try {
+    const pageUrl = `${TG_LIVE_SITE}/watch/892`;
+    const pageRes = await fetch(pageUrl, {
+      headers: { "User-Agent": BROWSER_METADATA_UA, Accept: "text/html,*/*" },
+      signal: ctrl.signal,
+    });
+    if (pageRes.ok) {
+      const html = await pageRes.text();
+      const scriptMatches = [...html.matchAll(/["'`]((?:\/)?assets\/[^"'`<>\s]+\.m?js)["'`]/g)].map((m) =>
+        new URL(m[1]!, `${TG_LIVE_SITE}/`).toString(),
+      );
+      scriptMatches.sort((a, b) => (a.includes("servers") ? -1 : 1) - (b.includes("servers") ? -1 : 1));
+      for (const scriptUrl of scriptMatches.slice(0, 5)) {
+        const sRes = await fetch(scriptUrl, {
+          headers: { "User-Agent": BROWSER_METADATA_UA, Referer: pageUrl },
+          signal: ctrl.signal,
+        }).catch(() => null);
+        if (!sRes || !sRes.ok) continue;
+        const code = await sRes.text();
+        for (const m of code.matchAll(/_serverFn\/([A-Za-z0-9_-]{16,128})/g)) found.add(m[1]!);
+        for (const m of code.matchAll(/\(\s*["'`]([a-f0-9]{64})["'`]\s*\)/gi)) found.add(m[1]!);
+        if (found.size > 0 && scriptUrl.includes("servers")) break;
+      }
+    }
+  } catch {
+    // keep fallback id
+  } finally {
+    clearTimeout(timer);
+  }
+  if (tgVerifiedFnId) found.add(tgVerifiedFnId);
+  found.add(TG_INITIAL_SERVER_FN);
+  tgDiscoveredAt = Date.now();
+  return [...found];
+}
+
+function extractTgCandidatesFromConfig(decoded: unknown): DirectPlayCandidate[] {
+  if (!decoded || typeof decoded !== "object") return [];
+  const root = decoded as Record<string, unknown>;
+  const cfg = (root["result"] ?? root["data"] ?? root) as Record<string, unknown>;
+  if (!cfg || typeof cfg !== "object") return [];
+
+  const extractClearKeys = (srv: Record<string, unknown>, fallbackKeys: Record<string, string>): Record<string, string> => {
+    const out: Record<string, string> = { ...fallbackKeys };
+    const ck = srv["clearKeys"];
+    if (ck && typeof ck === "object" && !Array.isArray(ck)) {
+      for (const [rawKid, rawK] of Object.entries(ck as Record<string, unknown>)) {
+        const kid = toHex16(rawKid);
+        const k = toHex16(String(rawK ?? ""));
+        if (kid && k) out[kid] = k;
+      }
+    }
+    const kidSingle = toHex16(String(srv["keyId"] ?? srv["kid"] ?? ""));
+    const kSingle = toHex16(String(srv["key"] ?? srv["k"] ?? ""));
+    if (kidSingle && kSingle) out[kidSingle] = kSingle;
+    return out;
+  };
+
+  const baseKeys = extractClearKeys(cfg, {});
+  const servers: Array<{ label: string; node: Record<string, unknown> }> = [];
+  if (Array.isArray(cfg["urls"]) && cfg["urls"].length > 0) {
+    servers.push({ label: "TG Live · Server 1", node: cfg });
+  }
+  if (Array.isArray(cfg["backups"])) {
+    (cfg["backups"] as unknown[]).forEach((b, idx) => {
+      if (b && typeof b === "object") {
+        servers.push({ label: `TG Live · Server ${servers.length + 1 || idx + 2}`, node: b as Record<string, unknown> });
+      }
+    });
+  }
+
+  const out: DirectPlayCandidate[] = [];
+  for (const srv of servers) {
+    const urls = Array.isArray(srv.node["urls"]) ? (srv.node["urls"] as unknown[]) : [];
+    const cookie = extractHdneaToken(String(srv.node["cookie"] ?? cfg["cookie"] ?? ""));
+    const clearKeys = extractClearKeys(srv.node, baseKeys);
+    for (const u of urls) {
+      if (typeof u !== "string" || !/^https?:\/\//i.test(u.trim())) continue;
+      const cleanUrl = u.trim().replace("bpk-tv//", "bpk-tv/");
+      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(cleanUrl) ? "hls" : "dash";
+      out.push({ label: srv.label, url: cleanUrl, cookie, clearKeys, container });
+    }
+  }
+  return out;
+}
+
+async function resolveTgRpcCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
+  if (!/^\d{1,10}$/.test(numericId)) return [];
+  if (!force) {
+    const cached = tgChannelCache.get(numericId);
+    if (cached && cached.until > Date.now()) return cached.candidates;
+  }
+
+  const callFn = async (fnId: string): Promise<DirectPlayCandidate[]> => {
+    const inner = {
+      t: 10,
+      i: 0,
+      p: { k: ["data"], v: [{ t: 10, i: 1, p: { k: ["id"], v: [{ t: 1, s: numericId }] }, o: 0 }] },
+      o: 0,
+    };
+    const payload = encodeURIComponent(JSON.stringify({ t: inner, f: 127, m: [] }));
+    const rpcUrl = `${TG_LIVE_SITE}/_serverFn/${fnId}?payload=${payload}${force ? `&_aktv=${Date.now()}` : ""}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6500);
+    try {
+      const res = await fetch(rpcUrl, {
+        headers: {
+          "User-Agent": BROWSER_METADATA_UA,
+          Origin: TG_LIVE_SITE,
+          Referer: `${TG_LIVE_SITE}/watch/${numericId}`,
+          Accept: "application/x-tss-framed, application/x-ndjson, application/json",
+          "x-tsr-serverfn": "true",
+          "Cache-Control": "no-cache",
+        },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) return [];
+      const buf = new Uint8Array(await res.arrayBuffer());
+      const records = parseTgFramedOrJsonRecords(buf, res.headers.get("content-type") || "");
+      const refs = new Map<number, unknown>();
+      const out: DirectPlayCandidate[] = [];
+      for (const rec of records) {
+        const decoded = decodeTgSerovalNode(rec, refs);
+        out.push(...extractTgCandidatesFromConfig(decoded));
+      }
+      return out;
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let result = await callFn(tgVerifiedFnId);
+  if (result.length === 0) {
+    const discovered = await discoverTgServerFn(true);
+    for (const fnId of discovered) {
+      if (fnId === tgVerifiedFnId && !force) continue;
+      result = await callFn(fnId);
+      if (result.length > 0) {
+        tgVerifiedFnId = fnId;
+        break;
+      }
+    }
+  }
+
+  if (result.length > 0) {
+    const expiries = result.map((c) => hdneaExpiryMs(c.cookie || c.url)).filter((x): x is number => x !== null);
+    const minExp = expiries.length > 0 ? Math.min(...expiries) : Date.now() + 30_000;
+    const until = Math.min(Date.now() + 30_000, minExp - 10_000);
+    if (until > Date.now()) tgChannelCache.set(numericId, { until, candidates: result });
+  }
+  return result;
+}
+
+function normalizeChannelMatchTokens(rawName: string): { base: string; noQuality: string; numbers: string[]; tokens: string[] } {
+  let s = rawName
+    .toLowerCase()
+    .replace(/^[|\[(\{\s]*(?:in|ind|india|indian|vip|hindi|uk|us)[|\])\}\s:\-–—]+/gi, "")
+    .replace(/\b(?:sony\s+sports\s+ten)\b/g, "sony ten")
+    .replace(/\b(?:sony\s+set)\b/g, "set")
+    .replace(/\b(?:star\s+sports\s+hd\s*(\d+))\b/g, "star sports $1 hd")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  s = s.replace(/\s+/g, " ");
+  const noQuality = s.replace(/\b(?:hd|sd|fhd|uhd|4k|live|tv|india)\b/g, " ").replace(/\s+/g, " ").trim();
+  const numbers = [...s.matchAll(/\b\d+\b/g)].map((m) => m[0]!);
+  const tokens = noQuality.split(" ").filter((t) => t.length > 0);
+  return { base: s, noQuality, numbers, tokens };
+}
+
+function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channelName: string): GioTvChannelRecord | null {
+  const numericId = rawId.replace(/^(?:jio|tg|st|xt):/i, "").trim();
+  // Direct numeric V1/Jio ID match ONLY when the channel actually came from jio/tgtv (not st:1001 maxTV IDs!)
+  if (/^(?:jio|tg):/i.test(rawId) || (!rawId.includes(":") && /^\d+$/.test(rawId))) {
+    const byId = records.find((r) => r.id === numericId);
+    if (byId) return byId;
+  }
+  if (!channelName.trim()) return null;
+
+  const target = normalizeChannelMatchTokens(channelName);
+  const wantsHd = /\bhd\b/i.test(channelName);
+  let best: { rec: GioTvChannelRecord; score: number } | null = null;
+
+  for (const rec of records) {
+    const cand = normalizeChannelMatchTokens(rec.name);
+    // Channel numbers (1, 2, 3, 18, 24, etc.) must agree so Star Sports 1 never matches Star Sports 2
+    if (target.numbers.join(",") !== cand.numbers.join(",")) continue;
+    let score = 0;
+    if (cand.base === target.base) score = 100;
+    else if (cand.noQuality && cand.noQuality === target.noQuality) {
+      const candHd = /\bhd\b/i.test(rec.name);
+      score = candHd === wantsHd ? 95 : 88;
+    } else if (target.tokens.length > 0 && cand.tokens.length > 0) {
+      const tSet = new Set(target.tokens);
+      const cSet = new Set(cand.tokens);
+      let overlap = 0;
+      for (const tok of tSet) if (cSet.has(tok)) overlap += 1;
+      const union = new Set([...tSet, ...cSet]).size;
+      const jaccard = union > 0 ? overlap / union : 0;
+      if (jaccard >= 0.75) {
+        score = Math.round(jaccard * 85) + (/\bhd\b/i.test(rec.name) === wantsHd ? 3 : 0);
+      }
+    }
+    if (score > 0 && (!best || score > best.score)) {
+      best = { rec, score };
+    }
+  }
+  return best ? best.rec : null;
+}
+
+async function resolveDirectPlayCandidates(
+  cfg: GatewayConfig,
+  rawId: string,
+  channelName: string,
+  force = false,
+): Promise<{ matchedId: string | null; matchedName: string | null; candidates: DirectPlayCandidate[] }> {
+  const gioRecords = await loadGioTvRawCached(force);
+  const matchedGio = findBestGioTvMatch(gioRecords, rawId, channelName);
+  const cleanPrefixId = rawId.replace(/^(?:jio|tg):/i, "").trim();
+  const v1NumericId =
+    matchedGio?.id ?? (/^(?:jio|tg):/i.test(rawId) && /^\d+$/.test(cleanPrefixId) ? cleanPrefixId : null);
+
+  const candidates: DirectPlayCandidate[] = [];
+  const seenKey = new Set<string>();
+  const pushCandidate = (c: DirectPlayCandidate) => {
+    const k = `${c.url}|${c.cookie}`;
+    if (seenKey.has(k)) return;
+    seenKey.add(k);
+    candidates.push(c);
+  };
+
+  // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
+  const [tgCandidates, regularCookie, starCookie] = await Promise.all([
+    v1NumericId ? resolveTgRpcCandidates(v1NumericId, force) : Promise.resolve([] as DirectPlayCandidate[]),
+    matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
+    matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
+      ? fetchGioStarCookieForChannel(matchedGio.id, force)
+      : Promise.resolve(""),
+  ]);
+
+  const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
+
+  for (const tc of tgCandidates) {
+    pushCandidate({
+      ...tc,
+      clearKeys: Object.keys(tc.clearKeys).length > 0 ? tc.clearKeys : gioKeys,
+    });
+  }
+
+  // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
+  if (matchedGio) {
+    for (const rawUrl of matchedGio.urls) {
+      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
+      const embeddedToken = extractHdneaToken(rawUrl);
+      const freshCookie = isJioStarPlUrl(rawUrl) ? starCookie : regularCookie;
+      const baseCleanUrl = rawUrl.split("?")[0]!;
+      if (freshCookie) {
+        pushCandidate({
+          label: "GioTV Direct · Fresh Token",
+          url: baseCleanUrl,
+          cookie: freshCookie,
+          clearKeys: gioKeys,
+          container,
+        });
+      }
+      if (embeddedToken) {
+        pushCandidate({
+          label: "GioTV Direct · Embedded Token",
+          url: baseCleanUrl,
+          cookie: embeddedToken,
+          clearKeys: gioKeys,
+          container,
+        });
+      }
+      if (!freshCookie && !embeddedToken) {
+        pushCandidate({
+          label: "GioTV Direct",
+          url: rawUrl,
+          cookie: "",
+          clearKeys: gioKeys,
+          container,
+        });
+      }
+    }
+  }
+
+  // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
+  if (candidates.length === 0) {
+    const pool = rawId.startsWith("tg:")
+      ? await loadTgTvCached(cfg, false)
+      : rawId.startsWith("jio:")
+        ? await loadJioCached(cfg, false)
+        : [];
+    const ch = pool.find((c) => c.id === rawId || c.rawId === rawId);
+    if (ch?.cmd && /^https:\/\//i.test(ch.cmd) && !ch.cmd.includes("allinonereborn")) {
+      pushCandidate({
+        label: "Playlist Direct",
+        url: ch.cmd,
+        cookie: extractHdneaToken(ch.cookie),
+        clearKeys: ch.drm?.keys ? pairsToHexRecord(ch.drm.keys) : {},
+        container: ch.mediaType === "hls" ? "hls" : "dash",
+      });
+    }
+  }
+
+  return {
+    matchedId: v1NumericId,
+    matchedName: matchedGio?.name ?? (channelName || null),
+    candidates,
+  };
+}
+
 const tgtvCache: { items: LiveChannelItem[]; fetchedAt: number; error: string | null } = {
   items: [],
   fetchedAt: 0,
@@ -1501,6 +2256,23 @@ const tgtvCache: { items: LiveChannelItem[]; fetchedAt: number; error: string | 
 };
 
 async function fetchTgTvCatalogue(cfg: GatewayConfig): Promise<LiveChannelItem[]> {
+  // Primary: GioTV / TG V1 1,176-channel JSON catalogue (works on Cloudflare Workers with full ClearKeys).
+  const gio = await loadGioTvRawCached(false);
+  if (gio.length > 0) {
+    return gio.map((g) => ({
+      id: `tg:${g.id}`,
+      rawId: g.id,
+      source: "tgtv" as const,
+      name: g.name,
+      category: g.category || "TG TV",
+      logo: g.logo,
+      cmd: g.urls[0]!,
+      mediaType: jioMediaType(g.urls[0]!),
+      ...(g.keys.length ? { drm: { type: "clearkey" as const, keys: g.keys } } : {}),
+    }));
+  }
+
+  // Fallback: M3U playlist at `cfg.tgtvPlaylistUrl`
   if (!cfg.tgtvPlaylistUrl) return [];
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 10000);
@@ -2451,6 +3223,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
   <title>${ch.name.replace(/[<>&"]/g, "")} · STREAMR Live</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -2588,9 +3361,77 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
       Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
       mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
     }
+    async function tryDirectPlay() {
+      try {
+        const dr = await fetch("/api/live/direct-config?id=" + encodeURIComponent(ch.id) + "&name=" + encodeURIComponent(ch.name || ""));
+        if (!dr.ok) return false;
+        const dd = await dr.json().catch(() => ({}));
+        const cands = Array.isArray(dd.candidates) ? dd.candidates : [];
+        if (!cands.length || !window.shaka) return false;
+        shaka.polyfill.installAll();
+        if (!shaka.Player.isBrowserSupported()) return false;
+        if (shaka.log && shaka.LogLevel) shaka.log.setLevel(shaka.LogLevel.NONE);
+        for (let idx = 0; idx < cands.length; idx++) {
+          const cand = cands[idx];
+          if (cand.container === "hls") { startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : "")); return true; }
+          const attempts = cand.cookie ? [cand.cookie, ""] : [""];
+          for (let a = 0; a < attempts.length; a++) {
+            clean();
+            sp = new shaka.Player();
+            const activeCookie = attempts[a];
+            const ck = cand.clearKeys || {};
+            sp.configure({
+              drm: Object.keys(ck).length ? { clearKeys: ck } : {},
+              streaming: { lowLatencyMode: true, rebufferingGoal: 2, bufferingGoal: 20, retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } },
+              manifest: { retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } }
+            });
+            const net = sp.getNetworkingEngine && sp.getNetworkingEngine();
+            if (net && activeCookie) {
+              net.registerRequestFilter(function (type, req) {
+                if ((type === 0 || type === 1) && req.uris && req.uris[0]) {
+                  const u = req.uris[0];
+                  if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
+                    req.uris[0] = u.split("?")[0] + "?" + activeCookie;
+                  }
+                }
+              });
+            }
+            if (net && Object.keys(ck).length) {
+              net.registerResponseFilter(function (type, resp) {
+                if (type !== 0 || !resp.data) return;
+                try {
+                  let xml = new TextDecoder().decode(resp.data);
+                  if (!/<MPD[\s>]/i.test(xml)) return;
+                  const kids = Array.from(xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)).map(function (m) { return m[1].replace(/-/g, "").toLowerCase(); });
+                  const ckEntries = Object.entries(ck);
+                  if (ckEntries.length === 1 && kids.length > 0 && !ck[kids[0]]) {
+                    const extra = Object.assign({}, ck);
+                    kids.forEach(function (kHex) { extra[kHex] = ckEntries[0][1]; });
+                    sp.configure({ drm: { clearKeys: extra } });
+                  }
+                  xml = xml.replace(/<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi, "");
+                  xml = xml.replace(/<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi, "");
+                  resp.data = new TextEncoder().encode(xml).buffer;
+                } catch {}
+              });
+            }
+            try {
+              await sp.attach(v);
+              await sp.load(cand.url);
+              v.play().catch(function () { v.muted = true; mu.textContent = "Unmute"; v.play().catch(function () {}); });
+              return true;
+            } catch {}
+          }
+        }
+      } catch {}
+      return false;
+    }
     async function boot() {
       clean(); ov.classList.remove("hide"); rt.style.display = "none"; st.textContent = "Connecting to " + ch.name + "…";
       armWatchdog();
+      if (ch.source === "jio" || ch.source === "tgtv" || /^(?:jio|tg):/i.test(String(ch.id || ""))) {
+        if (await tryDirectPlay()) return;
+      }
       // Ask for the container the catalogue advertised. Probing ".ts" unconditionally
       // made every DASH channel look like MPEG-TS, so the embed could never play one.
       const wantDash = String(ch.container || "").toLowerCase() === "dash";
@@ -2600,6 +3441,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
         const r = await fetch(sUrl(probeExt, true), { signal: c.signal }); clearTimeout(tm);
         if (!r.ok) {
           const j = await r.json().catch(() => ({})); c.abort();
+          if (await tryDirectPlay()) return;
           if (ch.directUrl) { startHls(ch.directUrl); return; }
           st.textContent = j.error || ("HTTP " + r.status); rt.style.display = "inline-block"; return;
         }
@@ -2607,7 +3449,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
         if (kind === "dash") startDash(sUrl(".mpd"));
         else if (kind === "hls") startHls(sUrl(".m3u8"));
         else startTs(sUrl(".ts"), true);
-      } catch { clearTimeout(tm); if (wantDash) startDash(sUrl(".mpd")); else startTs(sUrl(".ts"), true); }
+      } catch { clearTimeout(tm); if (await tryDirectPlay()) return; if (wantDash) startDash(sUrl(".mpd")); else startTs(sUrl(".ts"), true); }
     }
     function hideIfPlaying() {
       if ((v.videoWidth > 0 && v.videoHeight > 0 && !v.paused) || (!v.paused && v.currentTime > 0.6)) {
@@ -2676,6 +3518,7 @@ function toDto(ch: LiveChannelItem, publicOrigin: string): LiveChannelDto {
   const embedUrl = `${publicOrigin}/embed/${enc}`;
   const isDirectHttpsHls =
     ch.source === "tgtv" &&
+    ch.mediaType === "hls" &&
     typeof ch.cmd === "string" &&
     /^https:\/\//i.test(ch.cmd) &&
     !ch.cookie &&
@@ -2763,6 +3606,27 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
     return new Response(renderWidgetSdkJs(), {
       status: 200,
       headers: corsEmbedHeaders({ "Content-Type": "application/javascript; charset=utf-8" }),
+    });
+  }
+
+  if (path === "/api/live/direct-config") {
+    const rawId = (url.searchParams.get("id") || "").trim();
+    let channelName = (url.searchParams.get("name") || "").trim();
+    const force = url.searchParams.get("refresh") === "1";
+
+    if (!channelName && rawId) {
+      const pool = await getChannelsBySource(cfg, "all", false);
+      const hit = pool.find((c) => c.id === rawId || c.rawId === rawId);
+      if (hit) channelName = hit.name;
+    }
+
+    const resolved = await resolveDirectPlayCandidates(cfg, rawId, channelName, force);
+    return jsonResponse(200, {
+      ok: true,
+      channelId: rawId,
+      matchedId: resolved.matchedId,
+      matchedName: resolved.matchedName,
+      candidates: resolved.candidates,
     });
   }
 
@@ -3321,12 +4185,18 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
 
     try {
       const resolved = await resolveMaxtvLink(cfg, ch.cmd || "");
+      const acct = stalkerAccount(cfg);
+      const magCookie = `mac=${encodeURIComponent(acct.mac)}; stb_lang=en; timezone=Europe%2FLondon`;
       return await proxyMediaStream(
         resolved,
         "mag",
         publicOrigin,
         cfg.proxySecret,
-        undefined,
+        {
+          "User-Agent": MAG_USER_AGENT,
+          Cookie: magCookie,
+          Referer: `${acct.portal.replace(/\/+$/, "")}/`,
+        },
         undefined,
         request.headers.get("range"),
         { isProbe, handoffId: ch.id },

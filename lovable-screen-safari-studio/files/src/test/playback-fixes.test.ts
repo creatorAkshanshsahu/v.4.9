@@ -201,3 +201,163 @@ https://cdn.tgtv.example/live/ss1h/index.m3u8
     expect(json.channels[0]!.directUrl).toBe("https://cdn.tgtv.example/live/ss1h/index.m3u8");
   });
 });
+
+describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare Worker ASN bypass", () => {
+  const GIO_CATALOGUE = JSON.stringify([
+    {
+      id: "892",
+      name: "Sony SAB HD",
+      category: "Entertainment",
+      logo: "https://cdn.example/sab.png",
+      url: "https://jiotvmblive.cdn.jio.com/bpk-tv//Sony_SAB_HD_MOB/WDVLive/index.mpd",
+      keys: [{ keyId: "400131994b445d8c8817202248760fda", key: "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" }],
+    },
+    {
+      id: "165",
+      name: "Star Sports 1 Hindi HD",
+      category: "Sports",
+      logo: "https://cdn.example/ss1h.png",
+      url: "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/index.mpd",
+      keyId: "a8e437645c175bc29ab021807569e5f9",
+      key: "6ab0c15a3f11f89bfdd4a05ec1b1fc3c",
+    },
+    {
+      id: "166",
+      name: "Star Sports 2 HD",
+      category: "Sports",
+      logo: "https://cdn.example/ss2.png",
+      url: "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD2_BTS/WDVLive/index.mpd",
+      keyId: "11111111111111111111111111111111",
+      key: "22222222222222222222222222222222",
+    },
+  ]);
+
+  const REGULAR_COOKIES = JSON.stringify([
+    { cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=regular_token_abc" },
+  ]);
+
+  const STAR_COOKIES = JSON.stringify({
+    failed_results: [
+      {
+        channel_id: "165",
+        error_details: {
+          final_url:
+            "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/index.mpd?__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=star_165_token_xyz",
+        },
+      },
+    ],
+  });
+
+  function makeFramedTgRpcResponse(payloadObj: unknown): Response {
+    const jsonBytes = new TextEncoder().encode(JSON.stringify(payloadObj));
+    const framed = new Uint8Array(9 + jsonBytes.byteLength);
+    const view = new DataView(framed.buffer);
+    view.setUint8(0, 0);
+    view.setInt32(1, 0, false);
+    view.setInt32(5, jsonBytes.byteLength, false);
+    framed.set(jsonBytes, 9);
+    return new Response(framed, {
+      status: 200,
+      headers: { "content-type": "application/x-tss-framed" },
+    });
+  }
+
+  it("decodes TG _serverFn x-tss-framed RPC + GioTV tokens and normalizes bpk-tv// URLs", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
+        return makeFramedTgRpcResponse({
+          result: {
+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv//Sony_SAB_HD_MOB/WDVLive/index.mpd"],
+            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
+            clearKeys: { "40013199-4b44-5d8c-8817-202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+            backups: [
+              {
+                urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/Fallback/index.mpd"],
+                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv2_hmac",
+              },
+            ],
+          },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      ok: boolean;
+      matchedId: string;
+      candidates: Array<{ label: string; url: string; cookie: string; clearKeys: Record<string, string> }>;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.matchedId).toBe("892");
+    expect(body.candidates.length).toBeGreaterThanOrEqual(3);
+    // Double slash normalized to single slash so Jio CDN never returns 404
+    expect(body.candidates[0]!.url).toBe("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd");
+    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
+    // Hyphenated UUID KID normalized to 32-char hex
+    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe("2d56ef4bfcfb9fb0ae172f29b9cd6bfe");
+  });
+
+  it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("giotv-6op.pages.dev/cookie.json")) return new Response(STAR_COOKIES, { status: 200 });
+      return new Response("", { status: 403 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request(
+        "https://screen-safari-studio.lovable.app/api/live/direct-config?id=st%3A1001&name=IN%3A%20Star%20Sports%201%20Hindi%20HD&refresh=1",
+      ),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      matchedId: string;
+      matchedName: string;
+      candidates: Array<{ url: string; cookie: string; clearKeys: Record<string, string> }>;
+    };
+    expect(body.matchedId).toBe("165");
+    expect(body.matchedName).toBe("Star Sports 1 Hindi HD");
+    expect(body.candidates[0]!.url).toBe(
+      "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/index.mpd",
+    );
+    expect(body.candidates[0]!.cookie).toContain("star_165_token_xyz");
+    expect(body.candidates[0]!.clearKeys["a8e437645c175bc29ab021807569e5f9"]).toBe("6ab0c15a3f11f89bfdd4a05ec1b1fc3c");
+  });
+
+  it("serves JioTV catalogue from giotv-6op.pages.dev/jstr4web.json when allinonereborn2.online blocks Cloudflare Workers", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("allinonereborn2.online")) return new Response("", { status: 450 });
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/channels?source=jio&filter=all&refresh=1"),
+      {},
+    );
+    const body = (await res!.json()) as {
+      servedBy: string;
+      channels: Array<{ id: string; name: string; container?: string }>;
+    };
+    expect(body.servedBy).toBe("jio");
+    expect(body.channels.length).toBe(3);
+    expect(body.channels.map((c) => c.id)).toContain("jio:892");
+    expect(body.channels.map((c) => c.id)).toContain("jio:165");
+    expect(body.channels[0]!.container).toBe("dash");
+  });
+});
+
