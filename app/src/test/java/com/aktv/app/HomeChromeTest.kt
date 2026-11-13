@@ -51,13 +51,15 @@ class HomeChromeTest {
         assertEquals("search is a round glyph button", search.width, search.height)
         assertEquals("", search.text.toString())
         assertEquals("the profile chip is round", 38, root.findViewById<View>(R.id.profileAvatar).height)
-        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.searchBtn)) {
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar, R.id.searchBtn)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
             assertEquals("$id must lead down into the rows", R.id.rows, view.nextFocusDownId)
         }
         assertEquals("OG", root.findViewById<TextView>(R.id.segOg).text.toString())
         assertEquals("OG", root.findViewById<TextView>(R.id.phoneOg).text.toString())
+        assertEquals("StarShare", root.findViewById<TextView>(R.id.segStar).text.toString())
+        assertEquals("StarShare", root.findViewById<TextView>(R.id.phoneStar).text.toString())
         assertNull("TG TV section pill must be removed", root.findViewById<View?>(root.resources.getIdentifier("segTag", "id", root.context.packageName)))
         assertNull("TG TV phone pill must be removed", root.findViewById<View?>(root.resources.getIdentifier("phoneTag", "id", root.context.packageName)))
     }
@@ -69,6 +71,10 @@ class HomeChromeTest {
         assertEquals(View.VISIBLE, phoneOg.visibility)
         assertEquals("OG", phoneOg.text.toString())
         assertTrue("OG pill must fit on-screen without scrolling on mobile (right=${phoneOg.right})", phoneOg.right in 1..800)
+        val phoneStar = root.findViewById<TextView>(R.id.phoneStar)
+        assertEquals(View.VISIBLE, phoneStar.visibility)
+        assertEquals("StarShare", phoneStar.text.toString())
+        assertTrue("StarShare pill must fit on-screen without scrolling on mobile (right=${phoneStar.right})", phoneStar.right in 1..800)
         val search = root.findViewById<View>(R.id.phoneSearch)
         assertTrue(search.top >= 0); assertTrue(search.bottom <= 360)
         assertTrue(root.findViewById<View>(R.id.rows).height >= 100)

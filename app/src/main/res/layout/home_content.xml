@@ -64,6 +64,7 @@
                 <TextView android:id="@+id/phoneMovies" style="@style/Widget.AKTV.PhonePill" android:text="Movies"/>
                 <TextView android:id="@+id/phoneSeries" style="@style/Widget.AKTV.PhonePill" android:text="Series"/>
                 <TextView android:id="@+id/phoneOg" style="@style/Widget.AKTV.PhonePill" android:text="OG"/>
+                <TextView android:id="@+id/phoneStar" style="@style/Widget.AKTV.PhonePill" android:text="StarShare"/>
                 <TextView android:id="@+id/phoneSearch" style="@style/Widget.AKTV.PhonePill" android:text="Search"/>
             </LinearLayout>
         </HorizontalScrollView>
@@ -130,13 +131,15 @@
             <TextView android:id="@+id/segSeries" style="@style/Widget.STREAMR.Pill" android:text="Series"
                 android:nextFocusLeft="@id/segSites" android:nextFocusRight="@id/segOg" android:nextFocusDown="@id/rows"/>
             <TextView android:id="@+id/segOg" style="@style/Widget.STREAMR.Pill" android:text="OG"
-                android:nextFocusLeft="@id/segSeries" android:nextFocusRight="@id/searchBtn" android:nextFocusDown="@id/rows"/>
+                android:nextFocusLeft="@id/segSeries" android:nextFocusRight="@id/segStar" android:nextFocusDown="@id/rows"/>
+            <TextView android:id="@+id/segStar" style="@style/Widget.STREAMR.Pill" android:text="StarShare"
+                android:nextFocusLeft="@id/segOg" android:nextFocusRight="@id/searchBtn" android:nextFocusDown="@id/rows"/>
         </LinearLayout>
         <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
         <TextView android:id="@+id/searchBtn" android:layout_width="38dp" android:layout_height="38dp"
             android:layout_marginEnd="10dp" android:gravity="center" android:focusable="true" android:clickable="true"
             android:background="@drawable/circle_glass" android:contentDescription="Search"
-            android:nextFocusLeft="@id/segOg" android:nextFocusDown="@id/rows"/>
+            android:nextFocusLeft="@id/segStar" android:nextFocusDown="@id/rows"/>
         <LinearLayout android:id="@+id/navProfile" android:layout_width="38dp" android:layout_height="38dp"
             android:gravity="center" android:background="@drawable/circle_glass">
             <TextView android:id="@+id/profileAvatar" android:layout_width="38dp" android:layout_height="38dp"

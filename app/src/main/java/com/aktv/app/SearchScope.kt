@@ -11,6 +11,7 @@ internal object SearchScope {
     const val MOVIES = 2
     const val SERIES = 3
     const val OG = 4
+    const val STARSHARE_VOD = 5
 
     fun of(tabId: Int): Int = when (tabId) {
         3 -> MOVIES
@@ -19,5 +20,5 @@ internal object SearchScope {
         else -> CHANNELS
     }
 
-    fun isVod(scope: Int) = scope == MOVIES || scope == SERIES || scope == OG
+    fun isVod(scope: Int) = scope == MOVIES || scope == SERIES || scope == OG || scope == STARSHARE_VOD
 }

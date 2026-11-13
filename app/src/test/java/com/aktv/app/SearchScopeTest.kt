@@ -8,7 +8,7 @@ class SearchScopeTest {
 
     @Test
     fun `channel sections search channels`() {
-        for (tabId in listOf(0, 1, 2, 5, 6, 7)) {
+        for (tabId in listOf(0, 1, 2, 5, 6, 7, 9)) {
             assertEquals("tab $tabId must search channels", SearchScope.CHANNELS, SearchScope.of(tabId))
         }
     }
@@ -25,6 +25,7 @@ class SearchScopeTest {
         assertEquals(true, SearchScope.isVod(SearchScope.MOVIES))
         assertEquals(true, SearchScope.isVod(SearchScope.SERIES))
         assertEquals(true, SearchScope.isVod(SearchScope.OG))
+        assertEquals(true, SearchScope.isVod(SearchScope.STARSHARE_VOD))
         assertEquals(false, SearchScope.isVod(SearchScope.CHANNELS))
     }
 }

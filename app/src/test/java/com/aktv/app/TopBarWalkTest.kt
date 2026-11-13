@@ -10,7 +10,7 @@ import org.junit.Test
  */
 class TopBarWalkTest {
 
-    private val pills = 6                 // Live TV, JioTV, maxTV, Movies, Series, OG
+    private val pills = 7                 // Live TV, JioTV, maxTV, Movies, Series, OG, StarShare
     private val search = TopBarWalk.searchSlot(pills)
 
     @Test
@@ -22,7 +22,7 @@ class TopBarWalkTest {
             if (slot == TopBarWalk.OFF) break
             seen.add(slot)
         }
-        assertEquals("right has to reach every pill through OG and search", listOf(1, 2, 3, 4, 5, search), seen)
+        assertEquals("right has to reach every pill through StarShare and search", listOf(1, 2, 3, 4, 5, 6, search), seen)
     }
 
     @Test
@@ -34,7 +34,7 @@ class TopBarWalkTest {
             if (slot == TopBarWalk.OFF) break
             seen.add(slot)
         }
-        assertEquals("left has to come back through every pill", listOf(5, 4, 3, 2, 1, 0), seen)
+        assertEquals("left has to come back through every pill", listOf(6, 5, 4, 3, 2, 1, 0), seen)
     }
 
     @Test
