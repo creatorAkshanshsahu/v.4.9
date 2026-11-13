@@ -733,12 +733,12 @@ internal object XtreamClient {
         val lower = clean.lowercase(Locale.ROOT)
         if (pathPart.endsWith(".mpd")) {
             return listOf(
-                TgStream("maxTV · DASH", clean, "dash", headers, requestOrigin = PORTAL_ORIGIN_TAG, omitReferrer = true, omitOrigin = true)
+                TgStream(label = "maxTV · DASH", url = clean, type = "dash", headers = headers, requestOrigin = PORTAL_ORIGIN_TAG, omitReferrer = true, omitOrigin = true)
             )
         }
         if (pathPart.endsWith(".mp4") || pathPart.endsWith(".mkv")) {
             return listOf(
-                TgStream("maxTV · Stream", clean, "mp4", headers, requestOrigin = PORTAL_ORIGIN_TAG, omitReferrer = true, omitOrigin = true)
+                TgStream(label = "maxTV · Stream", url = clean, type = "mp4", headers = headers, requestOrigin = PORTAL_ORIGIN_TAG, omitReferrer = true, omitOrigin = true)
             )
         }
         val tsStream = TgStream(
