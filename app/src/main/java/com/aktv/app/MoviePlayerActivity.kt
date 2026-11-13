@@ -424,7 +424,7 @@ class MoviePlayerActivity : Activity() {
         val id = title.id
         runtimeLookup = io.submit {
             val mins = try {
-                VodDurationGuard.parseMinutes(Movies.details("movie", id).first.runtime)
+                VodDurationGuard.parseMinutes(Movies.details("movie", id).first?.runtime)
             } catch (_: Exception) { 0 }
             ui.post {
                 runtimeLookup = null
