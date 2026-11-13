@@ -126,7 +126,8 @@ jobs:
     needs: build
     if: >
       github.event_name == 'workflow_dispatch' && inputs.mode != 'inspect' ||
-      github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+      github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') ||
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: write
