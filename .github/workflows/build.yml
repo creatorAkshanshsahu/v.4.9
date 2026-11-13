@@ -59,14 +59,12 @@ jobs:
           STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
-          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then
-            echo "StarShare inbuilt secret status: configured"
-          else
-            echo "StarShare inbuilt secret status: not set"
-          fi
           env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
             gradle testArm32DebugUnitTest testArm64DebugUnitTest --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
-          gradle assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee -a "$RUNNER_TEMP/aktv-gradle.log"
+          ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
+          ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
+          ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
+            gradle assembleArm32Release assembleArm64Release --no-daemon --stacktrace --console=plain 2>&1 | tee -a "$RUNNER_TEMP/aktv-gradle.log"
       - name: Report deterministic tests for both APK variants
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
@@ -112,6 +110,12 @@ jobs:
           mkdir -p out
           cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
           cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
+          BC_FILE="app/build/generated/source/buildConfig/arm64/release/com/aktv/app/BuildConfig.java"
+          if [ -f "$BC_FILE" ] && ! grep -q 'STARSHARE_USER = "";' "$BC_FILE" && ! grep -q 'STARSHARE_PASS = "";' "$BC_FILE"; then
+            echo "included" > out/starshare-prebake-status.txt
+          else
+            echo "not-set" > out/starshare-prebake-status.txt
+          fi
       - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
@@ -123,6 +127,7 @@ jobs:
             out/*.apk
             out/SHA256SUMS
             out/apk-validation.json
+            out/starshare-prebake-status.txt
       - uses: actions/upload-artifact@v4
         with:
           name: STREAMR-arm32-install
@@ -152,6 +157,11 @@ jobs:
         run: |
           python3 .github/scripts/publish-update.test.py
           python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          if [ -f out/starshare-prebake-status.txt ] && [ "$(cat out/starshare-prebake-status.txt)" = "included" ]; then
+            printf "\nInbuilt StarShare login: **Included**\n" >> out/update-notes.md
+          else
+            printf "\nInbuilt StarShare login: **Not set in Actions secrets**\n" >> out/update-notes.md
+          fi
       - name: Publish the rolling latest release
         env:
           GH_TOKEN: ${{ github.token }}
