@@ -54,21 +54,41 @@ function ensurePlayerEnginesLoaded(): Promise<void> {
   if (window.mpegts && window.Hls) return Promise.resolve();
   if (scriptsPromise) return scriptsPromise;
 
-  const loadScript = (src: string) =>
+  const loadWithFallback = (primary: string, fallback: string, checkGlobal: () => boolean) =>
     new Promise<void>((resolve) => {
-      if (document.querySelector(`script[src="${src}"]`)) {
+      if (checkGlobal()) {
         resolve();
         return;
       }
-      const el = document.createElement("script");
-      el.src = src;
-      el.async = true;
-      el.onload = () => resolve();
-      el.onerror = () => resolve();
-      document.head.appendChild(el);
+      const trySrc = (src: string, next?: string) => {
+        const el = document.createElement("script");
+        el.src = src;
+        el.async = true;
+        el.onload = () => {
+          if (checkGlobal() || !next) resolve();
+          else trySrc(next);
+        };
+        el.onerror = () => {
+          if (next) trySrc(next);
+          else resolve();
+        };
+        document.head.appendChild(el);
+      };
+      trySrc(primary, fallback);
     });
 
-  scriptsPromise = Promise.all([loadScript("/vendor/mpegts.js"), loadScript("/vendor/hls.min.js")]).then(() => undefined);
+  scriptsPromise = Promise.all([
+    loadWithFallback(
+      "/vendor/mpegts.js",
+      "https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js",
+      () => Boolean(window.mpegts),
+    ),
+    loadWithFallback(
+      "/vendor/hls.min.js",
+      "https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js",
+      () => Boolean(window.Hls),
+    ),
+  ]).then(() => undefined);
   return scriptsPromise;
 }
 

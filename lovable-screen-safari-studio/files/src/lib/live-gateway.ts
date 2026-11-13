@@ -783,9 +783,14 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
       <div><button id="fs">Fullscreen</button></div>
     </div>
   </div>
-  <script src="/vendor/mpegts.js"></script>
-  <script src="/vendor/hls.min.js"></script>
+  <script src="/vendor/mpegts.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js'"></script>
+  <script src="/vendor/hls.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js'"></script>
   <script>
+    async function ensureEngines() {
+      const load = (u) => new Promise((r) => { const s = document.createElement("script"); s.src = u; s.onload = r; s.onerror = r; document.head.appendChild(s); });
+      if (!window.mpegts) await load("https://cdn.jsdelivr.net/npm/mpegts.js@1.8.0/dist/mpegts.js");
+      if (!window.Hls) await load("https://cdn.jsdelivr.net/npm/hls.js@1.5.18/dist/hls.min.js");
+    }
     const ch = ${boot};
     const v = document.getElementById("v"), ov = document.getElementById("ov"), st = document.getElementById("st"), rt = document.getElementById("rt"), au = document.getElementById("au"), mu = document.getElementById("mu"), pl = document.getElementById("pl");
     document.getElementById("nm").textContent = ch.name;
@@ -830,6 +835,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
     }
     async function boot() {
       clean(); ov.classList.remove("hide"); rt.style.display = "none"; st.textContent = "Connecting to " + ch.name + "…";
+      await ensureEngines();
       const c = new AbortController(); const tm = setTimeout(() => c.abort(), 8000);
       try {
         const r = await fetch(sUrl(".ts"), { signal: c.signal }); clearTimeout(tm);
