@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watch — STREAMR</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body class="watch">
+
+<header class="bar">
+  <a class="logo" href="index.html"><span class="tile"></span>STREAMR<span class="dot">.</span></a>
+  <div class="spacer"></div>
+  <a class="pill" href="index.html">All channels</a>
+</header>
+
+<main class="wrap">
+  <div class="stage">
+    <div>
+      <div class="screen" id="screen">
+        <span class="ad-flag" id="adFlag">Advertisement</span>
+        <video id="video" playsinline controls></video>
+        <div class="house-ad" id="houseAd"></div>
+        <div class="ad-countdown" id="adCountdown"></div>
+        <button class="skip" id="adSkip" type="button">Skip ad</button>
+        <div class="overlay" id="overlay">
+          <h3 id="overlayTitle">Loading channel…</h3>
+          <p id="overlayBody"></p>
+        </div>
+      </div>
+      <div class="banner-slot" id="banner">Ad slot</div>
+    </div>
+
+    <aside class="side">
+      <h2 id="name">…</h2>
+      <div class="sub" id="sub">…</div>
+      <div id="others"></div>
+      <p class="note" id="licenceNote"></p>
+      <a class="embed-link" id="embedCode" href="#" target="_blank" rel="noopener">…</a>
+    </aside>
+  </div>
+</main>
+
+<script src="assets/config.js"></script>
+<script src="assets/player.js"></script>
+<script src="assets/ads.js"></script>
+<script src="assets/watch.js"></script>
+</body>
+</html>

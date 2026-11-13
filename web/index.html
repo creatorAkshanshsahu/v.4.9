@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STREAMR — live channels and films</title>
+<meta name="description" content="STREAMR web player: live channels and films on any screen.">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23C4161C'/></svg>">
+</head>
+<body>
+
+<header class="bar">
+  <a class="logo" href="index.html"><span class="tile"></span>STREAMR<span class="dot">.</span></a>
+  <div class="spacer"></div>
+  <a class="pill" href="#" id="apkButton">Get the app</a>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>Everything you're licensed to show, on every screen.</h1>
+    <p>One player for the web, and one embed route for partners. Ad slots run before the stream, so a
+       channel you own earns on a page you don't.</p>
+  </section>
+
+  <div class="section-head">
+    <h2>Channels</h2>
+    <div class="rule"></div>
+    <div class="count" id="count">…</div>
+  </div>
+
+  <div class="grid" id="grid" aria-live="polite"></div>
+
+  <p class="note">
+    The three entries above are Creative-Commons test films (Blender Foundation) used to prove the player,
+    the ad slots and the embed route work. They are not the app's channel list.
+  </p>
+</main>
+
+<script src="assets/config.js"></script>
+<script src="assets/player.js"></script>
+<script>
+(function () {
+  'use strict';
+  const cfg =(window.STREAMR || {});
+  const grid = document.getElementById('grid');
+  const count = document.getElementById('count');
+  document.getElementById('apkButton').href = cfg.apk || '#';
+
+  function initials(name) {
+    return (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase();
+  }
+
+  function card(channel) {
+    const a = document.createElement('a');
+    a.className = 'card';
+    a.href = 'watch.html?id=' + encodeURIComponent(channel.id);
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.textContent = initials(channel.name);
+    if (channel.live) {
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = 'Live';
+      thumb.append(badge);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const strong = document.createElement('strong');
+    strong.textContent = channel.name;
+    const sub = document.createElement('span');
+    sub.textContent = [channel.category, channel.type && channel.type.toUpperCase(), channel.licence].filter(Boolean).join(' · ');
+    meta.append(strong, sub);
+    a.append(thumb, meta);
+    return a;
+  }
+
+  Player.loadChannels().then((channels) => {
+    grid.innerHTML = '';
+    channels.forEach((channel) => grid.append(card(channel)));
+    count.textContent = channels.length + (channels.length === 1 ? ' channel' : ' channels');
+  });
+
+  // Remote / keyboard: arrows walk the grid, Enter follows the card.
+  document.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    const cards = Array.from(grid.querySelectorAll('.card'));
+    if (!cards.length) return;
+    const at = cards.indexOf(document.activeElement);
+    const perRow = Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+    let next = at;
+    if (at < 0) next = 0;
+    else if (e.key === 'ArrowRight') next = Math.min(cards.length - 1, at + 1);
+    else if (e.key === 'ArrowLeft') next = Math.max(0, at - 1);
+    else if (e.key === 'ArrowDown') next = Math.min(cards.length - 1, at + perRow);
+    else if (e.key === 'ArrowUp') next = Math.max(0, at - perRow);
+    cards[next].focus();
+    e.preventDefault();
+  });
+})();
+</script>
+</body>
+</html>

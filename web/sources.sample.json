@@ -1,0 +1,29 @@
+{
+  "_comment": "The contract STREAMR.sourcesUrl must return. Serve this from YOUR backend, never from a third-party portal. `drm.widevine` is optional and only used when you have the licence server for that stream.",
+  "channels": [
+    {
+      "id": "news-1",
+      "name": "Channel name",
+      "category": "News",
+      "logo": "https://your.cdn/logo.png",
+      "live": true,
+      "type": "hls",
+      "url": "https://your.cdn/live/channel-1/master.m3u8",
+      "licence": "© Owner — licensed to you for web distribution",
+      "drm": {
+        "widevine": {
+          "licenseUrl": "https://your.licence.server/widevine",
+          "headers": { "Authorization": "Bearer <short-lived-token>" }
+        }
+      }
+    },
+    {
+      "id": "film-1",
+      "name": "A film you hold rights to",
+      "category": "Films",
+      "type": "dash",
+      "url": "https://your.cdn/vod/film-1/manifest.mpd",
+      "licence": "Public domain / licensed"
+    }
+  ]
+}

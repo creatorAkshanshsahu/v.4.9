@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STREAMR</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+  html, body { height: 100%; overflow: hidden; }
+  .embed-root { width: 100%; }
+  .screen { position: absolute; inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .screen video { height: 100%; aspect-ratio: auto; object-fit: contain; }
+</style>
+</head>
+<body class="embed">
+
+<div class="embed-root" id="root">
+  <div class="screen" id="screen">
+    <span class="ad-flag" id="adFlag">Advertisement</span>
+    <video id="video" playsinline controls></video>
+    <div class="house-ad" id="houseAd"></div>
+    <div class="ad-countdown" id="adCountdown"></div>
+    <button class="skip" id="adSkip" type="button">Skip ad</button>
+    <div class="overlay" id="overlay">
+      <h3 id="overlayTitle">Loading…</h3>
+      <p id="overlayBody"></p>
+    </div>
+  </div>
+</div>
+
+<script src="assets/config.js"></script>
+<script src="assets/player.js"></script>
+<script src="assets/ads.js"></script>
+<script src="assets/watch.js"></script>
+</body>
+</html>
