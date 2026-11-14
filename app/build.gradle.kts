@@ -74,7 +74,11 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
-    implementation("androidx.media3:media3-decoder-ffmpeg:1.3.1")
+    // Software AC-3/E-AC-3/DTS audio for phones without those licenses. Google publishes no
+    // FFmpeg binary, so this is Jellyfin's open-source build of Media3's own extension for 1.3.1.
+    // NOTE: this build is GPL-3.0 (its FFmpeg enables GPL components). If that ever matters,
+    // swap it for a self-built LGPL-configured AAR of the same extension; the wiring is unchanged.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.3.1+2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
