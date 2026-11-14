@@ -1,41 +1,44 @@
 # Website Live TV Playback Fix (`creatorAkshanshsahu/screen-safari-studio`)
 
-Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 83 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
+Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 86 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
 
-> `main` already contains the Browser-Direct CDN release (PR #12). This update fixes the follow-up production error below on top of it.
+> `main` already contains the Browser-Direct CDN release (PR #12). This update fixes JioTV channels not playing in the browser on top of it.
 
 ---
 
-## The Error This Fixes
+## The Real Issue: App vs Website Token Handling
 
-**`Direct CDN stream is taking too long to deliver video frames. Press Retry to switch token/server.`**
+The Android app and the website resolve the **same** TG/JJTV URLs + `__hdnea__` cookies + ClearKeys — but the app plays while the website stalled with `Direct CDN stream is taking too long to deliver video frames`. Auditing the app (`StreamRequestPolicy.kt`, `StreamHttp.kt`, `JjtvProtocol.kt`) against the website found two behavioral gaps, both fixed here:
 
-Root cause chain (all in the direct-play path shipped by PR #12):
+1. **The website clobbered per-request tokens; the app never does.**
+   The website's Shaka request filter rebuilt *every* manifest/segment URL as `base + "?" + coarseCookie`, stripping redirect-minted tokens and sibling query params. The app's `withToken(replace=false)` *appends* the token, preserves all other params, and returns a URL that already carries a token **untouched** (only the advertised root manifest gets a swap). Result on the website: the manifest (200 OK) loaded, but segments went out with a stale/clobbered token and never produced frames.
 
-1. `LiveVideoSurface.tsx` treated `player.load(manifest)` resolving as success and returned immediately — but a manifest can load while its segments stall forever (slow/rotated `__hdnea__` token, congested edge). Shaka's own retry budget (`12s × 2 attempts` ≈ 24s+) exceeds the player's 18s watchdog, so no Shaka error ever fired before the watchdog showed the manual-Retry message.
-2. Failover only happened when `player.load()` *threw*. A loaded-but-frozen stream never tried Server 2 / the fresh GioTV token by itself.
-3. `/api/live/direct-config` waited for the slowest metadata leg: when TG `_serverFn` discovery hung, GioTV candidates (ready in ~200ms) were delayed behind it, and expired embedded tokens were handed to the player, wasting one full attempt each.
+2. **The website pinned one token for the whole session; the app learns renewed auth.**
+   Jio replaces authentication on manifest redirects. The app's `observed()` captures the final wire URL's token after every successful manifest and uses it for the following segments. The website had no equivalent, so any channel whose manifest 302-mints a fresh token played the manifest and then starved on segments.
+
+3. **HLS follow-up requests went completely unsigned.**
+   Both the surface and the `/embed/:id` player signed only the root `.m3u8` URL. Variant/segment playlists resolved by hls.js dropped the query and were fetched with no token at all — guaranteed failure for every HLS direct candidate.
+
+(Also verified equivalent, so *not* the issue: `bpk-tv//` normalization, single-key → `default_KID` mapping, query-form (not header) token transport, and no-`Referer` requests — the app works both with and without `Origin`/`Referer` on these CDN hosts.)
 
 ---
 
 ## What Changed
 
-1. **Frame-verified direct playback (`src/components/tv/LiveVideoSurface.tsx`)**
-   - Every DASH/HLS direct candidate must render a real video frame within 6–7s (after an 8s load race); otherwise the player destroys it and automatically tries the next token/server, showing `Trying TG Live · Server 2…` etc.
-   - Shaka failures are captured *before/during* `load()` (not after): a fast `HTTP 403/450` refusal still gets one bare-URL retry, while a *stall* skips it and moves to the next server immediately.
-   - One automatic fresh-token pass (`&refresh=1`) runs inside the same attempt when all cached-token candidates fail — no manual Retry needed for expired tokens.
-   - The 18s watchdog now spends one automatic backup token/server switch (`Switching to backup token/server…`) before ever showing the manual-Retry error, and `onWaiting` can no longer overwrite a concrete error with `Buffering…`.
-   - `/embed/:id` standalone player (`renderStandaloneEmbedHtml`) gets the same frame-gated failover (7s fetch / 8s load / 6–7s frame budgets, 40s pass cap, 25s watchdog).
+1. **New `src/lib/direct-token.ts`** — dependency-free browser port of `StreamRequestPolicy`: `withHdneaToken()` (append/preserve/replace semantics), `extractHdneaParam()`, `sameUrlHost()` (tokens never leave their own host), `isHlsPlaylistUrl()`.
 
-2. **Faster, fresher `/api/live/direct-config` (`src/lib/live-gateway.ts`)**
-   - TG RPC leg is budget-raced at 5s: GioTV candidates are served on time even when `_serverFn` hangs (the background TG call still warms the verified fn-id cache for the retry), and normal plays reuse the 10-minute `_serverFn` discovery cache.
-   - Provably-expired `__hdnea__` tokens are pruned when the same URL also has a fresh variant, and candidates are ordered freshest-first (stable, so TG Server 1 still precedes Server 2).
+2. **`src/components/tv/LiveVideoSurface.tsx`**
+   - DASH: per-attempt session token — root manifest loaded with replace semantics (bare attempt plays the URL verbatim), manifest/segment requests signed with append semantics scoped to the candidate's host, and renewed tokens learned from every manifest's post-redirect `response.uri` (segments never overwrite session auth, exactly like `observed()`).
+   - HLS: `xhrSetup` signs every variant/segment request the same way and learns renewed playlist auth from `xhr.responseURL`.
+   - (Kept from the previous update: frame-verified failover across token/server with 6–8s budgets, automatic fresh-token pass, one automatic watchdog backup-switch, `onWaiting` no longer overwriting concrete errors.)
 
-3. **Test toolchain repair (`package.json`)**
-   - Restores `@testing-library/dom@^10.4.2`, accidentally removed by `683ea35` (`Work in progress`), which broke all 18 Vitest suites (`screen`/`fireEvent`/`waitFor` unresolved).
+3. **`src/lib/live-gateway.ts`**
+   - `/api/live/direct-config` hands the browser **verbatim** catalogue URLs (query intact) + cookie separately, like the app's `JjtvProtocol.streams`; TG leg budget-raced at 5s; expired tokens pruned; freshest-first ordering.
+   - `/embed/:id` standalone player gets the same session-token + redirect-learning policy for both Shaka and hls.js.
 
-4. **New regression test (`src/test/playback-fixes.test.ts`)**
-   - `prunes expired embedded tokens and orders freshest candidates first`.
+4. **`package.json`** — restores `@testing-library/dom@^10.4.2`, accidentally removed by `683ea35`, which broke all 18 Vitest suites.
+
+5. **New regression tests (`src/test/playback-fixes.test.ts`)** — token append/preserve/no-overwrite/replace rules, host scoping, playlist-vs-fragment detection, expired-token pruning with verbatim URLs.
 
 ---
 
@@ -46,7 +49,7 @@ Root cause chain (all in the direct-play path shipped by PR #12):
 ./lovable-screen-safari-studio/sync-to-lovable.sh
 cd screen-safari-studio
 git add -A
-git commit -m "fix(live): auto-switch direct CDN token/server on slow frames + prune expired tokens"
+git commit -m "fix(live): apply app-identical hdnea token policy + learn redirect-minted manifest auth"
 git push origin main
 ```
 

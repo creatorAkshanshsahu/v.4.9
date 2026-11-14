@@ -2198,16 +2198,17 @@ async function resolveDirectPlayCandidates(
   }
 
   // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
+  // URLs stay verbatim (query intact) exactly like the app's `JjtvProtocol.streams`: the browser
+  // applies the cookie with replace semantics and keeps every sibling parameter.
   if (matchedGio) {
     for (const rawUrl of matchedGio.urls) {
       const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
       const embeddedToken = extractHdneaToken(rawUrl);
       const freshCookie = isJioStarPlUrl(rawUrl) ? starCookie : regularCookie;
-      const baseCleanUrl = rawUrl.split("?")[0]!;
       if (freshCookie) {
         pushCandidate({
           label: "GioTV Direct · Fresh Token",
-          url: baseCleanUrl,
+          url: rawUrl,
           cookie: freshCookie,
           clearKeys: gioKeys,
           container,
@@ -2216,7 +2217,7 @@ async function resolveDirectPlayCandidates(
       if (embeddedToken) {
         pushCandidate({
           label: "GioTV Direct · Embedded Token",
-          url: baseCleanUrl,
+          url: rawUrl,
           cookie: embeddedToken,
           clearKeys: gioKeys,
           container,
@@ -3305,10 +3306,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
       au.style.display = "none"; au.innerHTML = "";
     }
     function sUrl(ext, probe) { return "/api/live/stream/" + encodeURIComponent(ch.id) + ext + "?_t=" + Date.now() + (probe ? "&probe=1" : ""); }
-    function startHls(url) {
+    function hdneaOf(s) {
+      var m = /(?:^|[?;&\s])(__hdnea__=[^;\s&"'<>]+)/.exec(String(s == null ? "" : s));
+      return m ? m[1] : null;
+    }
+    function withTok(url, tok, replace) {
+      var h = url.indexOf("#"), frag = h >= 0 ? url.slice(h) : "", base = h >= 0 ? url.slice(0, h) : url;
+      var q = base.indexOf("?"), params = (q >= 0 ? base.slice(q + 1) : "").split("&").filter(function (p) { return p.length > 0; });
+      var has = params.some(function (p) { return p.split("=", 1)[0] === "__hdnea__"; });
+      if (!replace && has) return url;
+      var kept = params.filter(function (p) { return p.split("=", 1)[0] !== "__hdnea__"; });
+      kept.push(tok);
+      return (q >= 0 ? base.slice(0, q) : base) + "?" + kept.join("&") + frag;
+    }
+    function sameHost(a, b) {
+      try { return new URL(a).hostname.toLowerCase() === new URL(b).hostname.toLowerCase(); } catch (e) { return false; }
+    }
+    function startHls(url, tok, host) {
       clean();
       if (window.Hls && Hls.isSupported()) {
-        hp = new Hls({ lowLatencyMode: true });
+        var activeTok = tok || "";
+        hp = new Hls({ lowLatencyMode: true, xhrSetup: function (xhr, u) {
+          try {
+            xhr.addEventListener("load", function () {
+              try {
+                var fin = xhr.responseURL || "";
+                if (fin && /\.m3u8(?:[?#]|$)/i.test(u) && host && sameHost(fin, host)) {
+                  var learned = hdneaOf(fin);
+                  if (learned) activeTok = learned;
+                }
+              } catch (e) {}
+            });
+            if (!activeTok || !host || u.indexOf("allinonereborn") >= 0 || !sameHost(u, host)) return;
+            var signed = withTok(u, activeTok, false);
+            if (signed !== u) xhr.open("GET", signed, true);
+          } catch (e) {}
+        } });
         hp.loadSource(url); hp.attachMedia(v);
         hp.on(Hls.Events.MANIFEST_PARSED, () => {
           const tr = hp.audioTracks || [];
@@ -3423,7 +3456,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
           const cand = cands[idx];
           st.textContent = "Trying " + (cand.label || "direct server") + "…";
           if (cand.container === "hls") {
-            startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : ""));
+            startHls(cand.cookie ? withTok(cand.url, cand.cookie, true) : cand.url, cand.cookie, cand.url);
             if (await waitDirectFrames(7000)) return true;
             continue;
           }
@@ -3432,6 +3465,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
             clean();
             sp = new shaka.Player();
             const activeCookie = attempts[a];
+            let activeTok = activeCookie;
             const ck = cand.clearKeys || {};
             sp.configure({
               drm: Object.keys(ck).length ? { clearKeys: ck } : {},
@@ -3439,19 +3473,26 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
               manifest: { retryParameters: { maxAttempts: 1, baseDelay: 300, backoffFactor: 2, timeout: 7000 } }
             });
             const net = sp.getNetworkingEngine && sp.getNetworkingEngine();
-            if (net && activeCookie) {
+            if (net) {
               net.registerRequestFilter(function (type, req) {
-                if ((type === 0 || type === 1) && req.uris && req.uris[0]) {
-                  const u = req.uris[0];
-                  if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
-                    req.uris[0] = u.split("?")[0] + "?" + activeCookie;
-                  }
-                }
+                if ((type !== 0 && type !== 1) || !req.uris || !req.uris[0]) return;
+                const u = req.uris[0];
+                if (u.includes("allinonereborn") || !sameHost(u, cand.url)) return;
+                if (!activeTok) return;
+                req.uris[0] = withTok(u, activeTok, false);
               });
             }
-            if (net && Object.keys(ck).length) {
+            if (net) {
               net.registerResponseFilter(function (type, resp) {
-                if (type !== 0 || !resp.data) return;
+                if (type === 0 && resp.uri) {
+                  try {
+                    if (!resp.uri.includes("allinonereborn") && sameHost(resp.uri, cand.url)) {
+                      const learned = hdneaOf(resp.uri);
+                      if (learned) activeTok = learned;
+                    }
+                  } catch (e) {}
+                }
+                if (type !== 0 || !resp.data || !Object.keys(ck).length) return;
                 try {
                   let xml = new TextDecoder().decode(resp.data);
                   if (!/<MPD[\s>]/i.test(xml)) return;
@@ -3470,7 +3511,8 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
             }
             try {
               await sp.attach(v);
-              await Promise.race([sp.load(cand.url), new Promise(function (_, rej) { setTimeout(function () { rej(new Error("direct-timeout")); }, 8000); })]);
+              const rootUrl = activeCookie ? withTok(cand.url, activeCookie, true) : cand.url;
+              await Promise.race([sp.load(rootUrl), new Promise(function (_, rej) { setTimeout(function () { rej(new Error("direct-timeout")); }, 8000); })]);
               v.play().catch(function () { v.muted = true; mu.textContent = "Unmute"; v.play().catch(function () {}); });
               // A manifest that loads but never renders must fail over, not trap the embed.
               if (await waitDirectFrames(6000)) return true;

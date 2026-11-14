@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DirectPlayCandidate } from "@/lib/live-gateway";
+import { extractHdneaParam, isHlsPlaylistUrl, sameUrlHost, withHdneaToken } from "@/lib/direct-token";
 
 export interface AudioTrackOption {
   index: number;
@@ -515,23 +516,39 @@ export function LiveVideoSurface({
           },
         });
 
-        const net = player.getNetworkingEngine?.();
-        if (net && activeCookie) {
-          net.registerRequestFilter((type, request) => {
-            if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
-              const u = request.uris[0];
-              if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
-                const base = u.split("?")[0]!;
-                request.uris[0] = `${base}?${activeCookie}`;
-              }
-            }
-          });
-        }
+          // App-faithful session token (StreamRequestPolicy): starts as this attempt's cookie,
+          // then tracks whatever the CDN's manifest redirects mint for the following segments.
+          let activeToken = activeCookie;
 
-        if (net && Object.keys(normalizedKeys).length > 0) {
-          net.registerResponseFilter((type, response) => {
-            if (type !== manifestType || !response.data) return;
-            try {
+          const net = player.getNetworkingEngine?.();
+          if (net) {
+            net.registerRequestFilter((type, request) => {
+              if ((type !== manifestType && type !== segmentType) || !request.uris?.[0]) return;
+              const u = request.uris[0];
+              // App's target==origin rule: the token never leaves its own host (and never
+              // touches relay queries). A URL that already carries a token keeps it.
+              if (u.includes("allinonereborn") || !sameUrlHost(u, cand.url)) return;
+              if (!activeToken) return;
+              request.uris[0] = withHdneaToken(u, activeToken, false);
+            });
+          }
+
+          if (net) {
+            net.registerResponseFilter((type, response) => {
+              // Learn renewed manifest auth from the final wire URL (post-redirect response.uri),
+              // exactly like StreamRequestPolicy.observed(). Segments never overwrite session auth.
+              if (type === manifestType && response.uri) {
+                try {
+                  if (!response.uri.includes("allinonereborn") && sameUrlHost(response.uri, cand.url)) {
+                    const learned = extractHdneaParam(response.uri);
+                    if (learned) activeToken = learned;
+                  }
+                } catch {
+                  // keep current token
+                }
+              }
+              if (type !== manifestType || !response.data || Object.keys(normalizedKeys).length === 0) return;
+              try {
               let xml = new TextDecoder().decode(response.data);
               if (!/<MPD[\s>]/i.test(xml)) return;
               const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
@@ -574,8 +591,11 @@ export function LiveVideoSurface({
         const loadStart = Date.now();
         try {
           await player.attach(videoRef.current);
+          // Root request: swap in this attempt's token (sibling params preserved); the bare
+          // attempt plays the URL verbatim, keeping any token it already carries.
+          const rootUrl = activeCookie ? withHdneaToken(cand.url, activeCookie, true) : cand.url;
           await Promise.race([
-            player.load(cand.url),
+            player.load(rootUrl),
             new Promise((_, reject) => setTimeout(() => reject(new Error("direct-load-timeout")), 8000)),
           ]);
         } catch {
@@ -624,9 +644,10 @@ export function LiveVideoSurface({
         directModeRef.current = true;
         onContainerDetected?.("HLS");
         setStatusMsg(`Trying ${cand.label}…`);
-        const signedHls = cand.cookie
-          ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
-          : cand.url;
+        const signedHls = cand.cookie ? withHdneaToken(cand.url, cand.cookie, true) : cand.url;
+        // App-faithful session token (StreamRequestPolicy): variant/segment requests are signed
+        // the same way as DASH, and renewed manifest auth is learned from redirect finals.
+        let activeToken = cand.cookie;
         const el = videoRef.current;
         const HlsCtor = window.Hls;
         if (HlsCtor && HlsCtor.isSupported()) {
@@ -639,6 +660,26 @@ export function LiveVideoSurface({
             manifestLoadingRetryDelay: 500,
             levelLoadingRetryDelay: 500,
             fragLoadingRetryDelay: 500,
+            xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+              try {
+                xhr.addEventListener("load", () => {
+                  try {
+                    const finalUrl = xhr.responseURL || "";
+                    if (finalUrl && isHlsPlaylistUrl(url) && sameUrlHost(finalUrl, cand.url)) {
+                      const learned = extractHdneaParam(finalUrl);
+                      if (learned) activeToken = learned;
+                    }
+                  } catch {
+                    // keep current token
+                  }
+                });
+                if (!activeToken || url.includes("allinonereborn") || !sameUrlHost(url, cand.url)) return;
+                const signed = withHdneaToken(url, activeToken, false);
+                if (signed !== url) xhr.open("GET", signed, true);
+              } catch {
+                // play unsigned rather than crash the request
+              }
+            },
           });
           hlsRef.current = hls;
           let fatal = false;

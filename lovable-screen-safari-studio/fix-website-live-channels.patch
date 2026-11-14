@@ -1,15 +1,17 @@
-From fba964e4862697e8b324eb837deeef0e38b57df0 Mon Sep 17 00:00:00 2001
+From 8ded2a1a659f69f64fe12c4e019f45903dd5eba3 Mon Sep 17 00:00:00 2001
 From: STREAMR Bot <noreply@github.com>
-Date: Sat, 14 Nov 2026 03:03:24 +0000
-Subject: [PATCH] fix(live): auto-switch direct CDN token/server on slow frames
- + prune expired tokens
+Date: Sat, 14 Nov 2026 03:13:52 +0000
+Subject: [PATCH] fix(live): apply app-identical hdnea token policy + learn
+ redirect-minted manifest auth
 
 ---
  package.json                           |   1 +
- src/components/tv/LiveVideoSurface.tsx | 476 ++++++++++++++++++-------
- src/lib/live-gateway.ts                |  80 ++++-
- src/test/playback-fixes.test.ts        |  47 +++
- 4 files changed, 464 insertions(+), 140 deletions(-)
+ src/components/tv/LiveVideoSurface.tsx | 505 +++++++++++++++++++------
+ src/lib/direct-token.ts                |  70 ++++
+ src/lib/live-gateway.ts                | 150 ++++++--
+ src/test/playback-fixes.test.ts        |  88 +++++
+ 5 files changed, 666 insertions(+), 148 deletions(-)
+ create mode 100644 src/lib/direct-token.ts
 
 diff --git a/package.json b/package.json
 index 532ad06..278d72c 100644
@@ -24,10 +26,18 @@ index 532ad06..278d72c 100644
      "clsx": "^2.1.1",
      "cmdk": "^1.1.1",
 diff --git a/src/components/tv/LiveVideoSurface.tsx b/src/components/tv/LiveVideoSurface.tsx
-index 8d006b0..c2d5fdd 100644
+index 8d006b0..b8750ba 100644
 --- a/src/components/tv/LiveVideoSurface.tsx
 +++ b/src/components/tv/LiveVideoSurface.tsx
-@@ -212,6 +212,10 @@ export function LiveVideoSurface({
+@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
+ import { RefreshCw } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import type { DirectPlayCandidate } from "@/lib/live-gateway";
++import { extractHdneaParam, isHlsPlaylistUrl, sameUrlHost, withHdneaToken } from "@/lib/direct-token";
+ 
+ export interface AudioTrackOption {
+   index: number;
+@@ -212,6 +213,10 @@ export function LiveVideoSurface({
    const specificErrorRef = useRef(false);
    /** True when playing directly against upstream CDN from the browser (no server segment log). */
    const directModeRef = useRef(false);
@@ -38,7 +48,7 @@ index 8d006b0..c2d5fdd 100644
  
    const reportError = (msg: string) => {
      specificErrorRef.current = true;
-@@ -235,6 +239,13 @@ export function LiveVideoSurface({
+@@ -235,6 +240,13 @@ export function LiveVideoSurface({
      if (!el) return;
      let settled = false;
  
@@ -52,7 +62,7 @@ index 8d006b0..c2d5fdd 100644
      const check = () => {
        if (settled) return;
        if (el.videoWidth > 0 && el.videoHeight > 0) {
-@@ -250,18 +261,29 @@ export function LiveVideoSurface({
+@@ -250,18 +262,29 @@ export function LiveVideoSurface({
      const deadline = setTimeout(() => {
        if (settled) return;
        if (el.videoWidth === 0 || el.videoHeight === 0) {
@@ -84,7 +94,7 @@ index 8d006b0..c2d5fdd 100644
          const asked = `/api/live/diagnose?id=${encodeURIComponent(channelId)}`;
          void fetch(asked)
            .then((r) => (r.ok ? r.json() : null))
-@@ -396,148 +418,338 @@ export function LiveVideoSurface({
+@@ -396,148 +419,378 @@ export function LiveVideoSurface({
      const tryBrowserDirect = async (forceRefresh: boolean): Promise<boolean> => {
        if (cancelled || !videoRef.current) return false;
        ensureNoReferrerMeta();
@@ -245,32 +255,71 @@ index 8d006b0..c2d5fdd 100644
 -            manifest: {
 -              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
 -            },
-+        const net = player.getNetworkingEngine?.();
-+        if (net && activeCookie) {
-+          net.registerRequestFilter((type, request) => {
-+            if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
-+              const u = request.uris[0];
-+              if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
-+                const base = u.split("?")[0]!;
-+                request.uris[0] = `${base}?${activeCookie}`;
-+              }
-+            }
-           });
-+        }
+-          });
++          // App-faithful session token (StreamRequestPolicy): starts as this attempt's cookie,
++          // then tracks whatever the CDN's manifest redirects mint for the following segments.
++          let activeToken = activeCookie;
  
--          const net = player.getNetworkingEngine?.();
+           const net = player.getNetworkingEngine?.();
 -          if (net && activeCookie) {
--            net.registerRequestFilter((type, request) => {
++          if (net) {
+             net.registerRequestFilter((type, request) => {
 -              if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
 -                const u = request.uris[0];
 -                if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
 -                  const base = u.split("?")[0]!;
 -                  request.uris[0] = `${base}?${activeCookie}`;
 -                }
-+        if (net && Object.keys(normalizedKeys).length > 0) {
-+          net.registerResponseFilter((type, response) => {
-+            if (type !== manifestType || !response.data) return;
-+            try {
+-              }
++              if ((type !== manifestType && type !== segmentType) || !request.uris?.[0]) return;
++              const u = request.uris[0];
++              // App's target==origin rule: the token never leaves its own host (and never
++              // touches relay queries). A URL that already carries a token keeps it.
++              if (u.includes("allinonereborn") || !sameUrlHost(u, cand.url)) return;
++              if (!activeToken) return;
++              request.uris[0] = withHdneaToken(u, activeToken, false);
+             });
+           }
+ 
+-          if (net && Object.keys(normalizedKeys).length > 0) {
++          if (net) {
+             net.registerResponseFilter((type, response) => {
+-              if (type !== manifestType || !response.data) return;
+-              try {
+-                let xml = new TextDecoder().decode(response.data);
+-                if (!/<MPD[\s>]/i.test(xml)) return;
+-                const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
+-                  .map((m) => toHexKeyId(m[1]!))
+-                  .filter((x): x is string => Boolean(x));
+-                const pairs = Object.entries(normalizedKeys);
+-                if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
+-                  const expanded: Record<string, string> = { ...normalizedKeys };
+-                  for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
+-                  player.configure({ drm: { clearKeys: expanded, advanced: {} } });
++              // Learn renewed manifest auth from the final wire URL (post-redirect response.uri),
++              // exactly like StreamRequestPolicy.observed(). Segments never overwrite session auth.
++              if (type === manifestType && response.uri) {
++                try {
++                  if (!response.uri.includes("allinonereborn") && sameUrlHost(response.uri, cand.url)) {
++                    const learned = extractHdneaParam(response.uri);
++                    if (learned) activeToken = learned;
++                  }
++                } catch {
++                  // keep current token
+                 }
+-                // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
+-                xml = xml.replace(
+-                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
+-                  "",
+-                );
+-                xml = xml.replace(
+-                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
+-                  "",
+-                );
+-                response.data = new TextEncoder().encode(xml).buffer;
++              }
++              if (type !== manifestType || !response.data || Object.keys(normalizedKeys).length === 0) return;
++              try {
 +              let xml = new TextDecoder().decode(response.data);
 +              if (!/<MPD[\s>]/i.test(xml)) return;
 +              const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
@@ -281,9 +330,7 @@ index 8d006b0..c2d5fdd 100644
 +                const expanded: Record<string, string> = { ...normalizedKeys };
 +                for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
 +                player.configure({ drm: { clearKeys: expanded, advanced: {} } });
-               }
--            });
--          }
++              }
 +              // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
 +              xml = xml.replace(
 +                /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
@@ -299,37 +346,7 @@ index 8d006b0..c2d5fdd 100644
 +            }
 +          });
 +        }
- 
--          if (net && Object.keys(normalizedKeys).length > 0) {
--            net.registerResponseFilter((type, response) => {
--              if (type !== manifestType || !response.data) return;
--              try {
--                let xml = new TextDecoder().decode(response.data);
--                if (!/<MPD[\s>]/i.test(xml)) return;
--                const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
--                  .map((m) => toHexKeyId(m[1]!))
--                  .filter((x): x is string => Boolean(x));
--                const pairs = Object.entries(normalizedKeys);
--                if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
--                  const expanded: Record<string, string> = { ...normalizedKeys };
--                  for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
--                  player.configure({ drm: { clearKeys: expanded, advanced: {} } });
--                }
--                // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
--                xml = xml.replace(
--                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
--                  "",
--                );
--                xml = xml.replace(
--                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
--                  "",
--                );
--                response.data = new TextEncoder().encode(xml).buffer;
--              } catch {
--                // leave manifest untouched if decoding fails
--              }
--            });
--          }
++
 +        // Capture failures *during* load so a refused manifest fails over immediately.
 +        let fatalStatus: number | undefined;
 +        let fatalCode: number | undefined;
@@ -341,25 +358,15 @@ index 8d006b0..c2d5fdd 100644
 +          const numeric = payload.find((d): d is number => typeof d === "number");
 +          if (fatalCode === 1001 && typeof numeric === "number") fatalStatus = numeric;
 +        });
- 
--          try {
--            await player.attach(videoRef.current);
--            await player.load(cand.url);
--            if (cancelled) return false;
--
--            // Attach runtime error handler after initial manifest+init load succeeds.
--            player.addEventListener("error", (event) => {
--              if (cancelled) return;
--              const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
--              const code = detail?.detail?.code;
--              const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
--              const numeric = payload.find((d): d is number => typeof d === "number");
--              const status = code === 1001 ? numeric : undefined;
++
 +        const loadStart = Date.now();
 +        try {
 +          await player.attach(videoRef.current);
++          // Root request: swap in this attempt's token (sibling params preserved); the bare
++          // attempt plays the URL verbatim, keeping any token it already carries.
++          const rootUrl = activeCookie ? withHdneaToken(cand.url, activeCookie, true) : cand.url;
 +          await Promise.race([
-+            player.load(cand.url),
++            player.load(rootUrl),
 +            new Promise((_, reject) => setTimeout(() => reject(new Error("direct-load-timeout")), 8000)),
 +          ]);
 +        } catch {
@@ -408,9 +415,10 @@ index 8d006b0..c2d5fdd 100644
 +        directModeRef.current = true;
 +        onContainerDetected?.("HLS");
 +        setStatusMsg(`Trying ${cand.label}…`);
-+        const signedHls = cand.cookie
-+          ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
-+          : cand.url;
++        const signedHls = cand.cookie ? withHdneaToken(cand.url, cand.cookie, true) : cand.url;
++        // App-faithful session token (StreamRequestPolicy): variant/segment requests are signed
++        // the same way as DASH, and renewed manifest auth is learned from redirect finals.
++        let activeToken = cand.cookie;
 +        const el = videoRef.current;
 +        const HlsCtor = window.Hls;
 +        if (HlsCtor && HlsCtor.isSupported()) {
@@ -423,6 +431,28 @@ index 8d006b0..c2d5fdd 100644
 +            manifestLoadingRetryDelay: 500,
 +            levelLoadingRetryDelay: 500,
 +            fragLoadingRetryDelay: 500,
++            xhrSetup: (xhr: XMLHttpRequest, url: string) => {
++              try {
++                xhr.addEventListener("load", () => {
++                  try {
++                    const finalUrl = xhr.responseURL || "";
++                    if (finalUrl && isHlsPlaylistUrl(url) && sameUrlHost(finalUrl, cand.url)) {
++                      const learned = extractHdneaParam(finalUrl);
++                      if (learned) activeToken = learned;
++                    }
++                  } catch {
++                    // keep current token
++                  }
++                });
++                if (!activeToken || url.includes("allinonereborn") || !sameUrlHost(url, cand.url)) return;
++                const signed = withHdneaToken(url, activeToken, false);
++                if (signed !== url) xhr.open("GET", signed, true);
+               } catch {
+-                // leave manifest untouched if decoding fails
++                // play unsigned rather than crash the request
+               }
+-            });
++            },
 +          });
 +          hlsRef.current = hls;
 +          let fatal = false;
@@ -460,7 +490,21 @@ index 8d006b0..c2d5fdd 100644
 +            }
 +            if (hlsRef.current === hls) hlsRef.current = null;
 +            return false;
-+          }
+           }
+-
+-          try {
+-            await player.attach(videoRef.current);
+-            await player.load(cand.url);
+-            if (cancelled) return false;
+-
+-            // Attach runtime error handler after initial manifest+init load succeeds.
+-            player.addEventListener("error", (event) => {
+-              if (cancelled) return;
+-              const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
+-              const code = detail?.detail?.code;
+-              const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
+-              const numeric = payload.find((d): d is number => typeof d === "number");
+-              const status = code === 1001 ? numeric : undefined;
 +          hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
 +            const d = data as { fatal?: boolean } | undefined;
 +            if (d?.fatal && !cancelled) {
@@ -545,7 +589,7 @@ index 8d006b0..c2d5fdd 100644
        }
  
        directModeRef.current = false;
-@@ -740,7 +952,11 @@ export function LiveVideoSurface({
+@@ -740,7 +993,11 @@ export function LiveVideoSurface({
  
        // JioTV and TG TV streams must play directly from the viewer's browser IP because
        // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
@@ -557,7 +601,7 @@ index 8d006b0..c2d5fdd 100644
          const startedDirect = await tryBrowserDirect(forceRefresh);
          if (startedDirect || cancelled) return;
        }
-@@ -757,7 +973,8 @@ export function LiveVideoSurface({
+@@ -757,7 +1014,8 @@ export function LiveVideoSurface({
            probeCtrl.abort();
            // When maxTV/Cloudflare Worker proxy gets HTTP 403/502, rescue the channel immediately
            // via Browser-Direct CDN playback matched by channel name/ID!
@@ -567,7 +611,7 @@ index 8d006b0..c2d5fdd 100644
              const rescued = await tryBrowserDirect(forceRefresh);
              if (rescued || cancelled) return;
            }
-@@ -778,9 +995,12 @@ export function LiveVideoSurface({
+@@ -778,9 +1036,12 @@ export function LiveVideoSurface({
          else startMpegTs(streamUrl(".ts"), true);
        } catch {
          clearTimeout(timer);
@@ -581,7 +625,7 @@ index 8d006b0..c2d5fdd 100644
            if (directUrl) startHls(directUrl, true);
            else if (wantDash) startDash(streamUrl(".mpd"));
            else startMpegTs(streamUrl(".ts"), true);
-@@ -815,7 +1035,9 @@ export function LiveVideoSurface({
+@@ -815,7 +1076,9 @@ export function LiveVideoSurface({
          onTimeUpdate={() => {
            clearOverlayIfRendering();
          }}
@@ -592,8 +636,84 @@ index 8d006b0..c2d5fdd 100644
          className="h-full w-full object-contain"
        />
        {statusMsg && (
+diff --git a/src/lib/direct-token.ts b/src/lib/direct-token.ts
+new file mode 100644
+index 0000000..41320bd
+--- /dev/null
++++ b/src/lib/direct-token.ts
+@@ -0,0 +1,70 @@
++/**
++ * Browser port of the Android app's `StreamRequestPolicy` token rules (`v.4.9`
++ * `app/src/main/java/com/aktv/app/StreamRequestPolicy.kt`).
++ *
++ * The app plays these exact TG/JJTV URLs + cookies while the website stalled, and the
++ * difference is entirely in *how* the `__hdnea__` token is applied per request:
++ *
++ * 1. The app *appends* the token, preserving every other query parameter, and **never**
++ *    overwrites a token already present on a segment/child URL (`withToken(replace=false)`
++ *    returns the URL untouched). The website used to rebuild every URL as
++ *    `base + "?" + coarseCookie`, stripping redirect-minted tokens and sibling params.
++ * 2. The app *learns* renewed tokens from each successful manifest's final wire URL
++ *    (`observed()`: Jio replaces authentication on redirects) and uses them for the
++ *    following segments. The website pinned the coarse cookie for the whole session, so
++ *    segments went out with a stale token and never produced frames.
++ * 3. Tokens are never copied to a different host (`target == origin` check).
++ *
++ * Kept dependency-free so both the Cloudflare Worker bundle and the browser component
++ * can import it without pulling anything else in.
++ */
++
++export const HDNEA_PARAM = "__hdnea__";
++
++/** Full `__hdnea__=<value>` pair found in a URL or cookie string, or null. Raw, never re-encoded. */
++export function extractHdneaParam(urlOrCookie: string | undefined | null): string | null {
++  if (!urlOrCookie) return null;
++  const m = /(?:^|[?;&\s])(__hdnea__=[^;\s&"'<>]+)/.exec(String(urlOrCookie));
++  return m?.[1] ?? null;
++}
++
++/** True when the URL already carries its own `__hdnea__` query parameter. */
++export function hasHdneaParam(url: string): boolean {
++  return /(?:^|[?;&])__hdnea__=/.test(url);
++}
++
++/**
++ * The app's `withToken()`: work on the raw query (re-encoding a signed URL can invalidate
++ * its signature), keep every sibling parameter and the `#fragment`.
++ *
++ * - `replace=false` (segments/children): a URL that already carries a token is returned
++ *   untouched; otherwise the token is appended.
++ * - `replace=true` (the advertised root manifest): any existing token is swapped for the
++ *   supplied one, sibling parameters preserved.
++ */
++export function withHdneaToken(url: string, tokenParam: string, replace: boolean): string {
++  const hashIndex = url.indexOf("#");
++  const fragment = hashIndex >= 0 ? url.slice(hashIndex) : "";
++  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
++  const qIndex = base.indexOf("?");
++  const params = (qIndex >= 0 ? base.slice(qIndex + 1) : "").split("&").filter((p) => p.length > 0);
++  if (!replace && params.some((p) => p.split("=", 1)[0] === HDNEA_PARAM)) return url;
++  const kept = params.filter((p) => p.split("=", 1)[0] !== HDNEA_PARAM);
++  kept.push(tokenParam);
++  const path = qIndex >= 0 ? base.slice(0, qIndex) : base;
++  return `${path}?${kept.join("&")}${fragment}`;
++}
++
++/** Hostname equality for the app's `target == origin` token rule; unparseable URLs never match. */
++export function sameUrlHost(a: string, b: string): boolean {
++  try {
++    return new URL(a).hostname.toLowerCase() === new URL(b).hostname.toLowerCase();
++  } catch {
++    return false;
++  }
++}
++
++/** True for an HLS playlist URL (manifest/level/audio), as opposed to a media fragment. */
++export function isHlsPlaylistUrl(url: string): boolean {
++  return /\.m3u8(?:[?#]|$)/i.test(url);
++}
 diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
-index d01ec64..64be3c5 100644
+index d01ec64..326276a 100644
 --- a/src/lib/live-gateway.ts
 +++ b/src/lib/live-gateway.ts
 @@ -2070,7 +2070,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
@@ -626,7 +746,36 @@ index d01ec64..64be3c5 100644
      matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
      matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
        ? fetchGioStarCookieForChannel(matchedGio.id, force)
-@@ -2242,10 +2253,31 @@ async function resolveDirectPlayCandidates(
+@@ -2187,16 +2198,17 @@ async function resolveDirectPlayCandidates(
+   }
+ 
+   // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
++  // URLs stay verbatim (query intact) exactly like the app's `JjtvProtocol.streams`: the browser
++  // applies the cookie with replace semantics and keeps every sibling parameter.
+   if (matchedGio) {
+     for (const rawUrl of matchedGio.urls) {
+       const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
+       const embeddedToken = extractHdneaToken(rawUrl);
+       const freshCookie = isJioStarPlUrl(rawUrl) ? starCookie : regularCookie;
+-      const baseCleanUrl = rawUrl.split("?")[0]!;
+       if (freshCookie) {
+         pushCandidate({
+           label: "GioTV Direct · Fresh Token",
+-          url: baseCleanUrl,
++          url: rawUrl,
+           cookie: freshCookie,
+           clearKeys: gioKeys,
+           container,
+@@ -2205,7 +2217,7 @@ async function resolveDirectPlayCandidates(
+       if (embeddedToken) {
+         pushCandidate({
+           label: "GioTV Direct · Embedded Token",
+-          url: baseCleanUrl,
++          url: rawUrl,
+           cookie: embeddedToken,
+           clearKeys: gioKeys,
+           container,
+@@ -2242,10 +2254,31 @@ async function resolveDirectPlayCandidates(
      }
    }
  
@@ -659,7 +808,52 @@ index d01ec64..64be3c5 100644
    };
  }
  
-@@ -3361,19 +3393,40 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3273,10 +3306,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+       au.style.display = "none"; au.innerHTML = "";
+     }
+     function sUrl(ext, probe) { return "/api/live/stream/" + encodeURIComponent(ch.id) + ext + "?_t=" + Date.now() + (probe ? "&probe=1" : ""); }
+-    function startHls(url) {
++    function hdneaOf(s) {
++      var m = /(?:^|[?;&\s])(__hdnea__=[^;\s&"'<>]+)/.exec(String(s == null ? "" : s));
++      return m ? m[1] : null;
++    }
++    function withTok(url, tok, replace) {
++      var h = url.indexOf("#"), frag = h >= 0 ? url.slice(h) : "", base = h >= 0 ? url.slice(0, h) : url;
++      var q = base.indexOf("?"), params = (q >= 0 ? base.slice(q + 1) : "").split("&").filter(function (p) { return p.length > 0; });
++      var has = params.some(function (p) { return p.split("=", 1)[0] === "__hdnea__"; });
++      if (!replace && has) return url;
++      var kept = params.filter(function (p) { return p.split("=", 1)[0] !== "__hdnea__"; });
++      kept.push(tok);
++      return (q >= 0 ? base.slice(0, q) : base) + "?" + kept.join("&") + frag;
++    }
++    function sameHost(a, b) {
++      try { return new URL(a).hostname.toLowerCase() === new URL(b).hostname.toLowerCase(); } catch (e) { return false; }
++    }
++    function startHls(url, tok, host) {
+       clean();
+       if (window.Hls && Hls.isSupported()) {
+-        hp = new Hls({ lowLatencyMode: true });
++        var activeTok = tok || "";
++        hp = new Hls({ lowLatencyMode: true, xhrSetup: function (xhr, u) {
++          try {
++            xhr.addEventListener("load", function () {
++              try {
++                var fin = xhr.responseURL || "";
++                if (fin && /\.m3u8(?:[?#]|$)/i.test(u) && host && sameHost(fin, host)) {
++                  var learned = hdneaOf(fin);
++                  if (learned) activeTok = learned;
++                }
++              } catch (e) {}
++            });
++            if (!activeTok || !host || u.indexOf("allinonereborn") >= 0 || !sameHost(u, host)) return;
++            var signed = withTok(u, activeTok, false);
++            if (signed !== u) xhr.open("GET", signed, true);
++          } catch (e) {}
++        } });
+         hp.loadSource(url); hp.attachMedia(v);
+         hp.on(Hls.Events.MANIFEST_PARSED, () => {
+           const tr = hp.audioTracks || [];
+@@ -3361,44 +3426,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
        mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
      }
@@ -698,14 +892,16 @@ index d01ec64..64be3c5 100644
 -          if (cand.container === "hls") { startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : "")); return true; }
 +          st.textContent = "Trying " + (cand.label || "direct server") + "…";
 +          if (cand.container === "hls") {
-+            startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : ""));
++            startHls(cand.cookie ? withTok(cand.url, cand.cookie, true) : cand.url, cand.cookie, cand.url);
 +            if (await waitDirectFrames(7000)) return true;
 +            continue;
 +          }
            const attempts = cand.cookie ? [cand.cookie, ""] : [""];
            for (let a = 0; a < attempts.length; a++) {
              clean();
-@@ -3382,8 +3435,8 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+             sp = new shaka.Player();
+             const activeCookie = attempts[a];
++            let activeTok = activeCookie;
              const ck = cand.clearKeys || {};
              sp.configure({
                drm: Object.keys(ck).length ? { clearKeys: ck } : {},
@@ -715,13 +911,45 @@ index d01ec64..64be3c5 100644
 +              manifest: { retryParameters: { maxAttempts: 1, baseDelay: 300, backoffFactor: 2, timeout: 7000 } }
              });
              const net = sp.getNetworkingEngine && sp.getNetworkingEngine();
-             if (net && activeCookie) {
-@@ -3417,9 +3470,10 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+-            if (net && activeCookie) {
++            if (net) {
+               net.registerRequestFilter(function (type, req) {
+-                if ((type === 0 || type === 1) && req.uris && req.uris[0]) {
+-                  const u = req.uris[0];
+-                  if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
+-                    req.uris[0] = u.split("?")[0] + "?" + activeCookie;
+-                  }
+-                }
++                if ((type !== 0 && type !== 1) || !req.uris || !req.uris[0]) return;
++                const u = req.uris[0];
++                if (u.includes("allinonereborn") || !sameHost(u, cand.url)) return;
++                if (!activeTok) return;
++                req.uris[0] = withTok(u, activeTok, false);
+               });
+             }
+-            if (net && Object.keys(ck).length) {
++            if (net) {
+               net.registerResponseFilter(function (type, resp) {
+-                if (type !== 0 || !resp.data) return;
++                if (type === 0 && resp.uri) {
++                  try {
++                    if (!resp.uri.includes("allinonereborn") && sameHost(resp.uri, cand.url)) {
++                      const learned = hdneaOf(resp.uri);
++                      if (learned) activeTok = learned;
++                    }
++                  } catch (e) {}
++                }
++                if (type !== 0 || !resp.data || !Object.keys(ck).length) return;
+                 try {
+                   let xml = new TextDecoder().decode(resp.data);
+                   if (!/<MPD[\s>]/i.test(xml)) return;
+@@ -3417,9 +3511,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
              }
              try {
                await sp.attach(v);
 -              await sp.load(cand.url);
-+              await Promise.race([sp.load(cand.url), new Promise(function (_, rej) { setTimeout(function () { rej(new Error("direct-timeout")); }, 8000); })]);
++              const rootUrl = activeCookie ? withTok(cand.url, activeCookie, true) : cand.url;
++              await Promise.race([sp.load(rootUrl), new Promise(function (_, rej) { setTimeout(function () { rej(new Error("direct-timeout")); }, 8000); })]);
                v.play().catch(function () { v.muted = true; mu.textContent = "Unmute"; v.play().catch(function () {}); });
 -              return true;
 +              // A manifest that loads but never renders must fail over, not trap the embed.
@@ -729,7 +957,7 @@ index d01ec64..64be3c5 100644
              } catch {}
            }
          }
-@@ -3470,7 +3524,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3470,7 +3566,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
          if (v.videoWidth > 0 && v.videoHeight > 0) return;
          st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
          rt.style.display = "inline-block"; ov.classList.remove("hide");
@@ -739,10 +967,21 @@ index d01ec64..64be3c5 100644
      v.onpause = () => { pl.textContent = "Play"; };
      pl.onclick = () => v.paused ? v.play() : v.pause();
 diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
-index aecc8a2..6ddbf00 100644
+index aecc8a2..48201f8 100644
 --- a/src/test/playback-fixes.test.ts
 +++ b/src/test/playback-fixes.test.ts
-@@ -359,5 +359,52 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+@@ -1,4 +1,10 @@
+ import { afterEach, describe, expect, it, vi } from "vitest";
++import {
++  extractHdneaParam,
++  isHlsPlaylistUrl,
++  sameUrlHost,
++  withHdneaToken,
++} from "@/lib/direct-token";
+ 
+ afterEach(() => {
+   delete (globalThis as { __env__?: unknown }).__env__;
+@@ -359,5 +365,87 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
      expect(body.channels.map((c) => c.id)).toContain("jio:165");
      expect(body.channels[0]!.container).toBe("dash");
    });
@@ -783,15 +1022,50 @@ index aecc8a2..6ddbf00 100644
 +    const body = (await res!.json()) as {
 +      candidates: Array<{ label: string; url: string; cookie: string }>;
 +    };
-+    // Expired embedded token pruned: the same URL keeps only its fresh-token variant.
-+    const gioVariants = body.candidates.filter(
-+      (c) => c.url === "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd",
-+    );
++    // Expired embedded token pruned: the same verbatim URL keeps only its fresh-token variant.
++    const gioBase = "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd";
++    const gioVariants = body.candidates.filter((c) => c.url.split("?")[0] === gioBase);
 +    expect(gioVariants.length).toBe(1);
++    expect(gioVariants[0]!.url).toBe(
++      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1~exp=1000000000~acl=/*~hmac=expired_embedded",
++    );
 +    expect(gioVariants[0]!.cookie).toContain("regular_token_abc");
 +    // Freshest-first ordering: fresh Gio candidate precedes the expired TG fallback.
 +    expect(body.candidates[0]!.cookie).toContain("regular_token_abc");
 +    expect(body.candidates[body.candidates.length - 1]!.cookie).toContain("expired_tg");
++  });
++});
++
++describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {
++  const FRESH = "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=fresh";
++
++  it("appends the token while preserving sibling params and fragments", () => {
++    expect(withHdneaToken("https://cdn.example/a/index.mpd", FRESH, false)).toBe(
++      `https://cdn.example/a/index.mpd?${FRESH}`,
++    );
++    expect(withHdneaToken("https://cdn.example/a/index.mpd?id=5", FRESH, false)).toBe(
++      `https://cdn.example/a/index.mpd?id=5&${FRESH}`,
++    );
++    expect(withHdneaToken("https://cdn.example/a/index.mpd#frag", FRESH, false)).toBe(
++      `https://cdn.example/a/index.mpd?${FRESH}#frag`,
++    );
++  });
++
++  it("never overwrites a token already on a segment URL, but replaces it on the root manifest", () => {
++    const signed = "https://cdn.example/a/seg-1.m4s?__hdnea__=st=1~exp=2~acl=/a/*~hmac=minted&id=5";
++    expect(withHdneaToken(signed, FRESH, false)).toBe(signed);
++    expect(withHdneaToken(signed, FRESH, true)).toBe(`https://cdn.example/a/seg-1.m4s?id=5&${FRESH}`);
++  });
++
++  it("extracts raw token pairs for redirect learning and scopes tokens to their own host", () => {
++    expect(extractHdneaParam("https://cdn.example/a.mpd?__hdnea__=st=1~exp=2&x=1")).toBe("__hdnea__=st=1~exp=2");
++    expect(extractHdneaParam("no token here")).toBeNull();
++    expect(sameUrlHost("https://JIOTVMBLIVE.cdn.jio.com/a", "https://jiotvmblive.cdn.jio.com/b")).toBe(true);
++    expect(sameUrlHost("https://a.example/x", "https://b.example/x")).toBe(false);
++    expect(sameUrlHost("not a url", "https://a.example/")).toBe(false);
++    expect(isHlsPlaylistUrl("https://cdn.example/a/index.m3u8?__hdnea__=x")).toBe(true);
++    expect(isHlsPlaylistUrl("https://cdn.example/a/seg-1.ts")).toBe(false);
++    expect(isHlsPlaylistUrl("https://cdn.example/a/seg-1.m4s")).toBe(false);
 +  });
  });
  
