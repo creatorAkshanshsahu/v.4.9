@@ -1,0 +1,904 @@
+diff --git a/src/components/tv/LiveVideoSurface.tsx b/src/components/tv/LiveVideoSurface.tsx
+index 2a89197..5146f1f 100644
+--- a/src/components/tv/LiveVideoSurface.tsx
++++ b/src/components/tv/LiveVideoSurface.tsx
+@@ -2,8 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
+ import { RefreshCw, SkipForward } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import type { DirectPlayCandidate } from "@/lib/live-gateway";
+-import { extractHdneaParam, isHlsPlaylistUrl, sameTokenScope, withHdneaToken } from "@/lib/direct-token";
+-import { describeHlsFatal, describeShakaStall } from "@/lib/playback-faults";
++import {
++  delayMs,
++  extractHdneaParam,
++  hostStallCount,
++  isHlsPlaylistUrl,
++  sameTokenScope,
++  withHdneaToken,
++} from "@/lib/direct-token";
++import {
++  classifyHlsAttemptOutcome,
++  describeHlsFatal,
++  describeShakaStall,
++} from "@/lib/playback-faults";
++import type { AttemptOutcome } from "@/lib/playback-faults";
+ 
+ export interface AudioTrackOption {
+   index: number;
+@@ -205,18 +217,18 @@ function engineReady(name: EngineName): boolean {
+ }
+ 
+ function loadScript(src: string): Promise<void> {
+-  return new Promise<void>((resolve) => {
+-    if (document.querySelector(`script[src="${src}"]`)) {
+-      resolve();
+-      return;
+-    }
+-    const el = document.createElement("script");
+-    el.src = src;
+-    el.async = true;
++  if (document.querySelector(`script[src="${src}"]`)) return Promise.resolve();
++  const el = document.createElement("script");
++  el.src = src;
++  el.async = true;
++  const settled = new Promise<void>((resolve) => {
+     el.onload = () => resolve();
+     el.onerror = () => resolve();
+-    document.head.appendChild(el);
+   });
++  document.head.appendChild(el);
++  // A stalled /vendor fetch must never hang the player: give up engine-less after 12s and let
++  // the candidate loop skip what it cannot run.
++  return Promise.race([settled, delayMs(12_000)]);
+ }
+ 
+ function ensureEngine(name: EngineName): Promise<void> {
+@@ -848,8 +860,8 @@ export function LiveVideoSurface({
+         return "played";
+       };
+ 
+-      const tryHlsCandidate = async (cand: DirectPlayCandidate): Promise<boolean> => {
+-        if (cancelled || !videoRef.current) return false;
++      const tryHlsCandidate = async (cand: DirectPlayCandidate): Promise<AttemptOutcome> => {
++        if (cancelled || !videoRef.current) return "refused";
+         cleanup();
+         directModeRef.current = true;
+         emitContainer("HLS");
+@@ -883,7 +895,12 @@ export function LiveVideoSurface({
+                     // keep current token
+                   }
+                 });
+-                if (!activeToken || url.includes("allinonereborn") || !sameTokenScope(url, cand.url)) return;
++                if (
++                  !activeToken ||
++                  url.includes("allinonereborn") ||
++                  !sameTokenScope(url, cand.url)
++                )
++                  return;
+                 const signed = withHdneaToken(url, activeToken, false);
+                 if (signed !== url) xhr.open("GET", signed, true);
+               } catch {
+@@ -901,7 +918,9 @@ export function LiveVideoSurface({
+               label: [t.name, t.lang].filter(Boolean).join(" · ") || `Track ${idx + 1}`,
+             }));
+             let preferred = hls.audioTrack;
+-            const hindiIdx = list.findIndex((t) => /hin|^hi$/i.test(`${t.name ?? ""} ${t.lang ?? ""}`));
++            const hindiIdx = list.findIndex((t) =>
++              /hin|^hi$/i.test(`${t.name ?? ""} ${t.lang ?? ""}`),
++            );
+             if (hindiIdx >= 0) {
+               hls.audioTrack = hindiIdx;
+               preferred = hindiIdx;
+@@ -930,7 +949,7 @@ export function LiveVideoSurface({
+               // ignore teardown errors
+             }
+             if (hlsRef.current === hls) hlsRef.current = null;
+-            return false;
++            return classifyHlsAttemptOutcome(fatal ? fatalDetail : null);
+           }
+           hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
+             const d = data as { fatal?: boolean } | undefined;
+@@ -940,7 +959,7 @@ export function LiveVideoSurface({
+               reportError(describeHlsFatal(data, activeSource ?? "maxtv").message);
+             }
+           });
+-          return true;
++          return "played";
+         }
+         if (el.canPlayType("application/vnd.apple.mpegurl")) {
+           el.src = signedHls;
+@@ -949,29 +968,45 @@ export function LiveVideoSurface({
+           if (cancelled || !framed) {
+             el.removeAttribute("src");
+             el.load();
+-            return false;
++            // Native playback reports no status, so a failure keeps the pass going (as before)
++            // rather than condemning a host that may only have been handed a dead token.
++            return "refused";
+           }
+-          return true;
++          return "played";
+         }
+-        return false;
++        // No HLS engine at all: not the host's fault, so the pass continues to DASH.
++        return "refused";
+       };
+ 
+       const attemptAll = async (candidates: DirectPlayCandidate[]): Promise<boolean> => {
+         // Hard cap so one slow pass can never trap the player; the watchdog + fresh-token
+         // pass take over from there.
+         const passDeadline = Date.now() + 40000;
++        // Hosts that hung this pass: two stalls on one host skips its remaining candidates,
++        // while other hosts are always tried and the next pass starts over.
++        const stalledUrls: string[] = [];
+         for (const cand of candidates) {
+           if (cancelled || !videoRef.current || Date.now() > passDeadline) return false;
++          if (hostStallCount(cand.url, stalledUrls) >= 2) continue;
+ 
+           if (cand.container === "hls") {
+-            if (await tryHlsCandidate(cand)) return true;
++            const outcome = await tryHlsCandidate(cand);
++            if (outcome === "played" || cancelled) return outcome === "played";
++            if (outcome === "stalled") stalledUrls.push(cand.url);
+             continue;
+           }
+ 
+-          if (!shaka) continue;
+-          shaka.polyfill.installAll();
+-          if (!shaka.Player.isBrowserSupported()) continue;
+-          shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
++          // Readiness is per candidate, not per pass: the engine loads lazily, and a snapshot
++          // taken before the first DASH attempt would skip every DASH candidate on a fresh page.
++          let dashEngine = window.shaka;
++          if (!dashEngine) {
++            await ensureEngine("shaka");
++            dashEngine = window.shaka;
++          }
++          if (!dashEngine) continue;
++          dashEngine.polyfill.installAll();
++          if (!dashEngine.Player.isBrowserSupported()) continue;
++          dashEngine.log?.setLevel(dashEngine.LogLevel?.NONE ?? 0);
+ 
+           const normalizedKeys: Record<string, string> = {};
+           for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
+@@ -985,10 +1020,13 @@ export function LiveVideoSurface({
+           // while a hanging server would just hang twice.
+           const first = await tryDashAttempt(cand, cand.cookie || "", normalizedKeys);
+           if (first === "played" || cancelled) return first === "played";
++          let dashOutcome = first;
+           if (first === "refused" && cand.cookie) {
+             const bare = await tryDashAttempt(cand, "", normalizedKeys);
+             if (bare === "played" || cancelled) return bare === "played";
++            dashOutcome = bare;
+           }
++          if (dashOutcome === "stalled") stalledUrls.push(cand.url);
+         }
+         return false;
+       };
+diff --git a/src/lib/direct-token.ts b/src/lib/direct-token.ts
+index b4d96c4..489d0a1 100644
+--- a/src/lib/direct-token.ts
++++ b/src/lib/direct-token.ts
+@@ -102,3 +102,17 @@ export function sameTokenScope(a: string, b: string): boolean {
+ export function isHlsPlaylistUrl(url: string): boolean {
+   return /\.m3u8(?:[?#]|$)/i.test(url);
+ }
++
++/** Resolve after `ms` with no value: racing an engine `<script>` load so a stalled `/vendor` fetch can never hang the player. */
++export function delayMs(ms: number): Promise<void> {
++  return new Promise((resolve) => setTimeout(resolve, ms));
++}
++
++/**
++ * How many of this pass's stalled attempts share `url`'s host. Two stalls on one host skips
++ * its remaining candidates — a new token cannot fix a host that never answers — while other
++ * hosts are always tried, so a dead server never murders the failover to a live one.
++ */
++export function hostStallCount(url: string, stalledUrls: string[]): number {
++  return stalledUrls.filter((u) => sameUrlHost(u, url)).length;
++}
+diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
+index dd606bd..2d4c005 100644
+--- a/src/lib/live-gateway.ts
++++ b/src/lib/live-gateway.ts
+@@ -2373,6 +2373,11 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
+ export function normalizeChannelMatchTokens(rawName: string): { base: string; noQuality: string; numbers: string[]; tokens: string[] } {
+   let s = rawName
+     .toLowerCase()
++    // A reseller tag is not the channel: "CNBC Awaaz By Premium PlugX" never equals Jio's
++    // "CNBC Awaaz", so the JioTV browser-direct rescue rejected every reseller entry by name.
++    // Strip a trailing "by <tag>" first — the replaces below re-punctuate the tail and would
++    // hide it. End-anchored with a word after "by", so "Baby TV" and a bare trailing "by" survive.
++    .replace(/\s+by\s+[a-z0-9][a-z0-9 .&'()+/-]*?\s*$/, "")
+     .replace(/^[|\[(\{\s]*(?:in|ind|india|indian|vip|hindi|uk|us)[|\])\}\s:\-–—]+/gi, "")
+     .replace(/\b(?:sony\s+sports\s+ten)\b/g, "sony ten")
+     .replace(/\b(?:sony\s+set)\b/g, "set")
+@@ -2892,7 +2897,9 @@ async function fetchTgPlaylistCatalogue(cfg: GatewayConfig): Promise<LiveChannel
+   }));
+ }
+ 
+-async function fetchTgTvCatalogue(cfg: GatewayConfig): Promise<LiveChannelItem[]> {
++async function fetchTgTvCatalogue(
++  cfg: GatewayConfig,
++): Promise<{ items: LiveChannelItem[]; playlistError: string | null }> {
+   // Primary: the TG playlist. It used to be the *fallback*, behind GioTV's catalogue, and
+   // GioTV always returned 1,176 channels — so the TG tab silently stopped serving TG's own
+   // streams and served jio CDN channels instead. Those are blocked at the worker's address and
+@@ -2901,7 +2908,7 @@ async function fetchTgTvCatalogue(cfg: GatewayConfig): Promise<LiveChannelItem[]
+   let playlistError: unknown = null;
+   try {
+     const fromPlaylist = await fetchTgPlaylistCatalogue(cfg);
+-    if (fromPlaylist.length > 0) return fromPlaylist;
++    if (fromPlaylist.length > 0) return { items: fromPlaylist, playlistError: null };
+   } catch (err) {
+     playlistError = err;
+   }
+@@ -2910,21 +2917,30 @@ async function fetchTgTvCatalogue(cfg: GatewayConfig): Promise<LiveChannelItem[]
+   // as JioTV, so it is a usable second choice when the playlist is unreachable.
+   const gio = await loadGioTvRawCached(false).catch(() => []);
+   if (gio.length > 0) {
+-    return gio.map((g) => ({
+-      id: `tg:${g.id}`,
+-      rawId: g.id,
+-      source: "tgtv" as const,
+-      name: g.name,
+-      category: g.category || "AK TV",
+-      logo: g.logo,
+-      cmd: g.urls[0]!,
+-      mediaType: jioMediaType(g.urls[0]!),
+-      ...(g.keys.length ? { drm: { type: "clearkey" as const, keys: g.keys } } : {}),
+-    }));
++    // The list is a substitution, and the channels route says so: a silent swap here is a
++    // guide full of Jio entries wearing AK TV badges with no explanation.
++    const playlistMessage =
++      playlistError instanceof Error
++        ? playlistError.message
++        : "AK TV playlist returned no channels";
++    return {
++      items: gio.map((g) => ({
++        id: `tg:${g.id}`,
++        rawId: g.id,
++        source: "tgtv" as const,
++        name: g.name,
++        category: g.category || "AK TV",
++        logo: g.logo,
++        cmd: g.urls[0]!,
++        mediaType: jioMediaType(g.urls[0]!),
++        ...(g.keys.length ? { drm: { type: "clearkey" as const, keys: g.keys } } : {}),
++      })),
++      playlistError: playlistMessage,
++    };
+   }
+ 
+   if (playlistError) throw playlistError;
+-  return [];
++  return { items: [], playlistError: null };
+ }
+ 
+ /**
+@@ -2961,10 +2977,12 @@ async function loadTgTvCached(cfg: GatewayConfig, force = false): Promise<LiveCh
+ 
+   const read = (async (): Promise<LiveChannelItem[]> => {
+     try {
+-      const live = await fetchTgTvCatalogue(cfg);
++      // `error` names the playlist failure even when the GioTV backup is carrying the list,
++      // so the channels route can say so instead of serving a silent substitution.
++      const { items: live, playlistError } = await fetchTgTvCatalogue(cfg);
+       tgtvCache.items = live;
+       tgtvCache.fetchedAt = Date.now();
+-      tgtvCache.error = null;
++      tgtvCache.error = playlistError;
+       return live;
+     } catch (e) {
+       tgtvCache.error = e instanceof Error ? e.message : String(e);
+@@ -3860,6 +3878,25 @@ function saveStreamHandoff(channelId: string | undefined, entry: ProbeHandoffEnt
+   streamHandoffCache.set(channelId, entry);
+ }
+ 
++/**
++ * What the first bytes of a 200 body say when they contradict the manifest the URL promised.
++ *
++ * Extension sniffing calls anything at a `.m3u8` address HLS, but a reseller whose link expired
++ * answers 200 with an HTML error page, and some `.m3u8` addresses serve raw MPEG-TS. Serving
++ * either to hls.js as a playlist produces "not an HLS playlist" fatals in the browser for a
++ * body the server already held. `null` means the head confirms nothing either way and the
++ * existing content-type/extension verdict stands.
++ */
++export function sniffUpstreamHead(
++  headText: string,
++  firstByte: number | undefined,
++): "html" | "ts" | null {
++  if (/^<!doctype|^<html|^<head|^<title|^<body/i.test(headText)) return "html";
++  // 0x47 is the MPEG-TS sync byte: no playlist (`#`), MPD (`<`) or HTML page starts with it.
++  if (firstByte === 0x47) return "ts";
++  return null;
++}
++
+ async function proxyMediaStream(
+   upstreamUrl: string,
+   mode: "mag" | "xtream",
+@@ -3940,9 +3977,11 @@ async function proxyMediaStream(
+       // Built here, not earlier: resolving a redirector costs a round trip, and it is only worth
+       // spending on the path where the browser is about to be handed the address.
+       const recipe = typeof refusalRecipe === "function" ? await refusalRecipe() : refusalRecipe;
++      // Terminal wording, not a promise: the player shows this only after the recipe, the
++      // direct-config candidates and the direct-URL fallback have all failed.
+       return jsonResponse(502, {
+         ok: false,
+-        error: `The stream host refused this server's address (HTTP ${status}). Playing it directly from your browser instead.`,
++        error: `The stream host refused this server's address (HTTP ${status}), and the browser-direct fallback failed too. Try the same channel from another source, or press Retry.`,
+         directPlay: recipe,
+       });
+     }
+@@ -3963,8 +4002,43 @@ async function proxyMediaStream(
+   const pathLower = currentUrl.split("?")[0]!.toLowerCase();
+   const isHls = ctype.includes("mpegurl") || pathLower.endsWith(".m3u8") || headText.startsWith("#EXTM3U");
+   const isDash = ctype.includes("dash+xml") || pathLower.endsWith(".mpd") || /^<\?xml|^<MPD/i.test(headText);
++  const headSniff = sniffUpstreamHead(headText, first.value[0]);
++
++  if (headSniff === "html") {
++    // HTTP 200 with an error page where the manifest should be: the reseller link has most
++    // likely expired (or this address is banned and the page says so). Served as a playlist
++    // this becomes a browser-side "not an HLS playlist" fatal; refused here it names the
++    // cause, and the browser still gets the recipe in case the page was meant for this IP only.
++    recordSegment(mode, {
++      at: Date.now(),
++      url: diagnosticUrl(currentUrl),
++      status: upRes.status,
++      bytes: first.value.byteLength,
++      range: range ?? null,
++    });
++    await reader.cancel().catch(() => undefined);
++    if (refusalRecipe) {
++      const recipe = typeof refusalRecipe === "function" ? await refusalRecipe() : refusalRecipe;
++      return jsonResponse(502, {
++        ok: false,
++        error:
++          "This channel's link answered with an error page instead of a playlist — it has most likely expired — and the browser-direct fallback failed too. Try the same channel from another source, or press Retry.",
++        directPlay: recipe,
++      });
++    }
++    return jsonResponse(502, {
++      ok: false,
++      error:
++        "This channel's link answered with an error page instead of a playlist — it has most likely expired. Try the same channel from another source, or press Retry.",
++    });
++  }
+ 
+-  if (isDash) {
++  // Raw MPEG-TS behind a playlist extension: the branches below would serve binary to a
++  // playlist parser. Falling through to the byte stream serves it as MPEG-TS, which is the
++  // engine the probe then names and the player then opens.
++  const serveAsTs = headSniff === "ts";
++
++  if (isDash && !serveAsTs) {
+     // An MPD is small; buffer it and hand it back whole so the player can read it.
+     const chunks: Uint8Array[] = [first.value];
+     let total = first.value.byteLength;
+@@ -4036,7 +4110,7 @@ async function proxyMediaStream(
+     });
+   }
+ 
+-  if (isHls) {
++  if (isHls && !serveAsTs) {
+     const chunks: Uint8Array[] = [first.value];
+     let total = first.value.byteLength;
+     while (total < 2 * 1024 * 1024) {
+@@ -4825,6 +4899,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+       portalError,
+       portalEndpoint: memCache.maxtv.endpoint,
+       backupError: jioCache.error,
++      tgtvPlaylistError: hasTgTv ? (tgtvCache.error ?? null) : null,
+       categories,
+       channels,
+     });
+@@ -4840,7 +4915,9 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+     const raw = source === "all" ? akTvOnly(listed) : listed;
+     let filtered = raw.filter((c) => keepsByFilter(c.name, c.category, filter));
+     if (filtered.length === 0 && filter !== "all") filtered = raw;
+-    filtered.sort((a, b) => categoryRank(a.category) - categoryRank(b.category) || a.name.localeCompare(b.name));
++    filtered.sort(
++      (a, b) => categoryRank(a.category) - categoryRank(b.category) || a.name.localeCompare(b.name),
++    );
+ 
+     const lines = ["#EXTM3U"];
+     for (const ch of filtered) {
+@@ -5291,7 +5368,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+       if (isJioCdnHost(ch.cmd)) {
+         return jsonResponse(502, {
+           ok: false,
+-          error: `This channel streams from the Jio CDN, which refuses the server's address (HTTP 450). It is being played directly from your browser instead.`,
++          error: `This channel streams from the Jio CDN, which refuses the server's address (HTTP 450), and the browser-direct fallback failed too. Try the same channel from another source, or press Retry.`,
+           directPlay: await recipeFor(),
+         });
+       }
+@@ -5314,7 +5391,9 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+           // fix: the host answers 403 to the server *and* to the viewer's browser, and neither
+           // address can be changed from here. The refusal path below is untouched, so a wrong
+           // referrer costs nothing that was working.
+-          ...(referrerFor(ch.cmd, ch.referrer) ? { Referer: referrerFor(ch.cmd, ch.referrer) } : {}),
++          ...(referrerFor(ch.cmd, ch.referrer)
++            ? { Referer: referrerFor(ch.cmd, ch.referrer) }
++            : {}),
+         },
+         undefined,
+         request.headers.get("range"),
+diff --git a/src/lib/playback-faults.ts b/src/lib/playback-faults.ts
+index dd7b75c..fc1b744 100644
+--- a/src/lib/playback-faults.ts
++++ b/src/lib/playback-faults.ts
+@@ -81,8 +81,7 @@ export function describeHlsFatal(data: unknown, sourceName?: string): PlaybackFa
+     return {
+       kind,
+       ...(detail ? { detail } : {}),
+-      message:
+-        "The stream host answered with something that is not an HLS playlist. The link has most likely expired, or this is a raw MPEG-TS stream wearing an .m3u8 name.",
++      message: `The stream host answered with something that is not an HLS playlist. The link has most likely expired, or this is a raw MPEG-TS stream wearing an .m3u8 name. ${retryAdvice(source)}`,
+     };
+   }
+ 
+@@ -161,6 +160,23 @@ function classifyHls(detail: string | undefined): FaultKind {
+   return "unknown";
+ }
+ 
++/** A browser-direct attempt's verdict: frames, a fast refusal, or a hang. Shared with the DASH path's own tri-state. */
++export type AttemptOutcome = "played" | "refused" | "stalled";
++
++/**
++ * An HLS attempt that never produced frames: did the host refuse (another token may work)
++ * or did nothing answer (nothing will, on this host, in this pass)?
++ *
++ * Only a real HTTP refusal keeps the pass going at full length: timeouts and status-less
++ * fatals are stalls, and two stalls on one host skip its remaining candidates.
++ */
++export function classifyHlsAttemptOutcome(fatalDetail: unknown): "refused" | "stalled" {
++  const d = (fatalDetail ?? {}) as { response?: { code?: unknown } };
++  const rawStatus = d.response?.code;
++  if (typeof rawStatus === "number" && rawStatus >= 400) return "refused";
++  return "stalled";
++}
++
+ /**
+  * Attribute a direct-DASH stall.
+  *
+diff --git a/src/routes/live.tsx b/src/routes/live.tsx
+index 0a3ccfa..39bf72b 100644
+--- a/src/routes/live.tsx
++++ b/src/routes/live.tsx
+@@ -56,6 +56,7 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+    */
+   const [accent, setAccent] = useState<string | null>(null);
+   const [backupError, setBackupError] = useState<string | null>(null);
++  const [tgtvPlaylistError, setTgtvPlaylistError] = useState<string | null>(null);
+ 
+   useEffect(() => {
+     if (typeof window === "undefined") return;
+@@ -80,12 +81,14 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+           portalError?: string | null;
+           servedBy?: string;
+           backupError?: string | null;
++          tgtvPlaylistError?: string | null;
+         };
+         const list = data.channels ?? [];
+         setChannels(list);
+         setCategories(data.categories ?? []);
+         setPortalError(data.portalError ?? null);
+         setBackupError(data.backupError ?? null);
++        setTgtvPlaylistError(data.tgtvPlaylistError ?? null);
+         setSelectedCategory("");
+         if (list.length > 0) {
+           /*
+@@ -313,7 +316,9 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+             )}
+             {activeChannel?.name ?? (loading ? "Loading…" : "No channel")}
+           </h1>
+-          <span className="glass rounded-full px-2.5 py-1 text-[11px] font-bold text-accent">AK TV</span>
++          <span className="glass rounded-full px-2.5 py-1 text-[11px] font-bold text-accent">
++            AK TV
++          </span>
+           {activeChannel && (
+             <span className="text-xs text-muted-foreground">
+               {activeChannel.category} · {containerKind}
+@@ -338,12 +343,26 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+           </div>
+         </section>
+ 
++        {/* The playlist failed but the backup catalogue is carrying the list: say so plainly. */}
++        {tgtvPlaylistError && visibleChannels.length > 0 && (
++          <div className="mb-3 rounded-xl border border-accent/40 bg-background/85 px-4 py-2.5 text-xs">
++            <p className="font-bold text-accent">
++              AK TV playlist unreachable — showing the JioTV backup list.
++            </p>
++            <p className="mt-0.5 text-muted-foreground">
++              {tgtvPlaylistError} Some entries may not play. Press Refresh to retry the playlist.
++            </p>
++          </div>
++        )}
++
+         {/* One source, so there is nothing to fall back from: say the list is short or dead. */}
+         {(portalError || backupError || (!loading && visibleChannels.length === 0)) && (
+           <div className="mb-3 rounded-xl border border-accent/40 bg-background/85 px-4 py-2.5 text-xs">
+             <p className="font-bold text-accent">AK TV returned no channels.</p>
+             <p className="mt-0.5 text-muted-foreground">
+-              {portalError ?? backupError ?? "The playlist answered but listed nothing. Press Refresh to try again."}
++              {portalError ??
++                backupError ??
++                "The playlist answered but listed nothing. Press Refresh to try again."}
+             </p>
+           </div>
+         )}
+@@ -433,7 +452,9 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+                   </span>
+                   <span className="min-w-0">
+                     <span className="block truncate text-xs font-bold sm:text-sm">{ch.name}</span>
+-                    <span className={`block truncate text-[10px] ${selected ? "opacity-80" : "text-muted-foreground"}`}>
++                    <span
++                      className={`block truncate text-[10px] ${selected ? "opacity-80" : "text-muted-foreground"}`}
++                    >
+                       {ch.category}
+                     </span>
+                   </span>
+@@ -444,7 +465,9 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+ 
+           {!loading && visibleChannels.length === 0 && (
+             <p className="py-1 text-xs text-muted-foreground">
+-              {query.trim() ? `No channels match “${query.trim()}”.` : "No channels match this filter. Try “All”."}
++              {query.trim()
++                ? `No channels match “${query.trim()}”.`
++                : "No channels match this filter. Try “All”."}
+             </p>
+           )}
+         </section>
+@@ -456,23 +479,40 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+           <div className="w-full max-w-xl space-y-3 rounded-2xl border border-border bg-background p-5">
+             <div className="flex flex-wrap items-center justify-between gap-2">
+               <h2 className="font-display text-base font-bold">Embed {activeChannel.name}</h2>
+-              <a href="/embed" target="_blank" rel="noopener" className="text-[11px] font-semibold text-accent underline">
++              <a
++                href="/embed"
++                target="_blank"
++                rel="noopener"
++                className="text-[11px] font-semibold text-accent underline"
++              >
+                 Full guide, colour and API
+               </a>
+-              <Button variant="secondary" size="sm" onClick={() => setShowEmbedModal(false)} className="rounded-full text-xs">
++              <Button
++                variant="secondary"
++                size="sm"
++                onClick={() => setShowEmbedModal(false)}
++                className="rounded-full text-xs"
++              >
+                 Close
+               </Button>
+             </div>
+ 
+             {[
+               { key: "iframe", label: "1. This channel · iframe", value: channelEmbedCode },
+-              { key: "one", label: "2. This channel · sources and ClearKey (JSON)", value: channelPublicUrl },
++              {
++                key: "one",
++                label: "2. This channel · sources and ClearKey (JSON)",
++                value: channelPublicUrl,
++              },
+               { key: "api", label: "3. Channel list (public JSON API)", value: publicApiUrl },
+               { key: "watch", label: "4. This channel · full page", value: channelWatchUrl },
+               { key: "m3u", label: "5. AK TV M3U playlist", value: m3uUrl },
+               { key: "sdk", label: "6. Player and channel grid (script tag)", value: sdkCode },
+             ].map((item) => (
+-              <div key={item.key} className="space-y-1 rounded-xl border border-border bg-background/80 p-3">
++              <div
++                key={item.key}
++                className="space-y-1 rounded-xl border border-border bg-background/80 p-3"
++              >
+                 <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                   <span>{item.label}</span>
+                   <button
+@@ -480,7 +520,11 @@ export function LivePlayerContent({ initialChannelId }: { initialChannelId?: str
+                     onClick={() => copySnippet(item.key, item.value)}
+                     className="inline-flex items-center gap-1 text-accent hover:underline"
+                   >
+-                    {copiedKey === item.key ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
++                    {copiedKey === item.key ? (
++                      <Check className="size-3.5" />
++                    ) : (
++                      <Copy className="size-3.5" />
++                    )}
+                     {copiedKey === item.key ? "Copied" : "Copy"}
+                   </button>
+                 </div>
+diff --git a/src/test/playback-faults.test.ts b/src/test/playback-faults.test.ts
+index eaf9516..7aee970 100644
+--- a/src/test/playback-faults.test.ts
++++ b/src/test/playback-faults.test.ts
+@@ -1,5 +1,9 @@
+ import { describe, expect, it } from "vitest";
+-import { describeHlsFatal, describeShakaStall } from "@/lib/playback-faults";
++import {
++  classifyHlsAttemptOutcome,
++  describeHlsFatal,
++  describeShakaStall,
++} from "@/lib/playback-faults";
+ 
+ /**
+  * Both real reports are pinned here:
+@@ -24,6 +28,15 @@ describe("describeHlsFatal", () => {
+     expect(f.kind).toBe("manifest");
+     expect(f.message).toContain("not an HLS playlist");
+     expect(f.message).toContain("MPEG-TS");
++    // Every other branch ends in the source's remedy; this one used to leave the viewer
++    // with a diagnosis and nothing to do.
++    expect(f.message).toContain("Press Retry");
++  });
++
++  it("gives the AK TV variant of the not-a-playlist fault its reconnect remedy", () => {
++    const f = describeHlsFatal({ fatal: true, details: "manifestParsingError" }, "tgtv");
++    expect(f.kind).toBe("manifest");
++    expect(f.message).toContain("Press Retry to reconnect");
+   });
+ 
+   it("calls an unfetchable AES key a key fault, not the network", () => {
+@@ -108,3 +121,23 @@ describe("describeShakaStall", () => {
+     expect(f.message).toContain("Press Retry");
+   });
+ });
++
++describe("classifyHlsAttemptOutcome", () => {
++  it("keeps the pass going on a fast HTTP refusal, but calls timeouts and stateless fatals stalls", () => {
++    expect(
++      classifyHlsAttemptOutcome({
++        fatal: true,
++        details: "manifestLoadError",
++        response: { code: 403 },
++      }),
++    ).toBe("refused");
++    expect(classifyHlsAttemptOutcome({ fatal: true, details: "manifestLoadTimeout" })).toBe(
++      "stalled",
++    );
++    expect(classifyHlsAttemptOutcome({ fatal: true, details: "manifestParsingError" })).toBe(
++      "stalled",
++    );
++    // No fatal at all: the wait simply never framed.
++    expect(classifyHlsAttemptOutcome(null)).toBe("stalled");
++  });
++});
+diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
+index 1f76194..ee300a3 100644
+--- a/src/test/playback-fixes.test.ts
++++ b/src/test/playback-fixes.test.ts
+@@ -676,3 +676,201 @@ describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {
+   });
+ });
+ 
++describe("Reseller-suffixed names still match the JioTV rescue catalogue", () => {
++  it("strips a trailing reseller tag before matching, without touching honest names", async () => {
++    const { normalizeChannelMatchTokens } = await import("@/lib/live-gateway");
++    expect(normalizeChannelMatchTokens("CNBC Awaaz By Premium PlugX").base).toBe("cnbc awaaz");
++    expect(normalizeChannelMatchTokens("DISCOVERY By Premium PlugX").base).toBe("discovery");
++    expect(normalizeChannelMatchTokens("Star Sports 1 Hindi By Nova IPTV").numbers).toEqual(["1"]);
++    // Not tags: no space before "by", or nothing after it.
++    expect(normalizeChannelMatchTokens("Baby TV").base).toBe("baby tv");
++    expect(normalizeChannelMatchTokens("Stand By").base).toBe("stand by");
++  });
++
++  it("matches a reseller entry to its JioTV namesake for the browser-direct rescue", async () => {
++    const { findBestGioTvMatch } = await import("@/lib/live-gateway");
++    const records = [
++      { id: "377", name: "CNBC Awaaz", category: "News", logo: "", urls: [], keys: [] },
++      { id: "114", name: "Discovery HD", category: "Infotainment", logo: "", urls: [], keys: [] },
++    ];
++    const cnbc = findBestGioTvMatch(records, "tg:2752", "CNBC Awaaz By Premium PlugX");
++    expect(cnbc?.id).toBe("377");
++    // "DISCOVERY" has no bare Jio namesake, but it is "Discovery HD" minus the quality word.
++    const discovery = findBestGioTvMatch(records, "tg:2423", "DISCOVERY By Premium PlugX");
++    expect(discovery?.id).toBe("114");
++  });
++});
++
++describe("AK TV reseller failures refuse honestly instead of serving garbage as HLS", () => {
++  const RESELLER_M3U = `#EXTM3U
++#EXTINF:-1 tvg-id="2752" group-title="News",CNBC Awaaz By Premium PlugX
++https://reseller.example/tee/playlist.php/CNBC.m3u8
++#EXTINF:-1 tvg-id="2423" group-title="Infotainment",DISCOVERY By Premium PlugX
++https://reseller.example/tee/playlist.php/DISCOVERY.m3u8
++`;
++
++  it("refuses an HTML error page with an expiry sentence and the browser recipe, not HLS", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(RESELLER_M3U, { status: 200 });
++      if (u.includes("reseller.example")) {
++        return new Response(
++          "<html><head><title>Link expired</title></head><body>expired</body></html>",
++          {
++            status: 200,
++            headers: { "content-type": "text/html" },
++          },
++        );
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2752.ts?probe=1"),
++      {},
++    );
++    expect(res!.status).toBe(502);
++    const body = (await res!.json()) as {
++      error: string;
++      directPlay?: { url: string; container: string };
++    };
++    expect(body.error).toContain("error page instead of a playlist");
++    expect(body.error).toContain("most likely expired");
++    expect(body.directPlay?.url).toContain("reseller.example");
++    expect(body.directPlay?.container).toBe("hls");
++  });
++
++  it("serves raw MPEG-TS behind a .m3u8 address as MPEG-TS so the probe names the TS engine", async () => {
++    const ts = new Uint8Array(376);
++    ts[0] = 0x47;
++    ts[188] = 0x47;
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(RESELLER_M3U, { status: 200 });
++      if (u.includes("reseller.example")) {
++        return new Response(ts, { status: 200, headers: { "content-type": "video/mp2t" } });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const probe = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2752.ts?probe=1"),
++      {},
++    );
++    expect(probe!.status).toBe(200);
++    expect(probe!.headers.get("x-stream-container")).toBe("mpegts");
++    // And the player's follow-up request streams the bytes the probe put aside.
++    const play = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2752.ts"),
++      {},
++    );
++    expect(play!.status).toBe(200);
++    expect(play!.headers.get("x-stream-container")).toBe("mpegts");
++    expect(play!.headers.get("content-type")).toContain("video/mp2t");
++  });
++
++  it("tells the viewer the browser fallback failed too when a reseller gate refuses the relay", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(RESELLER_M3U, { status: 200 });
++      // The gate refuses the relay everywhere: the manifest fetch and the recipe's resolve.
++      if (u.includes("reseller.example")) return new Response("blocked", { status: 530 });
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2423.ts?probe=1"),
++      {},
++    );
++    expect(res!.status).toBe(502);
++    const body = (await res!.json()) as { error: string; directPlay?: { url: string } };
++    expect(body.error).toContain("HTTP 530");
++    expect(body.error).toContain("browser-direct fallback failed too");
++    expect(body.error).not.toContain("Playing it directly from your browser instead");
++    expect(body.directPlay?.url).toContain("reseller.example");
++  });
++
++  it("pins the first-byte sniffing the stream route trusts over the URL extension", async () => {
++    const { sniffUpstreamHead } = await import("@/lib/live-gateway");
++    expect(sniffUpstreamHead("<!DOCTYPE HTML><html>", 0x3c)).toBe("html");
++    expect(sniffUpstreamHead("<html><body>expired</body></html>", 0x3c)).toBe("html");
++    expect(sniffUpstreamHead("G", 0x47)).toBe("ts");
++    // A playlist, an MPD and an inconclusive head all leave the extension verdict standing.
++    expect(sniffUpstreamHead("#EXTM3U", 0x23)).toBeNull();
++    expect(sniffUpstreamHead('<?xml version="1.0"?>', 0x3c)).toBeNull();
++    expect(sniffUpstreamHead("<MPD", 0x3c)).toBeNull();
++    expect(sniffUpstreamHead("", undefined)).toBeNull();
++  });
++});
++
++describe("AK TV playlist outage falls back to the JioTV backup list, and says so", () => {
++  const PLAYLIST_M3U = `#EXTM3U
++#EXTINF:-1 tvg-id="2752" group-title="News",CNBC Awaaz By Premium PlugX
++https://reseller.example/tee/playlist.php/CNBC.m3u8
++`;
++  const GIO_JSON = JSON.stringify([
++    {
++      id: "377",
++      name: "CNBC Awaaz",
++      category: "News",
++      logo: "https://cdn.example/cnbc.png",
++      url: "https://jiotvmblive.cdn.jio.com/bpk-tv/CNBC_Awaaz_MOB/WDVLive/index.mpd",
++      keyId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
++      key: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
++    },
++  ]);
++
++  it("serves the playlist with no error flag when it answers", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(PLAYLIST_M3U, { status: 200 });
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request(
++        "https://screen-safari-studio.lovable.app/api/live/channels?source=tgtv&filter=all",
++      ),
++      {},
++    );
++    const body = (await res!.json()) as {
++      channels: Array<{ name: string }>;
++      servedBy: string;
++      tgtvPlaylistError: string | null;
++    };
++    expect(body.channels.length).toBe(1);
++    expect(body.channels[0]!.name).toBe("CNBC Awaaz By Premium PlugX");
++    expect(body.servedBy).toBe("tgtv");
++    expect(body.tgtvPlaylistError).toBeNull();
++  });
++
++  it("serves the GioTV backup with the playlist error attached when the playlist fails", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response("gone", { status: 404 });
++      if (u.includes("giotv-6op.pages.dev")) return new Response(GIO_JSON, { status: 200 });
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request(
++        "https://screen-safari-studio.lovable.app/api/live/channels?source=tgtv&filter=all",
++      ),
++      {},
++    );
++    const body = (await res!.json()) as {
++      channels: Array<{ name: string }>;
++      servedBy: string;
++      tgtvPlaylistError: string | null;
++    };
++    expect(body.channels.length).toBe(1);
++    expect(body.channels[0]!.name).toBe("CNBC Awaaz");
++    expect(body.servedBy).toBe("tgtv");
++    expect(body.tgtvPlaylistError).toContain("404");
++  });
++});
+diff --git a/src/test/token-scope.test.ts b/src/test/token-scope.test.ts
+index 2bd1d23..2619039 100644
+--- a/src/test/token-scope.test.ts
++++ b/src/test/token-scope.test.ts
+@@ -1,6 +1,6 @@
+ import { describe, expect, it } from "vitest";
+ 
+-import { sameTokenScope, withHdneaToken } from "@/lib/direct-token";
++import { delayMs, hostStallCount, sameTokenScope, withHdneaToken } from "@/lib/direct-token";
+ 
+ // The app's rule is `target == origin`: a token must never travel to a third party. Applied as
+ // a strict hostname comparison in a browser it is too tight, because reshared playlists put a
+@@ -50,3 +50,21 @@ describe("withHdneaToken", () => {
+     expect(withHdneaToken(signed, "__hdnea__=other", false)).toBe(signed);
+   });
+ });
++
++describe("browser-direct host skip + engine load budget", () => {
++  it("counts stalls per host so one hung host skips only itself", () => {
++    const stalled = ["https://cdn-a.example/x", "https://cdn-a.example/y"];
++    expect(hostStallCount("https://cdn-a.example/z", stalled)).toBe(2);
++    expect(hostStallCount("https://CDN-A.example/z", stalled)).toBe(2);
++    expect(hostStallCount("https://cdn-b.example/z", stalled)).toBe(0);
++    expect(hostStallCount("https://cdn-b.example/z", [...stalled, "https://cdn-b.example/w"])).toBe(
++      1,
++    );
++  });
++
++  it("resolves after the budget even when nothing else settles", async () => {
++    const start = Date.now();
++    await delayMs(20);
++    expect(Date.now() - start).toBeGreaterThanOrEqual(15);
++  });
++});
