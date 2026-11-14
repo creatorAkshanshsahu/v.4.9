@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DirectPlayCandidate } from "@/lib/live-gateway";
+import { interleaveCandidateGroups } from "@/lib/live-gateway";
 import { extractHdneaParam, isHlsPlaylistUrl, sameUrlHost, withHdneaToken } from "@/lib/direct-token";
 
 export interface AudioTrackOption {
@@ -747,10 +748,13 @@ export function LiveVideoSurface({
       };
 
       const attemptAll = async (candidates: DirectPlayCandidate[]): Promise<boolean> => {
+        // First of each source group, then the remaining variants: a dead Jio cookie must not
+        // burn the whole pass budget before the TG servers get their turn.
+        const ordered = interleaveCandidateGroups(candidates);
         // Hard cap so one slow pass can never trap the player; the watchdog + fresh-token
         // pass take over from there.
         const passDeadline = Date.now() + 40000;
-        for (const cand of candidates) {
+        for (const cand of ordered) {
           if (cancelled || !videoRef.current || Date.now() > passDeadline) return false;
 
           if (cand.container === "hls") {
@@ -776,6 +780,9 @@ export function LiveVideoSurface({
           const first = await tryDashAttempt(cand, cand.cookie || "", normalizedKeys);
           if (first === "played" || cancelled) return first === "played";
           if (first === "refused" && cand.cookie) {
+            // A candidate whose cookie IS the URL's own minted token (the playlist redirector)
+            // has no distinct bare form: retrying it replays the identical request.
+            if (extractHdneaParam(cand.url) === cand.cookie) continue;
             const bare = await tryDashAttempt(cand, "", normalizedKeys);
             if (bare === "played" || cancelled) return bare === "played";
           }
@@ -986,13 +993,12 @@ export function LiveVideoSurface({
       if (cancelled) return;
 
       const forceRefresh = localRetry > 0 || reloadNonce > 0;
-      const preferDirectFirst =
-        activeSource === "jio" ||
-        activeSource === "tgtv" ||
-        /^(?:jio|tg):/i.test(channelId);
+      // Browser-direct first for everything the worker cannot serve: its datacenter egress IPs
+      // receive HTTP 450/451 from cdn.jio.com and HTTP 403 on maxTV media (portal JSON answers,
+      // so the proxy probe succeeds and then dies slowly on segments). Only StarShare keeps the
+      // proxy first — its media does not come from a blocked ASN.
+      const preferDirectFirst = activeSource !== "starshare" && !/^(?:xt):/i.test(channelId);
 
-      // JioTV and TG TV streams must play directly from the viewer's browser IP because
-      // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
       // tryBrowserDirect already spends one cached-token pass plus one fresh-token pass,
       // so a failed direct attempt is never repeated after the proxy probe.
       let directAttempted = false;

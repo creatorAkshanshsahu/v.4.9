@@ -768,6 +768,50 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
   });
 });
 
+describe("Cross-group candidate attempt order (dead Jio must not starve TG)", () => {
+  const cand = (label: string) => ({ label, url: "https://cdn.example/x.mpd", cookie: "", clearKeys: {}, container: "dash" as const });
+
+  it("tries the first of each source group before the remaining variants", async () => {
+    const { interleaveCandidateGroups } = await import("@/lib/live-gateway");
+    const ordered = interleaveCandidateGroups([
+      cand("JioTV Playlist · Redirector"),
+      cand("JioTV Direct · Fresh Token"),
+      cand("JioTV Direct · Embedded Token"),
+      cand("TG Live · Server 1"),
+      cand("TG Live · Server 2"),
+    ]);
+    expect(ordered.map((c) => c.label)).toEqual([
+      "JioTV Playlist · Redirector",
+      "JioTV Direct · Fresh Token",
+      "TG Live · Server 1",
+      "JioTV Direct · Embedded Token",
+      "TG Live · Server 2",
+    ]);
+  });
+
+  it("keeps TG first for tg: orderings and leaves single-group lists alone", async () => {
+    const { interleaveCandidateGroups } = await import("@/lib/live-gateway");
+    const tgFirst = interleaveCandidateGroups([
+      cand("TG Live · Server 1"),
+      cand("JioTV Playlist · Redirector"),
+      cand("TG Live · Server 2"),
+      cand("JioTV Direct · Fresh Token"),
+    ]);
+    expect(tgFirst.map((c) => c.label)).toEqual([
+      "TG Live · Server 1",
+      "JioTV Playlist · Redirector",
+      "JioTV Direct · Fresh Token",
+      "TG Live · Server 2",
+    ]);
+    const single = [cand("TG Live · Server 1"), cand("TG Live · Server 2")];
+    expect(interleaveCandidateGroups(single).map((c) => c.label)).toEqual([
+      "TG Live · Server 1",
+      "TG Live · Server 2",
+    ]);
+    expect(interleaveCandidateGroups([])).toEqual([]);
+  });
+});
+
 describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {
   const FRESH = "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=fresh";
 

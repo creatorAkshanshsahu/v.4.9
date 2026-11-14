@@ -29,6 +29,30 @@ export interface DirectPlayCandidate {
   container: "dash" | "hls";
 }
 
+/**
+ * Attempt order across source groups: the first candidate of each label group in the
+ * gateway's order, then the remaining variants in the gateway's order.
+ *
+ * A dead Jio cookie refuses every Jio variant the same way; tried in listed order, the player
+ * burns the whole pass budget on cookie/bare/embedded retries of dead Jio URLs and never
+ * reaches the TG servers that would have played. The gateway's preference still leads — Jio
+ * is always tried first — but TG gets its turn after one Jio round instead of after all of them.
+ */
+export function interleaveCandidateGroups(candidates: DirectPlayCandidate[]): DirectPlayCandidate[] {
+  const seen = new Set<string>();
+  const first: DirectPlayCandidate[] = [];
+  const rest: DirectPlayCandidate[] = [];
+  for (const c of candidates) {
+    const group = c.label.split(" · ")[0]!.trim() || c.label;
+    if (seen.has(group)) rest.push(c);
+    else {
+      seen.add(group);
+      first.push(c);
+    }
+  }
+  return [...first, ...rest];
+}
+
 export interface LiveChannelDto {
   id: string;
   source: "maxtv" | "starshare" | "jio" | "tgtv";

@@ -1,16 +1,16 @@
-From f29a6d46e7d686eadb058ecfbc8d3025551df147 Mon Sep 17 00:00:00 2001
+From 9afc8dcd2f95d46a24371b34e27ca1d8bca16a9b Mon Sep 17 00:00:00 2001
 From: STREAMR Bot <noreply@github.com>
-Date: Sat, 14 Nov 2026 04:20:58 +0000
-Subject: [PATCH] fix(live): TG public channel API fallback for ids the RPC
- layer misses
+Date: Sat, 14 Nov 2026 06:22:40 +0000
+Subject: [PATCH] fix(live): direct-first rescue for maxTV + cross-group
+ failover so TG is reached
 
 ---
  package.json                           |   1 +
- src/components/tv/LiveVideoSurface.tsx | 505 ++++++++++++++++++------
+ src/components/tv/LiveVideoSurface.tsx | 523 ++++++++++++++++++------
  src/lib/direct-token.ts                |  70 ++++
- src/lib/live-gateway.ts                | 511 ++++++++++++++++++++++---
- src/test/playback-fixes.test.ts        | 446 ++++++++++++++++++++-
- 5 files changed, 1349 insertions(+), 184 deletions(-)
+ src/lib/live-gateway.ts                | 535 ++++++++++++++++++++++---
+ src/test/playback-fixes.test.ts        | 490 +++++++++++++++++++++-
+ 5 files changed, 1429 insertions(+), 190 deletions(-)
  create mode 100644 src/lib/direct-token.ts
 
 diff --git a/package.json b/package.json
@@ -26,18 +26,19 @@ index 532ad06..278d72c 100644
      "clsx": "^2.1.1",
      "cmdk": "^1.1.1",
 diff --git a/src/components/tv/LiveVideoSurface.tsx b/src/components/tv/LiveVideoSurface.tsx
-index 8d006b0..b8750ba 100644
+index 8d006b0..1af0303 100644
 --- a/src/components/tv/LiveVideoSurface.tsx
 +++ b/src/components/tv/LiveVideoSurface.tsx
-@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
+@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
  import { RefreshCw } from "lucide-react";
  import { Button } from "@/components/ui/button";
  import type { DirectPlayCandidate } from "@/lib/live-gateway";
++import { interleaveCandidateGroups } from "@/lib/live-gateway";
 +import { extractHdneaParam, isHlsPlaylistUrl, sameUrlHost, withHdneaToken } from "@/lib/direct-token";
  
  export interface AudioTrackOption {
    index: number;
-@@ -212,6 +213,10 @@ export function LiveVideoSurface({
+@@ -212,6 +214,10 @@ export function LiveVideoSurface({
    const specificErrorRef = useRef(false);
    /** True when playing directly against upstream CDN from the browser (no server segment log). */
    const directModeRef = useRef(false);
@@ -48,7 +49,7 @@ index 8d006b0..b8750ba 100644
  
    const reportError = (msg: string) => {
      specificErrorRef.current = true;
-@@ -235,6 +240,13 @@ export function LiveVideoSurface({
+@@ -235,6 +241,13 @@ export function LiveVideoSurface({
      if (!el) return;
      let settled = false;
  
@@ -62,7 +63,7 @@ index 8d006b0..b8750ba 100644
      const check = () => {
        if (settled) return;
        if (el.videoWidth > 0 && el.videoHeight > 0) {
-@@ -250,18 +262,29 @@ export function LiveVideoSurface({
+@@ -250,18 +263,29 @@ export function LiveVideoSurface({
      const deadline = setTimeout(() => {
        if (settled) return;
        if (el.videoWidth === 0 || el.videoHeight === 0) {
@@ -94,7 +95,7 @@ index 8d006b0..b8750ba 100644
          const asked = `/api/live/diagnose?id=${encodeURIComponent(channelId)}`;
          void fetch(asked)
            .then((r) => (r.ok ? r.json() : null))
-@@ -396,148 +419,378 @@ export function LiveVideoSurface({
+@@ -396,148 +420,384 @@ export function LiveVideoSurface({
      const tryBrowserDirect = async (forceRefresh: boolean): Promise<boolean> => {
        if (cancelled || !videoRef.current) return false;
        ensureNoReferrerMeta();
@@ -542,10 +543,13 @@ index 8d006b0..b8750ba 100644
 -          } catch {
 -            // Try next cookie mode / next server candidate!
 +      const attemptAll = async (candidates: DirectPlayCandidate[]): Promise<boolean> => {
++        // First of each source group, then the remaining variants: a dead Jio cookie must not
++        // burn the whole pass budget before the TG servers get their turn.
++        const ordered = interleaveCandidateGroups(candidates);
 +        // Hard cap so one slow pass can never trap the player; the watchdog + fresh-token
 +        // pass take over from there.
 +        const passDeadline = Date.now() + 40000;
-+        for (const cand of candidates) {
++        for (const cand of ordered) {
 +          if (cancelled || !videoRef.current || Date.now() > passDeadline) return false;
 +
 +          if (cand.container === "hls") {
@@ -571,6 +575,9 @@ index 8d006b0..b8750ba 100644
 +          const first = await tryDashAttempt(cand, cand.cookie || "", normalizedKeys);
 +          if (first === "played" || cancelled) return first === "played";
 +          if (first === "refused" && cand.cookie) {
++            // A candidate whose cookie IS the URL's own minted token (the playlist redirector)
++            // has no distinct bare form: retrying it replays the identical request.
++            if (extractHdneaParam(cand.url) === cand.cookie) continue;
 +            const bare = await tryDashAttempt(cand, "", normalizedKeys);
 +            if (bare === "played" || cancelled) return bare === "played";
            }
@@ -589,10 +596,22 @@ index 8d006b0..b8750ba 100644
        }
  
        directModeRef.current = false;
-@@ -740,7 +993,11 @@ export function LiveVideoSurface({
+@@ -733,14 +993,17 @@ export function LiveVideoSurface({
+       if (cancelled) return;
  
-       // JioTV and TG TV streams must play directly from the viewer's browser IP because
-       // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
+       const forceRefresh = localRetry > 0 || reloadNonce > 0;
+-      const preferDirectFirst =
+-        activeSource === "jio" ||
+-        activeSource === "tgtv" ||
+-        /^(?:jio|tg):/i.test(channelId);
++      // Browser-direct first for everything the worker cannot serve: its datacenter egress IPs
++      // receive HTTP 450/451 from cdn.jio.com and HTTP 403 on maxTV media (portal JSON answers,
++      // so the proxy probe succeeds and then dies slowly on segments). Only StarShare keeps the
++      // proxy first — its media does not come from a blocked ASN.
++      const preferDirectFirst = activeSource !== "starshare" && !/^(?:xt):/i.test(channelId);
+ 
+-      // JioTV and TG TV streams must play directly from the viewer's browser IP because
+-      // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
 +      // tryBrowserDirect already spends one cached-token pass plus one fresh-token pass,
 +      // so a failed direct attempt is never repeated after the proxy probe.
 +      let directAttempted = false;
@@ -601,7 +620,7 @@ index 8d006b0..b8750ba 100644
          const startedDirect = await tryBrowserDirect(forceRefresh);
          if (startedDirect || cancelled) return;
        }
-@@ -757,7 +1014,8 @@ export function LiveVideoSurface({
+@@ -757,7 +1020,8 @@ export function LiveVideoSurface({
            probeCtrl.abort();
            // When maxTV/Cloudflare Worker proxy gets HTTP 403/502, rescue the channel immediately
            // via Browser-Direct CDN playback matched by channel name/ID!
@@ -611,7 +630,7 @@ index 8d006b0..b8750ba 100644
              const rescued = await tryBrowserDirect(forceRefresh);
              if (rescued || cancelled) return;
            }
-@@ -778,9 +1036,12 @@ export function LiveVideoSurface({
+@@ -778,9 +1042,12 @@ export function LiveVideoSurface({
          else startMpegTs(streamUrl(".ts"), true);
        } catch {
          clearTimeout(timer);
@@ -625,7 +644,7 @@ index 8d006b0..b8750ba 100644
            if (directUrl) startHls(directUrl, true);
            else if (wantDash) startDash(streamUrl(".mpd"));
            else startMpegTs(streamUrl(".ts"), true);
-@@ -815,7 +1076,9 @@ export function LiveVideoSurface({
+@@ -815,7 +1082,9 @@ export function LiveVideoSurface({
          onTimeUpdate={() => {
            clearOverlayIfRendering();
          }}
@@ -713,10 +732,41 @@ index 0000000..41320bd
 +  return /\.m3u8(?:[?#]|$)/i.test(url);
 +}
 diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
-index d01ec64..d981d0f 100644
+index d01ec64..e7058af 100644
 --- a/src/lib/live-gateway.ts
 +++ b/src/lib/live-gateway.ts
-@@ -1994,33 +1994,125 @@ function extractTgCandidatesFromConfig(decoded: unknown): DirectPlayCandidate[]
+@@ -29,6 +29,30 @@ export interface DirectPlayCandidate {
+   container: "dash" | "hls";
+ }
+ 
++/**
++ * Attempt order across source groups: the first candidate of each label group in the
++ * gateway's order, then the remaining variants in the gateway's order.
++ *
++ * A dead Jio cookie refuses every Jio variant the same way; tried in listed order, the player
++ * burns the whole pass budget on cookie/bare/embedded retries of dead Jio URLs and never
++ * reaches the TG servers that would have played. The gateway's preference still leads — Jio
++ * is always tried first — but TG gets its turn after one Jio round instead of after all of them.
++ */
++export function interleaveCandidateGroups(candidates: DirectPlayCandidate[]): DirectPlayCandidate[] {
++  const seen = new Set<string>();
++  const first: DirectPlayCandidate[] = [];
++  const rest: DirectPlayCandidate[] = [];
++  for (const c of candidates) {
++    const group = c.label.split(" · ")[0]!.trim() || c.label;
++    if (seen.has(group)) rest.push(c);
++    else {
++      seen.add(group);
++      first.push(c);
++    }
++  }
++  return [...first, ...rest];
++}
++
+ export interface LiveChannelDto {
+   id: string;
+   source: "maxtv" | "starshare" | "jio" | "tgtv";
+@@ -1994,33 +2018,125 @@ function extractTgCandidatesFromConfig(decoded: unknown): DirectPlayCandidate[]
    };
  
    const baseKeys = extractClearKeys(cfg, {});
@@ -859,7 +909,7 @@ index d01ec64..d981d0f 100644
  async function resolveTgRpcCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
    if (!/^\d{1,10}$/.test(numericId)) return [];
    if (!force) {
-@@ -2070,7 +2162,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
+@@ -2070,7 +2186,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
  
    let result = await callFn(tgVerifiedFnId);
    if (result.length === 0) {
@@ -871,7 +921,7 @@ index d01ec64..d981d0f 100644
      for (const fnId of discovered) {
        if (fnId === tgVerifiedFnId && !force) continue;
        result = await callFn(fnId);
-@@ -2080,6 +2175,11 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
+@@ -2080,6 +2199,11 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
        }
      }
    }
@@ -883,7 +933,7 @@ index d01ec64..d981d0f 100644
  
    if (result.length > 0) {
      const expiries = result.map((c) => hdneaExpiryMs(c.cookie || c.url)).filter((x): x is number => x !== null);
-@@ -2147,12 +2247,131 @@ function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channe
+@@ -2147,12 +2271,131 @@ function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channe
    return best ? best.rec : null;
  }
  
@@ -1016,7 +1066,7 @@ index d01ec64..d981d0f 100644
    const gioRecords = await loadGioTvRawCached(force);
    const matchedGio = findBestGioTvMatch(gioRecords, rawId, channelName);
    const cleanPrefixId = rawId.replace(/^(?:jio|tg):/i, "").trim();
-@@ -2169,51 +2388,100 @@ async function resolveDirectPlayCandidates(
+@@ -2169,51 +2412,100 @@ async function resolveDirectPlayCandidates(
    };
  
    // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
@@ -1136,7 +1186,7 @@ index d01ec64..d981d0f 100644
            url: rawUrl,
            cookie: "",
            clearKeys: gioKeys,
-@@ -2223,6 +2491,37 @@ async function resolveDirectPlayCandidates(
+@@ -2223,6 +2515,37 @@ async function resolveDirectPlayCandidates(
      }
    }
  
@@ -1174,7 +1224,7 @@ index d01ec64..d981d0f 100644
    // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
    if (candidates.length === 0) {
      const pool = rawId.startsWith("tg:")
-@@ -2242,10 +2541,38 @@ async function resolveDirectPlayCandidates(
+@@ -2242,10 +2565,38 @@ async function resolveDirectPlayCandidates(
      }
    }
  
@@ -1214,7 +1264,7 @@ index d01ec64..d981d0f 100644
    };
  }
  
-@@ -3273,10 +3600,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3273,10 +3624,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        au.style.display = "none"; au.innerHTML = "";
      }
      function sUrl(ext, probe) { return "/api/live/stream/" + encodeURIComponent(ch.id) + ext + "?_t=" + Date.now() + (probe ? "&probe=1" : ""); }
@@ -1259,7 +1309,7 @@ index d01ec64..d981d0f 100644
          hp.loadSource(url); hp.attachMedia(v);
          hp.on(Hls.Events.MANIFEST_PARSED, () => {
            const tr = hp.audioTracks || [];
-@@ -3361,44 +3720,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3361,44 +3744,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
        mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
      }
@@ -1349,7 +1399,7 @@ index d01ec64..d981d0f 100644
                  try {
                    let xml = new TextDecoder().decode(resp.data);
                    if (!/<MPD[\s>]/i.test(xml)) return;
-@@ -3417,9 +3805,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3417,9 +3829,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
              }
              try {
                await sp.attach(v);
@@ -1363,7 +1413,7 @@ index d01ec64..d981d0f 100644
              } catch {}
            }
          }
-@@ -3470,7 +3860,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3470,7 +3884,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
          if (v.videoWidth > 0 && v.videoHeight > 0) return;
          st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
          rt.style.display = "inline-block"; ov.classList.remove("hide");
@@ -1372,7 +1422,7 @@ index d01ec64..d981d0f 100644
      }
      v.onpause = () => { pl.textContent = "Play"; };
      pl.onclick = () => v.paused ? v.play() : v.pause();
-@@ -3627,6 +4017,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+@@ -3627,6 +4041,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
        matchedId: resolved.matchedId,
        matchedName: resolved.matchedName,
        candidates: resolved.candidates,
@@ -1381,7 +1431,7 @@ index d01ec64..d981d0f 100644
    }
  
 diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
-index aecc8a2..5217de7 100644
+index aecc8a2..7a23863 100644
 --- a/src/test/playback-fixes.test.ts
 +++ b/src/test/playback-fixes.test.ts
 @@ -1,4 +1,10 @@
@@ -1446,7 +1496,7 @@ index aecc8a2..5217de7 100644
    });
  
    it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
-@@ -359,5 +401,403 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+@@ -359,5 +401,447 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
      expect(body.channels.map((c) => c.id)).toContain("jio:165");
      expect(body.channels[0]!.container).toBe("dash");
    });
@@ -1814,6 +1864,50 @@ index aecc8a2..5217de7 100644
 +    expect(body.candidates.length).toBeGreaterThan(0);
 +    expect(body.candidates.every((c) => c.label.startsWith("JioTV"))).toBe(true);
 +    expect(body.candidates.some((c) => c.cookie.includes("wrong_channel"))).toBe(false);
++  });
++});
++
++describe("Cross-group candidate attempt order (dead Jio must not starve TG)", () => {
++  const cand = (label: string) => ({ label, url: "https://cdn.example/x.mpd", cookie: "", clearKeys: {}, container: "dash" as const });
++
++  it("tries the first of each source group before the remaining variants", async () => {
++    const { interleaveCandidateGroups } = await import("@/lib/live-gateway");
++    const ordered = interleaveCandidateGroups([
++      cand("JioTV Playlist · Redirector"),
++      cand("JioTV Direct · Fresh Token"),
++      cand("JioTV Direct · Embedded Token"),
++      cand("TG Live · Server 1"),
++      cand("TG Live · Server 2"),
++    ]);
++    expect(ordered.map((c) => c.label)).toEqual([
++      "JioTV Playlist · Redirector",
++      "JioTV Direct · Fresh Token",
++      "TG Live · Server 1",
++      "JioTV Direct · Embedded Token",
++      "TG Live · Server 2",
++    ]);
++  });
++
++  it("keeps TG first for tg: orderings and leaves single-group lists alone", async () => {
++    const { interleaveCandidateGroups } = await import("@/lib/live-gateway");
++    const tgFirst = interleaveCandidateGroups([
++      cand("TG Live · Server 1"),
++      cand("JioTV Playlist · Redirector"),
++      cand("TG Live · Server 2"),
++      cand("JioTV Direct · Fresh Token"),
++    ]);
++    expect(tgFirst.map((c) => c.label)).toEqual([
++      "TG Live · Server 1",
++      "JioTV Playlist · Redirector",
++      "JioTV Direct · Fresh Token",
++      "TG Live · Server 2",
++    ]);
++    const single = [cand("TG Live · Server 1"), cand("TG Live · Server 2")];
++    expect(interleaveCandidateGroups(single).map((c) => c.label)).toEqual([
++      "TG Live · Server 1",
++      "TG Live · Server 2",
++    ]);
++    expect(interleaveCandidateGroups([])).toEqual([]);
 +  });
 +});
 +
