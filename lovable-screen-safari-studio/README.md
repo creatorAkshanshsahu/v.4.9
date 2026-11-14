@@ -1,4 +1,34 @@
-# Website Live TV Playback Fix (`creatorAkshanshsahu/screen-safari-studio`)
+# AK TV Refused/Expired Playback Fix (`creatorAkshanshsahu/screen-safari-studio`)
+
+Fix for the two Premium PlugX failures on the live site (screenshots 2026-11-14): **`tg:` channels whose host refuses the relay (HTTP 530)** and **channels whose link answers with an error page instead of a playlist**. Built and verified against `main` @ `a7b4022` (**38/38 Vitest suites / 227 tests passing**, **`tsc --noEmit` = 0 errors**, clean **`vite build`**). **Apply this patch, not the older one below** — the older patch/docs target `main` @ `63a50a2`, which predates the site's AK TV-only rewrite (PRs #38–41).
+
+## What the two screenshots showed
+
+1. **2423 DISCOVERY — "refused this server's address (HTTP 530). Playing it directly from your browser instead."** The relay was IP-gated by the reseller host, handed the browser its recipe, and the browser fallback *also* failed (reseller redirectors hotlink-gate browsers, and the recipe's `Referer`/cookie cannot be sent cross-origin). The sentence was then displayed as if browser-direct were still to come — a stale promise. Worse, the `/api/live/direct-config` JioTV rescue (same channel via Jio's CDN, which *does* play in browsers) never fired: the reseller suffix in `"DISCOVERY By Premium PlugX"` made Jio-name matching score 0.
+2. **2752 CNBC Awaaz — "answered with something that is not an HLS playlist."** Upstream answered HTTP 200 with a non-playlist body (an HTML expired-link page, or raw MPEG-TS) at a `.m3u8` address; the relay classified by extension and served the garbage to hls.js as a playlist. The fault sentence also named no remedy (the only branch without one).
+
+## What changed (`fix-aktv-refused-expired.patch`, base `a7b4022`)
+
+1. **`src/lib/live-gateway.ts`**
+   - Refusal errors are now terminal-accurate: *"The stream host refused this server's address (HTTP 530), and the browser-direct fallback failed too. Try the same channel from another source, or press Retry."* (same for the Jio-450 shortcut). The player only displays these after the seed, `direct-config`, and `directUrl` fallbacks have all failed.
+   - New `sniffUpstreamHead()`: a 200 body starting with HTML is refused as an (expired?) reseller link instead of being served as HLS/DASH — with the browser recipe still attached in case the page was addressed to the relay's IP only. A body starting with the MPEG-TS sync byte falls through to the byte stream, so the probe names the MPEG-TS engine and mislabeled `.m3u8` streams play instead of dying in hls.js.
+   - `normalizeChannelMatchTokens()` strips a trailing reseller tag (`" By …"`) before Jio-name matching, so `"CNBC Awaaz By Premium PlugX"` matches Jio's `"CNBC Awaaz"` (exact) and `"DISCOVERY …"` can match `"Discovery HD"` (quality-word-insensitive) — unlocking the proven JioTV browser-direct rescue for reseller entries whose names exist in Jio's catalogue. Honest names (`"Baby TV"`) are untouched.
+2. **`src/lib/playback-faults.ts`** — the not-a-playlist fault now ends with the source's own remedy (`Press Retry to reconnect.` for AK TV).
+3. **Tests** — 7 new: reseller-name strip + Jio match, HTML-expiry refusal (502 + recipe, not HLS), TS-behind-`.m3u8` probe/play as MPEG-TS, 530 terminal wording, first-byte sniff pins, fault-remedy pins.
+
+## Apply inside `screen-safari-studio` (from `main` @ `a7b4022` or later)
+
+```bash
+git apply --check fix-aktv-refused-expired.patch && git apply fix-aktv-refused-expired.patch
+yarn vitest run && yarn tsc --noEmit && yarn build
+git add -A && git commit -m "fix(aktv): honest refused/expired errors, TS-mislabel playback, reseller-name Jio rescue" && git push origin main
+```
+
+---
+
+# (Older) Website Live TV Playback Fix — base `63a50a2`, DO NOT APPLY on current `main`
+
+> Everything below — including `files/`, `fix-website-live-channels.patch`, and `sync-to-lovable.sh` — targets `main` @ `63a50a2` and predates PRs #38–41. Kept for reference only.
 
 Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 96 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
 
