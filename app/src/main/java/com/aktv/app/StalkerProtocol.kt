@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.io.File
+import java.util.Locale
 
 /** One channel as the portal advertises it. [cmd] is the handle the portal trades for a playable URL. */
 internal data class StalkerChannel(
@@ -26,6 +27,8 @@ internal object StalkerProtocol {
     const val MAG_USER_AGENT =
         "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 4 rev: 2110 Safari/533.3"
     const val DEVICE_USER_AGENT = "Model: MAG254; Link: WiFi"
+    /** The single shelf a channel lands on when the portal gave it no usable genre. */
+    const val FALLBACK_CATEGORY = "maxTV"
     private const val MAX_PORTAL_CHANNELS = 35_000
 
     private fun raw(body: String): Any? {
@@ -78,13 +81,17 @@ internal object StalkerProtocol {
             val id = item.optString("id").ifBlank { item.optString("ch_id") }.trim()
             // A row without a name or without a handle cannot be shown or played.
             if (cmd.isEmpty() || name.isEmpty()) continue
-            out.add(StalkerChannel(id.ifEmpty { name }, name, cmd,
-                item.optString("tv_genre_id").trim(), item.optString("logo").trim()))
+            // Panels disagree on the genre key: the classic `tv_genre_id`, a bare `genre_id`, or a
+            // `genre` carrying either an id or the title itself ("Sports").
+            val genre = item.optString("tv_genre_id").ifBlank { item.optString("genre_id") }
+                .ifBlank { item.optString("tv_genre") }.ifBlank { item.optString("genre") }.trim()
+            out.add(StalkerChannel(id.ifEmpty { name }, name, cmd, genre, item.optString("logo").trim()))
         }
         return out
     }
 
-    /** `get_genres`: `[{id, title}]`, or the same array under `js`. */
+    /** `get_genres`: `[{id, title}]`, or the same array under `js`. Alias keys are read too, because
+     * panels disagree here as well; the pseudo "All" row (`*`) is not a shelf and is dropped. */
     fun genres(body: String): Map<String, String> {
         val array = when (val root = raw(body)) {
             is JSONArray -> root
@@ -96,11 +103,43 @@ internal object StalkerProtocol {
         val out = LinkedHashMap<String, String>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
-            val id = item.optString("id").trim()
-            val title = item.optString("title").trim()
-            if (id.isNotEmpty() && title.isNotEmpty()) out[id] = title
+            val id = item.optString("id").ifBlank { item.optString("tv_genre_id") }
+                .ifBlank { item.optString("genre_id") }.trim()
+            val title = item.optString("title").ifBlank { item.optString("name") }
+                .ifBlank { item.optString("label") }.trim()
+            if (id.isEmpty() || title.isEmpty()) continue
+            if (id == "*" || title.equals("All", ignoreCase = true)) continue
+            out[id] = title
         }
         return out
+    }
+
+    /**
+     * The shelf a portal channel belongs on. The portal's genre table wins; when the channel's genre
+     * value matches nothing — a panel that sends names instead of ids, or no genre table at all — a
+     * title-like value is used as-is, then an IPTV-style `PREFIX | Name` prefix, and only then the
+     * single fallback that used to swallow the whole playlist into one row.
+     */
+    fun categoryFor(genres: Map<String, String>, genre: String, name: String): String {
+        val id = genre.trim()
+        if (id.isNotEmpty()) {
+            genres[id]?.takeIf { it.isNotBlank() && it != "*" && !it.equals("All", ignoreCase = true) }?.let { return it }
+            // A panel that sends genre names ("Sports") instead of ids ("5") needs no table at all;
+            // a numeric value that matches nothing ("99") is not a shelf.
+            if (id.length <= 32 && id.any { it.isLetter() }) return id
+        }
+        prefixCategory(name)?.let { return it }
+        return FALLBACK_CATEGORY
+    }
+
+    /** `IN | Star Plus` → `IN`: the coarse shelf for channels the portal gave no genre for. */
+    fun prefixCategory(name: String): String? {
+        val prefix = name.substringBefore('|', "").trim()
+        if (prefix.length < 2 || prefix.length > 14) return null
+        if (!prefix.any { it.isLetter() }) return null
+        // Short codes read as codes ("in" → "IN"); longer labels read as titles ("sports" → "Sports").
+        return if (prefix.length <= 4 && prefix.all { !it.isLetter() || it.isLowerCase() }) prefix.uppercase(Locale.ROOT)
+        else prefix.replaceFirstChar { it.toString().uppercase(Locale.ROOT) }
     }
 
     /** `create_link`: the raw `js.cmd` handle, still carrying the player's `ffmpeg ` prefix. */

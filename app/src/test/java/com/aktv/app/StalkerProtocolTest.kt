@@ -50,6 +50,45 @@ class StalkerProtocolTest {
     }
 
     @Test
+    fun `genres tolerate alias keys and skip the pseudo all row`() {
+        val body = """{"js":{"data":[
+            {"id":"*","title":"All"},
+            {"tv_genre_id":"5","name":"Sports"},
+            {"genre_id":6,"label":"News"}
+        ]}}"""
+        assertEquals(mapOf("5" to "Sports", "6" to "News"), StalkerProtocol.genres(body))
+    }
+
+    @Test
+    fun `channels read the genre from alias fields`() {
+        val body = """{"js":{"data":[
+            {"id":"101","name":"Arena Sports","cmd":"ffmpeg http://cdn/101","genre_id":"5"},
+            {"id":"102","name":"Bowls TV","cmd":"ffmpeg http://cdn/102","genre":"Bowls"}
+        ]}}"""
+        val list = StalkerProtocol.channels(body)
+        assertEquals(2, list.size)
+        assertEquals("5", list[0].genre)
+        assertEquals("Bowls", list[1].genre)
+    }
+
+    @Test
+    fun `a shelf prefers the genre table, then a title-like value, then a name prefix`() {
+        val genres = mapOf("5" to "Sports")
+        assertEquals("Sports", StalkerProtocol.categoryFor(genres, "5", "Arena Sports"))
+        // A panel that sends names instead of ids needs no table.
+        assertEquals("Bowls", StalkerProtocol.categoryFor(emptyMap(), "Bowls", "Bowls TV"))
+        // A numeric value that matches nothing is not a shelf.
+        assertEquals("maxTV", StalkerProtocol.categoryFor(emptyMap(), "99", "Mystery Channel"))
+        // An IPTV-style prefix still beats the single fallback row.
+        assertEquals("IN", StalkerProtocol.categoryFor(emptyMap(), "", "IN | Star Plus"))
+        assertEquals("Sports", StalkerProtocol.categoryFor(emptyMap(), "99", "sports | Sky Mix"))
+        assertEquals("4K", StalkerProtocol.categoryFor(emptyMap(), "", "4k | Demo Loop"))
+        // ...but a name without a usable prefix stays on the fallback shelf.
+        assertEquals("maxTV", StalkerProtocol.categoryFor(emptyMap(), "", "Just A Name"))
+        assertEquals("maxTV", StalkerProtocol.categoryFor(emptyMap(), "", "X | Solo"))
+    }
+
+    @Test
     fun `a playable url is cut out of the portal command`() {
         assertEquals("http://cdn/101/index.m3u8",
             StalkerProtocol.streamUrl("ffmpeg http://cdn/101/index.m3u8"))

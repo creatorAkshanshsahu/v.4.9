@@ -79,6 +79,27 @@ class StalkerPortalTest {
     }
 
     @Test
+    fun `genres are fetched best-effort and never fail the section`() {
+        val http = FakeHttp { url ->
+            when {
+                "action=handshake" in url -> 200 to """{"js":{"token":"T1"}}"""
+                "action=get_profile" in url -> 200 to """{"js":{"id":"1"}}"""
+                "action=get_genres" in url -> 200 to """{"js":[{"id":"*","title":"All"},{"id":"5","title":"Sports"}]}"""
+                else -> 404 to ""
+            }
+        }
+        assertEquals(mapOf("5" to "Sports"), StalkerPortal(account, http).genres())
+
+        val refusing = FakeHttp { url ->
+            when {
+                "action=handshake" in url -> 200 to """{"js":{"token":"T1"}}"""
+                else -> 404 to ""
+            }
+        }
+        assertEquals(emptyMap<String, String>(), StalkerPortal(account, refusing).genres())
+    }
+
+    @Test
     fun `a portal catalogue is allowed a bigger body than a website player response`() {
         // get_all_channels is the whole subscription in one document; the 4 MB player budget refused it.
         assertTrue("portal budget ${StalkerPortal.MAX_CATALOGUE_BYTES} vs player ${TgProtocol.MAX_BODY}",

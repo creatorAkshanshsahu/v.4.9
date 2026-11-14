@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
     private var all = listOf<Channel>(); private var allV2 = listOf<Channel>(); private var allJio = listOf<Channel>(); private var shown = listOf<Channel>()
     // maxTV: the Stalker portal playlist. Pre-cached on disk and sliced off the UI thread.
     private var allPortal = listOf<Channel>(); private var portalLoaded = false; private var portalInFlight = false; private var portalRetried = false
+    private var portalGenreRetried = false; private var portalGenreToken = 0
     private var portalFilterMode = XtreamClient.FILTER_ENGLISH_HINDI
     private var portalVisibleCached = listOf<Channel>()
     private var portalFeaturedCached = listOf<Channel>()
@@ -1340,7 +1341,7 @@ class MainActivity : AppCompatActivity() {
         Channel(
             id = c.id,
             name = c.name,
-            category = genres[c.genre]?.takeIf { it.isNotBlank() && it != "*" && !it.equals("All", true) } ?: "maxTV",
+            category = StalkerProtocol.categoryFor(genres, c.genre, c.name),
             logo = if (c.logo.startsWith("/")) account.origin + c.logo else c.logo,
             portal = true,
             cmd = c.cmd
@@ -1375,8 +1376,9 @@ class MainActivity : AppCompatActivity() {
      * catalogue downloads never starve it, and caches on disk for instant cold start.
      */
     private fun loadPortalChannels(force: Boolean = false) {
-        if (force) portalRetried = false
+        if (force) { portalRetried = false; portalGenreRetried = false }
         if ((portalLoaded && !force) || portalInFlight) return
+        portalGenreToken++
         portalInFlight = true
         portalMsg = "Loading maxTV channels…"
         if (tab == 6) updateStatus()
@@ -1412,6 +1414,12 @@ class MainActivity : AppCompatActivity() {
                 val channels = mapStalkerChannels(account, listed, genres)
                 val slice = computePortalSlice(channels, portalFilterMode, maxPerRow = 250)
                 seedAccents(slice.second)
+                // The genre table is a tiny call next to a ~20 MB catalogue: when it alone comes back
+                // empty, one cheap re-fetch saves the tab from a single giant fallback row.
+                if (listed.isNotEmpty() && genres.isEmpty() && !portalGenreRetried) {
+                    portalGenreRetried = true
+                    schedulePortalGenreRefetch(account, listed, portalGenreToken)
+                }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     portalInFlight = false; portalLoaded = channels.isNotEmpty()
@@ -1441,6 +1449,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * One cheap `get_genres` re-fetch for a catalogue that arrived without its genre table, so a
+     * transient failure still ends in genre shelves instead of one giant row. The catalogue itself is
+     * reused, never re-downloaded; a newer load or a changed portal invalidates the attempt.
+     */
+    private fun schedulePortalGenreRefetch(account: StalkerAccount, listed: List<StalkerChannel>, token: Int) {
+        ui.postDelayed({
+            if (isFinishing || isDestroyed) return@postDelayed
+            if (token != portalGenreToken || portalGenres.isNotEmpty() || stalkerAccount() != account) return@postDelayed
+            submit(portalIo) {
+                val refetched = runCatching { newPortal().genres() }.getOrDefault(emptyMap())
+                if (refetched.isEmpty()) return@submit
+                StalkerProtocol.saveCache(portalCacheDir(), account.cacheKey, listed, refetched)
+                val remapped = mapStalkerChannels(account, listed, refetched)
+                val slice = computePortalSlice(remapped, portalFilterMode, maxPerRow = 250)
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    if (token != portalGenreToken || stalkerAccount() != account) return@runOnUiThread
+                    portalGenres = refetched
+                    applyPortal(remapped, slice)
+                }
+            }
+        }, 6_000)
+    }
+
     private fun applyPortal(list: List<Channel>, precomputed: Triple<List<Channel>, List<Channel>, List<Row>>) {
         allPortal = list
         portalVisibleCached = precomputed.first
@@ -1467,7 +1500,7 @@ class MainActivity : AppCompatActivity() {
                 tiles = listOf(
                     Tile.Action(
                         label = "Filter: ${XtreamClient.filterLabel(portalFilterMode)}\n" +
-                            if (channels.isNotEmpty()) "${visible.size} of ${channels.size} channels" else "Tap to switch filter",
+                            if (channels.isNotEmpty()) "${visible.size} of ${channels.size} channels · ${portalGenres.size} genres" else "Tap to switch filter",
                         active = portalFilterMode != XtreamClient.FILTER_ALL
                     ) { togglePortalFilter() },
                     Tile.Action(
