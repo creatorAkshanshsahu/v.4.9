@@ -1012,14 +1012,7 @@ class MoviePlayerActivity : Activity() {
             1 -> "Mono"; 2 -> "Stereo"; 6 -> "5.1"; 8 -> "7.1"
             else -> if (format.channelCount > 0) "${format.channelCount}ch" else ""
         }
-        val codec = when (val mime = format.sampleMimeType.orEmpty()) {
-            MimeTypes.AUDIO_AAC -> "AAC"
-            MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
-            MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital+"
-            MimeTypes.AUDIO_MPEG -> "MP2/MP3"
-            MimeTypes.AUDIO_OPUS -> "Opus"
-            else -> mime.substringAfter('/', "").uppercase(Locale.ROOT)
-        }
+        val codec = NativePlaybackPolicy.audioCodecLabel(format.sampleMimeType.orEmpty())
         val details = listOf(codec, channels).filter { it.isNotBlank() }.joinToString(" · ")
         return if (details.isNotBlank()) "$primary  ·  $details" else primary
     }

@@ -130,4 +130,21 @@ class NativePlaybackPolicyTest {
         } finally { prefs.edit().remove("native_force_tv").commit() }
     }
 
+    @Test fun `broadcast audio codecs get short menu names`() {
+        assertEquals("AAC", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_AAC))
+        assertEquals("Dolby AC-3", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_AC3))
+        assertEquals("Dolby Digital+", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_E_AC3))
+        assertEquals("Dolby Digital+", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_E_AC3_JOC))
+        assertEquals("MP2/MP3", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_MPEG))
+        assertEquals("MP2/MP3", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_MPEG_L2))
+        assertEquals("Opus", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_OPUS))
+        assertEquals("DTS", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_DTS))
+        assertEquals("Dolby TrueHD", NativePlaybackPolicy.audioCodecLabel(MimeTypes.AUDIO_TRUEHD))
+    }
+
+    @Test fun `unknown audio codecs fall back to the bare subtype`() {
+        assertEquals("X-FOO", NativePlaybackPolicy.audioCodecLabel("audio/x-foo"))
+        assertEquals("", NativePlaybackPolicy.audioCodecLabel(""))
+    }
+
 }

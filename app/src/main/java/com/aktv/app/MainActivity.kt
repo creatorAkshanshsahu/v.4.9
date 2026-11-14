@@ -280,6 +280,7 @@ class MainActivity : AppCompatActivity() {
     private var updateDownloading = false
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
+    private var silenceHintedFor: ExoPlayer? = null
     private var picture: NativePictureController? = null
     private val lowEnd by lazy {
         (getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isLowRamDevice || android.os.Build.SUPPORTED_64_BIT_ABIS.isEmpty()
@@ -3681,6 +3682,21 @@ class MainActivity : AppCompatActivity() {
         pv.player = p; player = p
         prepareOnSurface(p)
         showInfo()
+        // A silent picture is otherwise indistinguishable from a working one: if video is playing a
+        // few seconds in but no audio track was ever selected, say so once, while the Audio menu
+        // (and its next-server rescue) is still one key away.
+        val hintFor = p
+        ui.postDelayed({
+            if (player !== hintFor || isFinishing || isDestroyed || !expectsVideo() || healthScanActive) return@postDelayed
+            if (silenceHintedFor === hintFor) return@postDelayed
+            val groups = hintFor.currentTracks.groups
+            val videoSelected = groups.any { g -> g.type == C.TRACK_TYPE_VIDEO && (0 until g.length).any { g.isTrackSelected(it) } }
+            val audioSelected = groups.any { g -> g.type == C.TRACK_TYPE_AUDIO && (0 until g.length).any { g.isTrackSelected(it) } }
+            if (hintFor.isPlaying && videoSelected && !audioSelected) {
+                silenceHintedFor = hintFor
+                Toast.makeText(this, "No playable audio on this source — open Audio to try another track or server.", Toast.LENGTH_LONG).show()
+            }
+        }, 6_000)
     }
 
     /** Avoid configuring an older TV codec against a placeholder before its real SurfaceView exists. */
@@ -4158,14 +4174,7 @@ class MainActivity : AppCompatActivity() {
             8 -> "7.1"
             else -> if (format.channelCount > 0) "${format.channelCount}ch" else ""
         }
-        val codec = when (val mime = format.sampleMimeType.orEmpty()) {
-            MimeTypes.AUDIO_AAC -> "AAC"
-            MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
-            MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital+"
-            MimeTypes.AUDIO_MPEG -> "MP2/MP3"
-            MimeTypes.AUDIO_OPUS -> "Opus"
-            else -> mime.substringAfter('/', "").uppercase(Locale.ROOT)
-        }
+        val codec = NativePlaybackPolicy.audioCodecLabel(format.sampleMimeType.orEmpty())
         val kbps = if (format.bitrate > 0) "${format.bitrate / 1000} kbps" else ""
         val details = listOf(codec, channels, kbps).filter { it.isNotBlank() }.joinToString(" · ")
         return if (details.isNotBlank()) "$primary  ·  $details" else primary
@@ -4195,13 +4204,22 @@ class MainActivity : AppCompatActivity() {
         val hasSubtitles = owner.currentTracks.groups.any { it.type == C.TRACK_TYPE_TEXT }
         val items = ArrayList<Pair<String, () -> Unit>>()
         var counter = 0
+        var supportedRows = 0
         for (group in audioGroups) {
             for (i in 0 until group.length) {
+                val fmt = group.getTrackFormat(i)
                 if (!group.isTrackSupported(i)) {
+                    // A track the device cannot decode is still information: it names the missing
+                    // codec instead of leaving a silent menu.
+                    val codecName = NativePlaybackPolicy.audioCodecLabel(fmt.sampleMimeType.orEmpty())
+                        .ifBlank { "this audio format" }
+                    items += "⚠  ${formatAudioTrackLabel(fmt, counter)}  ·  Unsupported" to {
+                        Toast.makeText(this, "No decoder on this device for $codecName.", Toast.LENGTH_LONG).show()
+                    }
                     counter++
                     continue
                 }
-                val fmt = group.getTrackFormat(i)
+                supportedRows++
                 val selected = group.isTrackSelected(i)
                 val label = "${if (selected) "✓  " else ""}${formatAudioTrackLabel(fmt, counter)}"
                 val mediaGroup = group.mediaTrackGroup
@@ -4242,6 +4260,12 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "Default audio set to English", Toast.LENGTH_SHORT).show()
             }
         }
+        // No playable audio on this candidate: another server (TS vs HLS) often carries a decodable mix.
+        if ((audioGroups.isEmpty() || supportedRows == 0) && nativeSources.size > 1) {
+            items += "Try next source (server ${serverIdx + 1} of ${nativeSources.size})…" to {
+                selectNativeServer((serverIdx + 1) % nativeSources.size)
+            }
+        }
         if (hasSubtitles) {
             items += "Subtitles / Captions…" to {
                 if (player === owner) {
@@ -4253,8 +4277,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
         sourceMenu?.dismiss()
-        val title = if (audioGroups.isEmpty()) "Audio language (stream carries 1 embedded mix)"
-        else "Audio tracks · ${currentAudioLabel()}"
+        val title = when {
+            audioGroups.isEmpty() -> "Audio — this source carries no audio track"
+            supportedRows == 0 -> "Audio tracks · none supported on this device"
+            else -> "Audio tracks · ${currentAudioLabel()}"
+        }
         val dialog = AlertDialog.Builder(this)
             .setTitle(title)
             .setItems(items.map { it.first }.toTypedArray()) { _, idx -> items[idx].second() }

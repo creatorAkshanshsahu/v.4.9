@@ -26,7 +26,7 @@ android {
     namespace = "com.aktv.app"
     compileSdk = 35
     buildFeatures { buildConfig = true }
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 154; versionName = "5.4.35"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 155; versionName = "5.4.36"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
         buildConfigField("String", "STARSHARE_SERVER", quoteBuildConfig(starshareServer))
         buildConfigField("String", "STARSHARE_USER", quoteBuildConfig(starshareUser))
@@ -61,7 +61,7 @@ android {
         }
     }
     flavorDimensions += "abi"
-    productFlavors { create("arm32") { dimension = "abi" }; create("arm64") { dimension = "abi" } }
+    productFlavors { create("arm32") { dimension = "abi"; ndk { abiFilters.add("armeabi-v7a") } }; create("arm64") { dimension = "abi"; ndk { abiFilters.add("arm64-v8a") } } }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs { useLegacyPackaging = true } }
@@ -74,6 +74,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    implementation("androidx.media3:media3-decoder-ffmpeg:1.3.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
