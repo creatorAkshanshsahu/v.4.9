@@ -359,5 +359,52 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
     expect(body.channels.map((c) => c.id)).toContain("jio:165");
     expect(body.channels[0]!.container).toBe("dash");
   });
+
+  it("prunes expired embedded tokens and orders freshest candidates first", async () => {
+    const EXPIRED_CATALOGUE = JSON.stringify([
+      {
+        id: "892",
+        name: "Sony SAB HD",
+        category: "Entertainment",
+        logo: "https://cdn.example/sab.png",
+        url: "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1~exp=1000000000~acl=/*~hmac=expired_embedded",
+        keys: [{ keyId: "400131994b445d8c8817202248760fda", key: "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" }],
+      },
+    ]);
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(EXPIRED_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
+        return makeFramedTgRpcResponse({
+          result: {
+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/TGServer/index.mpd"],
+            cookie: "__hdnea__=st=1~exp=1000000000~acl=/*~hmac=expired_tg",
+            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+          },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string }>;
+    };
+    // Expired embedded token pruned: the same URL keeps only its fresh-token variant.
+    const gioVariants = body.candidates.filter(
+      (c) => c.url === "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd",
+    );
+    expect(gioVariants.length).toBe(1);
+    expect(gioVariants[0]!.cookie).toContain("regular_token_abc");
+    // Freshest-first ordering: fresh Gio candidate precedes the expired TG fallback.
+    expect(body.candidates[0]!.cookie).toContain("regular_token_abc");
+    expect(body.candidates[body.candidates.length - 1]!.cookie).toContain("expired_tg");
+  });
 });
 

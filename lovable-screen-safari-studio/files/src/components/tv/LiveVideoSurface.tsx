@@ -212,6 +212,10 @@ export function LiveVideoSurface({
   const specificErrorRef = useRef(false);
   /** True when playing directly against upstream CDN from the browser (no server segment log). */
   const directModeRef = useRef(false);
+  /** Automatic backup token/server switches the watchdog already spent for the current channel. */
+  const autoDirectRetryRef = useRef(0);
+  /** Channel key the auto-retry budget belongs to; reset when the channel or manual reload changes. */
+  const autoRetryKeyRef = useRef("");
 
   const reportError = (msg: string) => {
     specificErrorRef.current = true;
@@ -235,6 +239,13 @@ export function LiveVideoSurface({
     if (!el) return;
     let settled = false;
 
+    // One automatic backup token/server switch per channel (manual Retry / channel change resets it).
+    const retryKey = `${channelId}:${reloadNonce}`;
+    if (autoRetryKeyRef.current !== retryKey) {
+      autoRetryKeyRef.current = retryKey;
+      autoDirectRetryRef.current = 0;
+    }
+
     const check = () => {
       if (settled) return;
       if (el.videoWidth > 0 && el.videoHeight > 0) {
@@ -250,18 +261,29 @@ export function LiveVideoSurface({
     const deadline = setTimeout(() => {
       if (settled) return;
       if (el.videoWidth === 0 || el.videoHeight === 0) {
-        setHasError(true);
         settled = true;
         clearInterval(poll);
         // Never overwrite a specific HTTP/Shaka/HLS error with a generic watchdog guess.
-        if (specificErrorRef.current) return;
+        if (specificErrorRef.current) {
+          setHasError(true);
+          return;
+        }
         // When streaming browser-direct to cdn.jio.com, segments never pass through /api/live/segment.
+        // Switch token/server automatically once instead of asking the viewer to press Retry.
         if (directModeRef.current) {
+          if (autoDirectRetryRef.current < 1) {
+            autoDirectRetryRef.current += 1;
+            setStatusMsg("Direct server is slow — switching to backup token/server…");
+            setLocalRetry((n) => n + 1);
+            return;
+          }
+          setHasError(true);
           setStatusMsg(
             "Direct CDN stream is taking too long to deliver video frames. Press Retry to switch token/server.",
           );
           return;
         }
+        setHasError(true);
         const asked = `/api/live/diagnose?id=${encodeURIComponent(channelId)}`;
         void fetch(asked)
           .then((r) => (r.ok ? r.json() : null))
@@ -396,148 +418,338 @@ export function LiveVideoSurface({
     const tryBrowserDirect = async (forceRefresh: boolean): Promise<boolean> => {
       if (cancelled || !videoRef.current) return false;
       ensureNoReferrerMeta();
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 9000);
-      let candidates: DirectPlayCandidate[] = [];
-      try {
-        const q = `/api/live/direct-config?id=${encodeURIComponent(channelId)}&name=${encodeURIComponent(channelName)}${forceRefresh ? "&refresh=1" : ""}`;
-        const res = await fetch(q, { signal: ctrl.signal });
-        if (!res.ok) return false;
-        const data = (await res.json().catch(() => null)) as { candidates?: DirectPlayCandidate[] } | null;
-        if (!data || !Array.isArray(data.candidates) || data.candidates.length === 0) return false;
-        candidates = data.candidates;
-      } catch {
-        return false;
-      } finally {
-        clearTimeout(t);
-      }
 
-      if (cancelled || !videoRef.current) return false;
+      const fetchCandidates = async (refresh: boolean): Promise<DirectPlayCandidate[]> => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 7000);
+        try {
+          const q = `/api/live/direct-config?id=${encodeURIComponent(channelId)}&name=${encodeURIComponent(channelName)}${refresh ? "&refresh=1" : ""}`;
+          const res = await fetch(q, { signal: ctrl.signal });
+          if (!res.ok) return [];
+          const data = (await res.json().catch(() => null)) as { candidates?: DirectPlayCandidate[] } | null;
+          if (!data || !Array.isArray(data.candidates)) return [];
+          return data.candidates;
+        } catch {
+          return [];
+        } finally {
+          clearTimeout(t);
+        }
+      };
+
+      /**
+       * Resolve quickly once the video element actually renders a frame; a manifest that
+       * loads but never produces segments must fail over to the next token/server instead
+       * of sitting until the 18s watchdog fires.
+       */
+      const waitForFirstFrame = (timeoutMs: number, isDead?: () => boolean): Promise<boolean> => {
+        const el = videoRef.current;
+        if (!el || cancelled) return Promise.resolve(false);
+        if (el.videoWidth > 0 && el.videoHeight > 0) return Promise.resolve(true);
+        return new Promise((resolve) => {
+          let done = false;
+          const finish = (ok: boolean) => {
+            if (done) return;
+            done = true;
+            clearInterval(poll);
+            clearTimeout(timer);
+            resolve(ok);
+          };
+          const onFrame = () => {
+            if (cancelled || isDead?.()) {
+              finish(false);
+              return;
+            }
+            const v = videoRef.current;
+            if (v && ((v.videoWidth > 0 && v.videoHeight > 0) || (!v.paused && v.currentTime > 0.3))) {
+              finish(true);
+            }
+          };
+          const poll = setInterval(onFrame, 250);
+          const timer = setTimeout(() => finish(false), timeoutMs);
+          onFrame();
+        });
+      };
 
       const shaka = window.shaka;
       const manifestType = shaka?.net?.NetworkingEngine?.RequestType?.MANIFEST ?? 0;
       const segmentType = shaka?.net?.NetworkingEngine?.RequestType?.SEGMENT ?? 1;
 
-      for (const cand of candidates) {
-        if (cancelled || !videoRef.current) return false;
+      const killShaka = (player: ShakaPlayerInstance) => {
+        if (shakaRef.current === player) shakaRef.current = null;
+        try {
+          void player.destroy();
+        } catch {
+          // ignore teardown errors
+        }
+      };
 
-        if (cand.container === "hls") {
-          directModeRef.current = true;
-          const signedHls = cand.cookie
-            ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
-            : cand.url;
-          startHls(signedHls, true);
+      /** DASH attempt outcome: rendered frames, fast HTTP refusal (worth a bare-URL retry), or stall. */
+      const tryDashAttempt = async (
+        cand: DirectPlayCandidate,
+        activeCookie: string,
+        normalizedKeys: Record<string, string>,
+      ): Promise<"played" | "refused" | "stalled"> => {
+        if (cancelled || !videoRef.current || !shaka) return "stalled";
+        cleanup();
+        directModeRef.current = true;
+        onContainerDetected?.("DASH");
+        setStatusMsg(`Trying ${cand.label}…`);
+
+        const player = new shaka.Player();
+        shakaRef.current = player;
+        // Fail over ourselves instead of letting Shaka retry one dead server for 24s+:
+        // tight per-request timeouts, single manifest attempt, then the next token/server.
+        player.configure({
+          drm: {
+            ...(Object.keys(normalizedKeys).length ? { clearKeys: normalizedKeys } : {}),
+            advanced: {},
+          },
+          streaming: {
+            lowLatencyMode: true,
+            rebufferingGoal: 2,
+            bufferingGoal: 20,
+            retryParameters: { maxAttempts: 2, baseDelay: 300, backoffFactor: 2, timeout: 7000 },
+          },
+          manifest: {
+            retryParameters: { maxAttempts: 1, baseDelay: 300, backoffFactor: 2, timeout: 7000 },
+          },
+        });
+
+        const net = player.getNetworkingEngine?.();
+        if (net && activeCookie) {
+          net.registerRequestFilter((type, request) => {
+            if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
+              const u = request.uris[0];
+              if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
+                const base = u.split("?")[0]!;
+                request.uris[0] = `${base}?${activeCookie}`;
+              }
+            }
+          });
+        }
+
+        if (net && Object.keys(normalizedKeys).length > 0) {
+          net.registerResponseFilter((type, response) => {
+            if (type !== manifestType || !response.data) return;
+            try {
+              let xml = new TextDecoder().decode(response.data);
+              if (!/<MPD[\s>]/i.test(xml)) return;
+              const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
+                .map((m) => toHexKeyId(m[1]!))
+                .filter((x): x is string => Boolean(x));
+              const pairs = Object.entries(normalizedKeys);
+              if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
+                const expanded: Record<string, string> = { ...normalizedKeys };
+                for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
+                player.configure({ drm: { clearKeys: expanded, advanced: {} } });
+              }
+              // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
+              xml = xml.replace(
+                /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
+                "",
+              );
+              xml = xml.replace(
+                /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
+                "",
+              );
+              response.data = new TextEncoder().encode(xml).buffer;
+            } catch {
+              // leave manifest untouched if decoding fails
+            }
+          });
+        }
+
+        // Capture failures *during* load so a refused manifest fails over immediately.
+        let fatalStatus: number | undefined;
+        let fatalCode: number | undefined;
+        player.addEventListener("error", (event) => {
+          if (cancelled) return;
+          const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
+          fatalCode = detail?.detail?.code;
+          const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
+          const numeric = payload.find((d): d is number => typeof d === "number");
+          if (fatalCode === 1001 && typeof numeric === "number") fatalStatus = numeric;
+        });
+
+        const loadStart = Date.now();
+        try {
+          await player.attach(videoRef.current);
+          await Promise.race([
+            player.load(cand.url),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("direct-load-timeout")), 8000)),
+          ]);
+        } catch {
+          const refused = fatalStatus !== undefined && fatalStatus >= 400;
+          killShaka(player);
+          // A fast HTTP refusal (403/450) is worth one bare-URL retry; a stall is not.
+          return refused && Date.now() - loadStart < 8000 ? "refused" : "stalled";
+        }
+        if (cancelled) {
+          killShaka(player);
+          return "stalled";
+        }
+        if (fatalStatus !== undefined && fatalStatus >= 400) {
+          killShaka(player);
+          return "refused";
+        }
+
+        const framed = await waitForFirstFrame(6000, () => fatalStatus !== undefined && fatalStatus >= 400);
+        if (cancelled || !framed) {
+          killShaka(player);
+          return fatalStatus !== undefined && fatalStatus >= 400 ? "refused" : "stalled";
+        }
+
+        // Frames are rendering: report any *later* mid-stream interruption for real.
+        player.addEventListener("error", (event) => {
+          if (cancelled) return;
+          const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
+          const code = detail?.detail?.code;
+          const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
+          const numeric = payload.find((d): d is number => typeof d === "number");
+          const status = code === 1001 ? numeric : undefined;
+          reportError(
+            status
+              ? `Direct CDN segment returned HTTP ${status}. Press Retry to refresh token.`
+              : `Live stream interrupted${code ? ` (Shaka ${code})` : ""}. Press Retry.`,
+          );
+        });
+
+        await syncShakaAudioAndPlay(player);
+        return "played";
+      };
+
+      const tryHlsCandidate = async (cand: DirectPlayCandidate): Promise<boolean> => {
+        if (cancelled || !videoRef.current) return false;
+        cleanup();
+        directModeRef.current = true;
+        onContainerDetected?.("HLS");
+        setStatusMsg(`Trying ${cand.label}…`);
+        const signedHls = cand.cookie
+          ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
+          : cand.url;
+        const el = videoRef.current;
+        const HlsCtor = window.Hls;
+        if (HlsCtor && HlsCtor.isSupported()) {
+          const hls = new HlsCtor({
+            lowLatencyMode: true,
+            backBufferLength: 30,
+            manifestLoadingMaxRetry: 1,
+            levelLoadingMaxRetry: 2,
+            fragLoadingMaxRetry: 2,
+            manifestLoadingRetryDelay: 500,
+            levelLoadingRetryDelay: 500,
+            fragLoadingRetryDelay: 500,
+          });
+          hlsRef.current = hls;
+          let fatal = false;
+          const syncTracks = () => {
+            const list = hls.audioTracks || [];
+            const opts: AudioTrackOption[] = list.map((t, idx) => ({
+              index: idx,
+              label: [t.name, t.lang].filter(Boolean).join(" · ") || `Track ${idx + 1}`,
+            }));
+            let preferred = hls.audioTrack;
+            const hindiIdx = list.findIndex((t) => /hin|^hi$/i.test(`${t.name ?? ""} ${t.lang ?? ""}`));
+            if (hindiIdx >= 0) {
+              hls.audioTrack = hindiIdx;
+              preferred = hindiIdx;
+            }
+            onAudioTracksChange?.(opts, preferred);
+          };
+          hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
+            syncTracks();
+            void safePlay();
+          });
+          hls.on(HlsCtor.Events.AUDIO_TRACKS_UPDATED, syncTracks);
+          hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
+            const d = data as { fatal?: boolean } | undefined;
+            if (d?.fatal) fatal = true;
+          });
+          hls.loadSource(signedHls);
+          hls.attachMedia(el);
+          const framed = await waitForFirstFrame(7000, () => fatal);
+          if (cancelled || !framed || fatal) {
+            try {
+              hls.destroy();
+            } catch {
+              // ignore teardown errors
+            }
+            if (hlsRef.current === hls) hlsRef.current = null;
+            return false;
+          }
+          hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
+            const d = data as { fatal?: boolean } | undefined;
+            if (d?.fatal && !cancelled) {
+              reportError(
+                activeSource === "jio"
+                  ? "This JioTV stream was interrupted. Press Retry to reload it with a fresh CDN token."
+                  : activeSource === "tgtv"
+                    ? "This TG TV stream was interrupted. Press Retry to reconnect."
+                    : "Live HLS stream interrupted. Press Retry to request a fresh stream token.",
+              );
+            }
+          });
           return true;
         }
-
-        if (!shaka) continue;
-        shaka.polyfill.installAll();
-        if (!shaka.Player.isBrowserSupported()) continue;
-        shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
-
-        const normalizedKeys: Record<string, string> = {};
-        for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
-          const kid = toHexKeyId(rawKid);
-          const k = toHexKeyId(rawK);
-          if (kid && k) normalizedKeys[kid] = k;
+        if (el.canPlayType("application/vnd.apple.mpegurl")) {
+          el.src = signedHls;
+          await safePlay();
+          const framed = await waitForFirstFrame(7000);
+          if (cancelled || !framed) {
+            el.removeAttribute("src");
+            el.load();
+            return false;
+          }
+          return true;
         }
+        return false;
+      };
 
-        // Mirror TgPlayer's failover: try `{ url, cookie }` first, then `{ url, cookie: "" }`.
-        const cookieAttempts = cand.cookie ? [cand.cookie, ""] : [""];
-        for (const activeCookie of cookieAttempts) {
-          if (cancelled || !videoRef.current) return false;
-          cleanup();
-          directModeRef.current = true;
-          onContainerDetected?.("DASH");
+      const attemptAll = async (candidates: DirectPlayCandidate[]): Promise<boolean> => {
+        // Hard cap so one slow pass can never trap the player; the watchdog + fresh-token
+        // pass take over from there.
+        const passDeadline = Date.now() + 40000;
+        for (const cand of candidates) {
+          if (cancelled || !videoRef.current || Date.now() > passDeadline) return false;
 
-          const player = new shaka.Player();
-          shakaRef.current = player;
-          player.configure({
-            drm: {
-              ...(Object.keys(normalizedKeys).length ? { clearKeys: normalizedKeys } : {}),
-              advanced: {},
-            },
-            streaming: {
-              lowLatencyMode: true,
-              rebufferingGoal: 2,
-              bufferingGoal: 20,
-              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
-            },
-            manifest: {
-              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
-            },
-          });
-
-          const net = player.getNetworkingEngine?.();
-          if (net && activeCookie) {
-            net.registerRequestFilter((type, request) => {
-              if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
-                const u = request.uris[0];
-                if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
-                  const base = u.split("?")[0]!;
-                  request.uris[0] = `${base}?${activeCookie}`;
-                }
-              }
-            });
+          if (cand.container === "hls") {
+            if (await tryHlsCandidate(cand)) return true;
+            continue;
           }
 
-          if (net && Object.keys(normalizedKeys).length > 0) {
-            net.registerResponseFilter((type, response) => {
-              if (type !== manifestType || !response.data) return;
-              try {
-                let xml = new TextDecoder().decode(response.data);
-                if (!/<MPD[\s>]/i.test(xml)) return;
-                const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
-                  .map((m) => toHexKeyId(m[1]!))
-                  .filter((x): x is string => Boolean(x));
-                const pairs = Object.entries(normalizedKeys);
-                if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
-                  const expanded: Record<string, string> = { ...normalizedKeys };
-                  for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
-                  player.configure({ drm: { clearKeys: expanded, advanced: {} } });
-                }
-                // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
-                xml = xml.replace(
-                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
-                  "",
-                );
-                xml = xml.replace(
-                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
-                  "",
-                );
-                response.data = new TextEncoder().encode(xml).buffer;
-              } catch {
-                // leave manifest untouched if decoding fails
-              }
-            });
+          if (!shaka) continue;
+          shaka.polyfill.installAll();
+          if (!shaka.Player.isBrowserSupported()) continue;
+          shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
+
+          const normalizedKeys: Record<string, string> = {};
+          for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
+            const kid = toHexKeyId(rawKid);
+            const k = toHexKeyId(rawK);
+            if (kid && k) normalizedKeys[kid] = k;
           }
 
-          try {
-            await player.attach(videoRef.current);
-            await player.load(cand.url);
-            if (cancelled) return false;
-
-            // Attach runtime error handler after initial manifest+init load succeeds.
-            player.addEventListener("error", (event) => {
-              if (cancelled) return;
-              const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
-              const code = detail?.detail?.code;
-              const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
-              const numeric = payload.find((d): d is number => typeof d === "number");
-              const status = code === 1001 ? numeric : undefined;
-              reportError(
-                status
-                  ? `Direct CDN segment returned HTTP ${status}. Press Retry to refresh token.`
-                  : `Live stream interrupted${code ? ` (Shaka ${code})` : ""}. Press Retry.`,
-              );
-            });
-
-            await syncShakaAudioAndPlay(player);
-            return true;
-          } catch {
-            // Try next cookie mode / next server candidate!
+          // Mirror TgPlayer's failover (`{ url, cookie }`, then bare `{ url }`), except a
+          // *stall* skips the bare retry: an expired token refuses fast with HTTP 403/450,
+          // while a hanging server would just hang twice.
+          const first = await tryDashAttempt(cand, cand.cookie || "", normalizedKeys);
+          if (first === "played" || cancelled) return first === "played";
+          if (first === "refused" && cand.cookie) {
+            const bare = await tryDashAttempt(cand, "", normalizedKeys);
+            if (bare === "played" || cancelled) return bare === "played";
           }
         }
+        return false;
+      };
+
+      if (await attemptAll(await fetchCandidates(forceRefresh))) return true;
+      if (cancelled) return false;
+      if (!forceRefresh) {
+        // Cached tokens may have expired between page load and play: one automatic
+        // fresh-token pass before falling back to the (ASN-blocked) proxy path.
+        setStatusMsg(`Refreshing CDN token for ${channelName}…`);
+        if (await attemptAll(await fetchCandidates(true))) return true;
+        if (cancelled) return false;
       }
 
       directModeRef.current = false;
@@ -740,7 +952,11 @@ export function LiveVideoSurface({
 
       // JioTV and TG TV streams must play directly from the viewer's browser IP because
       // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
+      // tryBrowserDirect already spends one cached-token pass plus one fresh-token pass,
+      // so a failed direct attempt is never repeated after the proxy probe.
+      let directAttempted = false;
       if (preferDirectFirst) {
+        directAttempted = true;
         const startedDirect = await tryBrowserDirect(forceRefresh);
         if (startedDirect || cancelled) return;
       }
@@ -757,7 +973,8 @@ export function LiveVideoSurface({
           probeCtrl.abort();
           // When maxTV/Cloudflare Worker proxy gets HTTP 403/502, rescue the channel immediately
           // via Browser-Direct CDN playback matched by channel name/ID!
-          if (!cancelled) {
+          if (!cancelled && !directAttempted) {
+            directAttempted = true;
             const rescued = await tryBrowserDirect(forceRefresh);
             if (rescued || cancelled) return;
           }
@@ -778,9 +995,12 @@ export function LiveVideoSurface({
         else startMpegTs(streamUrl(".ts"), true);
       } catch {
         clearTimeout(timer);
-        if (!cancelled) {
+        if (!cancelled && !directAttempted) {
+          directAttempted = true;
           const rescued = await tryBrowserDirect(forceRefresh);
           if (rescued || cancelled) return;
+        }
+        if (!cancelled) {
           if (directUrl) startHls(directUrl, true);
           else if (wantDash) startDash(streamUrl(".mpd"));
           else startMpegTs(streamUrl(".ts"), true);
@@ -815,7 +1035,9 @@ export function LiveVideoSurface({
         onTimeUpdate={() => {
           clearOverlayIfRendering();
         }}
-        onWaiting={() => setStatusMsg("Buffering live broadcast…")}
+        onWaiting={() => {
+          if (!specificErrorRef.current) setStatusMsg("Buffering live broadcast…");
+        }}
         className="h-full w-full object-contain"
       />
       {statusMsg && (

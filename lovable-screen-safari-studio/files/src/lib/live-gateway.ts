@@ -2070,7 +2070,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
 
   let result = await callFn(tgVerifiedFnId);
   if (result.length === 0) {
-    const discovered = await discoverTgServerFn(true);
+    // Reuse the 10-minute discovery cache on normal plays; only a forced refresh pays for
+    // full `_serverFn` re-discovery. Either way the caller races this whole resolver so a
+    // hanging TG RPC can never delay the GioTV candidates past the direct-config budget.
+    const discovered = await discoverTgServerFn(force);
     for (const fnId of discovered) {
       if (fnId === tgVerifiedFnId && !force) continue;
       result = await callFn(fnId);
@@ -2169,8 +2172,16 @@ async function resolveDirectPlayCandidates(
   };
 
   // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
+  // The TG leg is budget-raced: when `_serverFn` hangs or rotates its hash, GioTV candidates
+  // still reach the browser within the 7s `/api/live/direct-config` client budget instead of
+  // stalling behind discovery (the background TG call warms `tgVerifiedFnId` for the retry).
+  const tgBudgeted = (async (): Promise<DirectPlayCandidate[]> => {
+    if (!v1NumericId) return [];
+    const budget = new Promise<DirectPlayCandidate[]>((resolve) => setTimeout(() => resolve([]), 5000));
+    return Promise.race([resolveTgRpcCandidates(v1NumericId, force), budget]);
+  })();
   const [tgCandidates, regularCookie, starCookie] = await Promise.all([
-    v1NumericId ? resolveTgRpcCandidates(v1NumericId, force) : Promise.resolve([] as DirectPlayCandidate[]),
+    tgBudgeted,
     matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
     matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
       ? fetchGioStarCookieForChannel(matchedGio.id, force)
@@ -2242,10 +2253,31 @@ async function resolveDirectPlayCandidates(
     }
   }
 
+  // 4. Never waste player time on a provably-expired token when the same URL also has a
+  // fresh one, and order freshest-first (stable, so TG Server 1 still precedes Server 2).
+  const now = Date.now();
+  const rankCandidate = (c: DirectPlayCandidate): number => {
+    const exp = hdneaExpiryMs(c.cookie || c.url);
+    if (exp === null) return 1;
+    return exp > now + 5_000 ? 2 : 0;
+  };
+  const byUrl = new Map<string, DirectPlayCandidate[]>();
+  for (const c of candidates) {
+    const group = byUrl.get(c.url);
+    if (group) group.push(c);
+    else byUrl.set(c.url, [c]);
+  }
+  const pruned: DirectPlayCandidate[] = [];
+  for (const group of byUrl.values()) {
+    const usable = group.filter((c) => rankCandidate(c) > 0);
+    pruned.push(...(usable.length > 0 ? usable : group));
+  }
+  pruned.sort((a, b) => rankCandidate(b) - rankCandidate(a));
+
   return {
     matchedId: v1NumericId,
     matchedName: matchedGio?.name ?? (channelName || null),
-    candidates,
+    candidates: pruned,
   };
 }
 
@@ -3361,19 +3393,40 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
       Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
       mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
     }
+    function waitDirectFrames(ms) {
+      return new Promise(function (resolve) {
+        const t0 = Date.now();
+        (function poll() {
+          if ((v.videoWidth > 0 && v.videoHeight > 0) || (!v.paused && v.currentTime > 0.3)) return resolve(true);
+          if (Date.now() - t0 > ms) return resolve(false);
+          setTimeout(poll, 250);
+        })();
+      });
+    }
     async function tryDirectPlay() {
       try {
-        const dr = await fetch("/api/live/direct-config?id=" + encodeURIComponent(ch.id) + "&name=" + encodeURIComponent(ch.name || ""));
-        if (!dr.ok) return false;
-        const dd = await dr.json().catch(() => ({}));
-        const cands = Array.isArray(dd.candidates) ? dd.candidates : [];
+        const dc = new AbortController(); const dtm = setTimeout(function () { dc.abort(); }, 7000);
+        let cands = [];
+        try {
+          const dr = await fetch("/api/live/direct-config?id=" + encodeURIComponent(ch.id) + "&name=" + encodeURIComponent(ch.name || ""), { signal: dc.signal });
+          if (!dr.ok) return false;
+          const dd = await dr.json().catch(() => ({}));
+          cands = Array.isArray(dd.candidates) ? dd.candidates : [];
+        } catch { return false; } finally { clearTimeout(dtm); }
         if (!cands.length || !window.shaka) return false;
         shaka.polyfill.installAll();
         if (!shaka.Player.isBrowserSupported()) return false;
         if (shaka.log && shaka.LogLevel) shaka.log.setLevel(shaka.LogLevel.NONE);
+        const passDeadline = Date.now() + 40000;
         for (let idx = 0; idx < cands.length; idx++) {
+          if (Date.now() > passDeadline) return false;
           const cand = cands[idx];
-          if (cand.container === "hls") { startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : "")); return true; }
+          st.textContent = "Trying " + (cand.label || "direct server") + "…";
+          if (cand.container === "hls") {
+            startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : ""));
+            if (await waitDirectFrames(7000)) return true;
+            continue;
+          }
           const attempts = cand.cookie ? [cand.cookie, ""] : [""];
           for (let a = 0; a < attempts.length; a++) {
             clean();
@@ -3382,8 +3435,8 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
             const ck = cand.clearKeys || {};
             sp.configure({
               drm: Object.keys(ck).length ? { clearKeys: ck } : {},
-              streaming: { lowLatencyMode: true, rebufferingGoal: 2, bufferingGoal: 20, retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } },
-              manifest: { retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } }
+              streaming: { lowLatencyMode: true, rebufferingGoal: 2, bufferingGoal: 20, retryParameters: { maxAttempts: 2, baseDelay: 300, backoffFactor: 2, timeout: 7000 } },
+              manifest: { retryParameters: { maxAttempts: 1, baseDelay: 300, backoffFactor: 2, timeout: 7000 } }
             });
             const net = sp.getNetworkingEngine && sp.getNetworkingEngine();
             if (net && activeCookie) {
@@ -3417,9 +3470,10 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
             }
             try {
               await sp.attach(v);
-              await sp.load(cand.url);
+              await Promise.race([sp.load(cand.url), new Promise(function (_, rej) { setTimeout(function () { rej(new Error("direct-timeout")); }, 8000); })]);
               v.play().catch(function () { v.muted = true; mu.textContent = "Unmute"; v.play().catch(function () {}); });
-              return true;
+              // A manifest that loads but never renders must fail over, not trap the embed.
+              if (await waitDirectFrames(6000)) return true;
             } catch {}
           }
         }
@@ -3470,7 +3524,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
         if (v.videoWidth > 0 && v.videoHeight > 0) return;
         st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
         rt.style.display = "inline-block"; ov.classList.remove("hide");
-      }, 15000);
+      }, 25000);
     }
     v.onpause = () => { pl.textContent = "Play"; };
     pl.onclick = () => v.paused ? v.play() : v.pause();

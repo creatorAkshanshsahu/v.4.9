@@ -1,1640 +1,773 @@
-From e35274a516eb86167f23fd8f2de3ec049d917498 Mon Sep 17 00:00:00 2001
+From fba964e4862697e8b324eb837deeef0e38b57df0 Mon Sep 17 00:00:00 2001
 From: STREAMR Bot <noreply@github.com>
-Date: Fri, 13 Nov 2026 18:18:48 +0000
-Subject: [PATCH] fix(live): bypass Cloudflare Worker ASN blocks via
- Browser-Direct CDN + GioTV/TG RPC
+Date: Sat, 14 Nov 2026 03:03:24 +0000
+Subject: [PATCH] fix(live): auto-switch direct CDN token/server on slow frames
+ + prune expired tokens
 
 ---
- src/components/tv/LiveVideoSurface.tsx | 349 ++++++++--
- src/lib/live-gateway.ts                | 878 ++++++++++++++++++++++++-
- src/routes/live.tsx                    |   1 +
- src/test/playback-fixes.test.ts        | 160 +++++
- 4 files changed, 1329 insertions(+), 59 deletions(-)
+ package.json                           |   1 +
+ src/components/tv/LiveVideoSurface.tsx | 476 ++++++++++++++++++-------
+ src/lib/live-gateway.ts                |  80 ++++-
+ src/test/playback-fixes.test.ts        |  47 +++
+ 4 files changed, 464 insertions(+), 140 deletions(-)
 
+diff --git a/package.json b/package.json
+index 532ad06..278d72c 100644
+--- a/package.json
++++ b/package.json
+@@ -49,6 +49,7 @@
+     "@tanstack/react-router": "1.170.41",
+     "@tanstack/react-start": "1.168.60",
+     "@tanstack/router-plugin": "1.168.42",
++    "@testing-library/dom": "^10.4.2",
+     "class-variance-authority": "^0.7.1",
+     "clsx": "^2.1.1",
+     "cmdk": "^1.1.1",
 diff --git a/src/components/tv/LiveVideoSurface.tsx b/src/components/tv/LiveVideoSurface.tsx
-index 0b8540c..8d006b0 100644
+index 8d006b0..c2d5fdd 100644
 --- a/src/components/tv/LiveVideoSurface.tsx
 +++ b/src/components/tv/LiveVideoSurface.tsx
-@@ -1,12 +1,29 @@
- import { useEffect, useRef, useState } from "react";
- import { RefreshCw } from "lucide-react";
- import { Button } from "@/components/ui/button";
-+import type { DirectPlayCandidate } from "@/lib/live-gateway";
- 
- export interface AudioTrackOption {
-   index: number;
-   label: string;
- }
- 
-+interface ShakaRequest {
-+  uris: string[];
-+  headers: Record<string, string>;
-+}
-+
-+interface ShakaResponse {
-+  uri: string;
-+  data: ArrayBuffer;
-+  headers: Record<string, string>;
-+}
-+
-+interface ShakaNetworkingEngine {
-+  registerRequestFilter: (filter: (type: number, request: ShakaRequest) => void) => void;
-+  registerResponseFilter: (filter: (type: number, response: ShakaResponse) => void) => void;
-+}
-+
- interface ShakaPlayerInstance {
-   configure: (config: Record<string, unknown>) => void;
-   attach: (el: HTMLMediaElement) => Promise<void>;
-@@ -16,6 +33,7 @@ interface ShakaPlayerInstance {
-   getAudioLanguages: () => string[];
-   selectAudioLanguage: (language: string, role?: string) => void;
-   getAudioLanguage: () => string;
-+  getNetworkingEngine?: () => ShakaNetworkingEngine | null;
- }
- 
- export interface ChannelDrm {
-@@ -63,6 +81,11 @@ declare global {
-         new (): ShakaPlayerInstance;
-         isBrowserSupported: () => boolean;
-       };
-+      net?: {
-+        NetworkingEngine?: {
-+          RequestType?: { MANIFEST?: number; SEGMENT?: number };
-+        };
-+      };
-       polyfill: { installAll: () => void };
-       log?: { setLevel: (level: number) => void };
-       LogLevel?: { NONE: number };
-@@ -87,15 +110,14 @@ declare global {
-  *
-  * Shaka accepts either 32 hex chars or 22-char unpadded base64url, and decides
-  * which by *length alone*: exactly 22 means "base64", anything else goes through
-- * a hex parser. A 16-byte key encoded as base64url is 22 chars, but a 16-byte
-- * key id we already emit is 22 only when unpadded — and a padded 24-char form, or
-- * a 32-char base64 string, fails the length test and gets parsed as hex, quietly
-- * producing a wrong key. Converting everything to hex removes the ambiguity.
-+ * a hex parser. Converting everything (including UUID forms with hyphens) to 32
-+ * lowercase hex chars removes any ambiguity.
-  */
- function toHexKeyId(value: string): string | null {
-   const v = (value ?? "").trim();
-   if (!v) return null;
--  if (/^[0-9a-fA-F]{32}$/.test(v)) return v.toLowerCase();
-+  const cleanUuid = v.replace(/-/g, "");
-+  if (/^[0-9a-fA-F]{32}$/.test(cleanUuid)) return cleanUuid.toLowerCase();
-   const normalised = v.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
-   if (!/^[A-Za-z0-9+/]+$/.test(normalised)) return null;
-   const padded = normalised + "===".slice((normalised.length + 3) % 4);
-@@ -124,10 +146,23 @@ function parseKeyHeader(value: string | null): Array<{ kid: string; k: string }>
-   return out;
- }
- 
-+/** Ensure `no-referrer` is active in `document.head` so Jio CDN never sees a third-party Referer (HTTP 451). */
-+function ensureNoReferrerMeta(): void {
-+  if (typeof document === "undefined") return;
-+  let meta = document.querySelector('meta[name="referrer"]') as HTMLMetaElement | null;
-+  if (!meta) {
-+    meta = document.createElement("meta");
-+    meta.name = "referrer";
-+    document.head.appendChild(meta);
-+  }
-+  if (meta.content !== "no-referrer") meta.content = "no-referrer";
-+}
-+
- let scriptsPromise: Promise<void> | null = null;
- 
- function ensurePlayerEnginesLoaded(): Promise<void> {
-   if (typeof window === "undefined") return Promise.resolve();
-+  ensureNoReferrerMeta();
-   if (window.mpegts && window.Hls && window.shaka) return Promise.resolve();
-   if (scriptsPromise) return scriptsPromise;
- 
-@@ -173,8 +208,16 @@ export function LiveVideoSurface({
-   const [statusMsg, setStatusMsg] = useState<string | null>("Connecting to live stream…");
-   const [hasError, setHasError] = useState(false);
-   const [localRetry, setLocalRetry] = useState(0);
--  /** Set when Shaka has named a concrete fault; the no-video timer must not overwrite it. */
-+  /** Set when a concrete fault has already been reported; the 15s timer must never overwrite it. */
+@@ -212,6 +212,10 @@ export function LiveVideoSurface({
    const specificErrorRef = useRef(false);
-+  /** True when playing directly against upstream CDN from the browser (no server segment log). */
-+  const directModeRef = useRef(false);
-+
-+  const reportError = (msg: string) => {
-+    specificErrorRef.current = true;
-+    setHasError(true);
-+    setStatusMsg(msg);
-+  };
+   /** True when playing directly against upstream CDN from the browser (no server segment log). */
+   const directModeRef = useRef(false);
++  /** Automatic backup token/server switches the watchdog already spent for the current channel. */
++  const autoDirectRetryRef = useRef(0);
++  /** Channel key the auto-retry budget belongs to; reset when the channel or manual reload changes. */
++  const autoRetryKeyRef = useRef("");
  
-   const clearOverlayIfRendering = () => {
-     const el = videoRef.current;
-@@ -210,21 +253,25 @@ export function LiveVideoSurface({
-         setHasError(true);
+   const reportError = (msg: string) => {
+     specificErrorRef.current = true;
+@@ -235,6 +239,13 @@ export function LiveVideoSurface({
+     if (!el) return;
+     let settled = false;
+ 
++    // One automatic backup token/server switch per channel (manual Retry / channel change resets it).
++    const retryKey = `${channelId}:${reloadNonce}`;
++    if (autoRetryKeyRef.current !== retryKey) {
++      autoRetryKeyRef.current = retryKey;
++      autoDirectRetryRef.current = 0;
++    }
++
+     const check = () => {
+       if (settled) return;
+       if (el.videoWidth > 0 && el.videoHeight > 0) {
+@@ -250,18 +261,29 @@ export function LiveVideoSurface({
+     const deadline = setTimeout(() => {
+       if (settled) return;
+       if (el.videoWidth === 0 || el.videoHeight === 0) {
+-        setHasError(true);
          settled = true;
          clearInterval(poll);
--        // A specific refusal from Shaka is worth more than anything this timer can infer.
--        // Overwriting it with "no video arrived" is how a 450 turned into a mystery.
-+        // Never overwrite a specific HTTP/Shaka/HLS error with a generic watchdog guess.
-         if (specificErrorRef.current) return;
--        // Ask the gateway what the CDN actually answered for the segments the player
--        // requested. Without that, "no video arrived" is six different faults wearing one
--        // message, and every round trip becomes a guess.
-+        // When streaming browser-direct to cdn.jio.com, segments never pass through /api/live/segment.
-+        if (directModeRef.current) {
-+          setStatusMsg(
-+            "Direct CDN stream is taking too long to deliver video frames. Press Retry to switch token/server.",
-+          );
+         // Never overwrite a specific HTTP/Shaka/HLS error with a generic watchdog guess.
+-        if (specificErrorRef.current) return;
++        if (specificErrorRef.current) {
++          setHasError(true);
 +          return;
 +        }
+         // When streaming browser-direct to cdn.jio.com, segments never pass through /api/live/segment.
++        // Switch token/server automatically once instead of asking the viewer to press Retry.
+         if (directModeRef.current) {
++          if (autoDirectRetryRef.current < 1) {
++            autoDirectRetryRef.current += 1;
++            setStatusMsg("Direct server is slow — switching to backup token/server…");
++            setLocalRetry((n) => n + 1);
++            return;
++          }
++          setHasError(true);
+           setStatusMsg(
+             "Direct CDN stream is taking too long to deliver video frames. Press Retry to switch token/server.",
+           );
+           return;
+         }
++        setHasError(true);
          const asked = `/api/live/diagnose?id=${encodeURIComponent(channelId)}`;
          void fetch(asked)
            .then((r) => (r.ok ? r.json() : null))
-           .then((report: unknown) => {
-+            if (specificErrorRef.current) return;
-             const segs = (report as { recentSegments?: Array<{ status?: number; bytes?: number }> } | null)
-               ?.recentSegments;
-             if (!segs || segs.length === 0) {
-               setStatusMsg(
--                "The player requested no segments at all, so the manifest it received could not be used.",
-+                "The stream started but no video segments arrived in time. Press Retry to reconnect.",
-               );
-               return;
-             }
-@@ -244,15 +291,17 @@ export function LiveVideoSurface({
-             );
-           })
-           .catch(() => {
--            setStatusMsg(
--              "The stream started but no video arrived. The channel's segments were refused or the format is unsupported.",
--            );
-+            if (!specificErrorRef.current) {
-+              setStatusMsg(
-+                "The stream started but no video arrived. The channel's segments were refused or the format is unsupported.",
-+              );
+@@ -396,148 +418,338 @@ export function LiveVideoSurface({
+     const tryBrowserDirect = async (forceRefresh: boolean): Promise<boolean> => {
+       if (cancelled || !videoRef.current) return false;
+       ensureNoReferrerMeta();
+-      const ctrl = new AbortController();
+-      const t = setTimeout(() => ctrl.abort(), 9000);
+-      let candidates: DirectPlayCandidate[] = [];
+-      try {
+-        const q = `/api/live/direct-config?id=${encodeURIComponent(channelId)}&name=${encodeURIComponent(channelName)}${forceRefresh ? "&refresh=1" : ""}`;
+-        const res = await fetch(q, { signal: ctrl.signal });
+-        if (!res.ok) return false;
+-        const data = (await res.json().catch(() => null)) as { candidates?: DirectPlayCandidate[] } | null;
+-        if (!data || !Array.isArray(data.candidates) || data.candidates.length === 0) return false;
+-        candidates = data.candidates;
+-      } catch {
+-        return false;
+-      } finally {
+-        clearTimeout(t);
+-      }
+ 
+-      if (cancelled || !videoRef.current) return false;
++      const fetchCandidates = async (refresh: boolean): Promise<DirectPlayCandidate[]> => {
++        const ctrl = new AbortController();
++        const t = setTimeout(() => ctrl.abort(), 7000);
++        try {
++          const q = `/api/live/direct-config?id=${encodeURIComponent(channelId)}&name=${encodeURIComponent(channelName)}${refresh ? "&refresh=1" : ""}`;
++          const res = await fetch(q, { signal: ctrl.signal });
++          if (!res.ok) return [];
++          const data = (await res.json().catch(() => null)) as { candidates?: DirectPlayCandidate[] } | null;
++          if (!data || !Array.isArray(data.candidates)) return [];
++          return data.candidates;
++        } catch {
++          return [];
++        } finally {
++          clearTimeout(t);
++        }
++      };
++
++      /**
++       * Resolve quickly once the video element actually renders a frame; a manifest that
++       * loads but never produces segments must fail over to the next token/server instead
++       * of sitting until the 18s watchdog fires.
++       */
++      const waitForFirstFrame = (timeoutMs: number, isDead?: () => boolean): Promise<boolean> => {
++        const el = videoRef.current;
++        if (!el || cancelled) return Promise.resolve(false);
++        if (el.videoWidth > 0 && el.videoHeight > 0) return Promise.resolve(true);
++        return new Promise((resolve) => {
++          let done = false;
++          const finish = (ok: boolean) => {
++            if (done) return;
++            done = true;
++            clearInterval(poll);
++            clearTimeout(timer);
++            resolve(ok);
++          };
++          const onFrame = () => {
++            if (cancelled || isDead?.()) {
++              finish(false);
++              return;
++            }
++            const v = videoRef.current;
++            if (v && ((v.videoWidth > 0 && v.videoHeight > 0) || (!v.paused && v.currentTime > 0.3))) {
++              finish(true);
++            }
++          };
++          const poll = setInterval(onFrame, 250);
++          const timer = setTimeout(() => finish(false), timeoutMs);
++          onFrame();
++        });
++      };
+ 
+       const shaka = window.shaka;
+       const manifestType = shaka?.net?.NetworkingEngine?.RequestType?.MANIFEST ?? 0;
+       const segmentType = shaka?.net?.NetworkingEngine?.RequestType?.SEGMENT ?? 1;
+ 
+-      for (const cand of candidates) {
+-        if (cancelled || !videoRef.current) return false;
+-
+-        if (cand.container === "hls") {
+-          directModeRef.current = true;
+-          const signedHls = cand.cookie
+-            ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
+-            : cand.url;
+-          startHls(signedHls, true);
+-          return true;
++      const killShaka = (player: ShakaPlayerInstance) => {
++        if (shakaRef.current === player) shakaRef.current = null;
++        try {
++          void player.destroy();
++        } catch {
++          // ignore teardown errors
+         }
++      };
+ 
+-        if (!shaka) continue;
+-        shaka.polyfill.installAll();
+-        if (!shaka.Player.isBrowserSupported()) continue;
+-        shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
++      /** DASH attempt outcome: rendered frames, fast HTTP refusal (worth a bare-URL retry), or stall. */
++      const tryDashAttempt = async (
++        cand: DirectPlayCandidate,
++        activeCookie: string,
++        normalizedKeys: Record<string, string>,
++      ): Promise<"played" | "refused" | "stalled"> => {
++        if (cancelled || !videoRef.current || !shaka) return "stalled";
++        cleanup();
++        directModeRef.current = true;
++        onContainerDetected?.("DASH");
++        setStatusMsg(`Trying ${cand.label}…`);
+ 
+-        const normalizedKeys: Record<string, string> = {};
+-        for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
+-          const kid = toHexKeyId(rawKid);
+-          const k = toHexKeyId(rawK);
+-          if (kid && k) normalizedKeys[kid] = k;
+-        }
++        const player = new shaka.Player();
++        shakaRef.current = player;
++        // Fail over ourselves instead of letting Shaka retry one dead server for 24s+:
++        // tight per-request timeouts, single manifest attempt, then the next token/server.
++        player.configure({
++          drm: {
++            ...(Object.keys(normalizedKeys).length ? { clearKeys: normalizedKeys } : {}),
++            advanced: {},
++          },
++          streaming: {
++            lowLatencyMode: true,
++            rebufferingGoal: 2,
++            bufferingGoal: 20,
++            retryParameters: { maxAttempts: 2, baseDelay: 300, backoffFactor: 2, timeout: 7000 },
++          },
++          manifest: {
++            retryParameters: { maxAttempts: 1, baseDelay: 300, backoffFactor: 2, timeout: 7000 },
++          },
++        });
+ 
+-        // Mirror TgPlayer's failover: try `{ url, cookie }` first, then `{ url, cookie: "" }`.
+-        const cookieAttempts = cand.cookie ? [cand.cookie, ""] : [""];
+-        for (const activeCookie of cookieAttempts) {
+-          if (cancelled || !videoRef.current) return false;
+-          cleanup();
+-          directModeRef.current = true;
+-          onContainerDetected?.("DASH");
+-
+-          const player = new shaka.Player();
+-          shakaRef.current = player;
+-          player.configure({
+-            drm: {
+-              ...(Object.keys(normalizedKeys).length ? { clearKeys: normalizedKeys } : {}),
+-              advanced: {},
+-            },
+-            streaming: {
+-              lowLatencyMode: true,
+-              rebufferingGoal: 2,
+-              bufferingGoal: 20,
+-              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
+-            },
+-            manifest: {
+-              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
+-            },
++        const net = player.getNetworkingEngine?.();
++        if (net && activeCookie) {
++          net.registerRequestFilter((type, request) => {
++            if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
++              const u = request.uris[0];
++              if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
++                const base = u.split("?")[0]!;
++                request.uris[0] = `${base}?${activeCookie}`;
++              }
 +            }
            });
-         return;
-       }
-       settled = true;
-       clearInterval(poll);
--    }, 15000);
-+    }, 18000);
++        }
  
-     check();
-     return () => {
-@@ -322,25 +371,193 @@ export function LiveVideoSurface({
-       }
-     };
+-          const net = player.getNetworkingEngine?.();
+-          if (net && activeCookie) {
+-            net.registerRequestFilter((type, request) => {
+-              if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
+-                const u = request.uris[0];
+-                if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
+-                  const base = u.split("?")[0]!;
+-                  request.uris[0] = `${base}?${activeCookie}`;
+-                }
++        if (net && Object.keys(normalizedKeys).length > 0) {
++          net.registerResponseFilter((type, response) => {
++            if (type !== manifestType || !response.data) return;
++            try {
++              let xml = new TextDecoder().decode(response.data);
++              if (!/<MPD[\s>]/i.test(xml)) return;
++              const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
++                .map((m) => toHexKeyId(m[1]!))
++                .filter((x): x is string => Boolean(x));
++              const pairs = Object.entries(normalizedKeys);
++              if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
++                const expanded: Record<string, string> = { ...normalizedKeys };
++                for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
++                player.configure({ drm: { clearKeys: expanded, advanced: {} } });
+               }
+-            });
+-          }
++              // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
++              xml = xml.replace(
++                /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
++                "",
++              );
++              xml = xml.replace(
++                /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
++                "",
++              );
++              response.data = new TextEncoder().encode(xml).buffer;
++            } catch {
++              // leave manifest untouched if decoding fails
++            }
++          });
++        }
  
--    // DASH + ClearKey through Shaka. Shaka wants each key as 32 hex chars or as
--    // *unpadded* 22-char base64url; a 32-char base64url string (which is what a
--    // default_KID produces) is silently misread as hex, so normalise both forms
--    // to hex and let Shaka encode them itself.
-+    const syncShakaAudioAndPlay = async (player: ShakaPlayerInstance) => {
-+      if (cancelled) return;
-+      const langs = player.getAudioLanguages() ?? [];
-+      if (langs.length > 1) {
-+        const hindi = langs.find((l) => /^hi/i.test(l));
-+        if (hindi) player.selectAudioLanguage(hindi);
-+      }
-+      const opts: AudioTrackOption[] = langs.map((name, idx) => ({ index: idx, label: name }));
-+      onAudioTracksChange?.(opts, Math.max(langs.indexOf(player.getAudioLanguage() ?? ""), 0));
-+      await safePlay();
-+    };
+-          if (net && Object.keys(normalizedKeys).length > 0) {
+-            net.registerResponseFilter((type, response) => {
+-              if (type !== manifestType || !response.data) return;
+-              try {
+-                let xml = new TextDecoder().decode(response.data);
+-                if (!/<MPD[\s>]/i.test(xml)) return;
+-                const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
+-                  .map((m) => toHexKeyId(m[1]!))
+-                  .filter((x): x is string => Boolean(x));
+-                const pairs = Object.entries(normalizedKeys);
+-                if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
+-                  const expanded: Record<string, string> = { ...normalizedKeys };
+-                  for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
+-                  player.configure({ drm: { clearKeys: expanded, advanced: {} } });
+-                }
+-                // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
+-                xml = xml.replace(
+-                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
+-                  "",
+-                );
+-                xml = xml.replace(
+-                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
+-                  "",
+-                );
+-                response.data = new TextEncoder().encode(xml).buffer;
+-              } catch {
+-                // leave manifest untouched if decoding fails
+-              }
+-            });
+-          }
++        // Capture failures *during* load so a refused manifest fails over immediately.
++        let fatalStatus: number | undefined;
++        let fatalCode: number | undefined;
++        player.addEventListener("error", (event) => {
++          if (cancelled) return;
++          const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
++          fatalCode = detail?.detail?.code;
++          const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
++          const numeric = payload.find((d): d is number => typeof d === "number");
++          if (fatalCode === 1001 && typeof numeric === "number") fatalStatus = numeric;
++        });
+ 
+-          try {
+-            await player.attach(videoRef.current);
+-            await player.load(cand.url);
+-            if (cancelled) return false;
+-
+-            // Attach runtime error handler after initial manifest+init load succeeds.
+-            player.addEventListener("error", (event) => {
+-              if (cancelled) return;
+-              const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
+-              const code = detail?.detail?.code;
+-              const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
+-              const numeric = payload.find((d): d is number => typeof d === "number");
+-              const status = code === 1001 ? numeric : undefined;
++        const loadStart = Date.now();
++        try {
++          await player.attach(videoRef.current);
++          await Promise.race([
++            player.load(cand.url),
++            new Promise((_, reject) => setTimeout(() => reject(new Error("direct-load-timeout")), 8000)),
++          ]);
++        } catch {
++          const refused = fatalStatus !== undefined && fatalStatus >= 400;
++          killShaka(player);
++          // A fast HTTP refusal (403/450) is worth one bare-URL retry; a stall is not.
++          return refused && Date.now() - loadStart < 8000 ? "refused" : "stalled";
++        }
++        if (cancelled) {
++          killShaka(player);
++          return "stalled";
++        }
++        if (fatalStatus !== undefined && fatalStatus >= 400) {
++          killShaka(player);
++          return "refused";
++        }
 +
-+    /**
-+     * Browser-direct playback against `jiotvmblive.cdn.jio.com` / `jiotvpllive.cdn.jio.com`.
-+     *
-+     * Cloudflare Workers (`AS13335`) are geo/ASN-blocked on media streams (`HTTP 403` on maxTV,
-+     * `HTTP 450/451` on Jio CDN), whereas the viewer's own Indian browser IP receives `200 OK`
-+     * with `Access-Control-Allow-Origin: *` when:
-+     *   1. `no-referrer` is set,
-+     *   2. Shaka's `registerRequestFilter` appends `?__hdnea__=<token>` to MANIFEST & SEGMENT URIs,
-+     *   3. ClearKey hex pairs are normalized and bound to the MPD's `cenc:default_KID`.
-+     */
-+    const tryBrowserDirect = async (forceRefresh: boolean): Promise<boolean> => {
-+      if (cancelled || !videoRef.current) return false;
-+      ensureNoReferrerMeta();
-+      const ctrl = new AbortController();
-+      const t = setTimeout(() => ctrl.abort(), 9000);
-+      let candidates: DirectPlayCandidate[] = [];
-+      try {
-+        const q = `/api/live/direct-config?id=${encodeURIComponent(channelId)}&name=${encodeURIComponent(channelName)}${forceRefresh ? "&refresh=1" : ""}`;
-+        const res = await fetch(q, { signal: ctrl.signal });
-+        if (!res.ok) return false;
-+        const data = (await res.json().catch(() => null)) as { candidates?: DirectPlayCandidate[] } | null;
-+        if (!data || !Array.isArray(data.candidates) || data.candidates.length === 0) return false;
-+        candidates = data.candidates;
-+      } catch {
-+        return false;
-+      } finally {
-+        clearTimeout(t);
-+      }
++        const framed = await waitForFirstFrame(6000, () => fatalStatus !== undefined && fatalStatus >= 400);
++        if (cancelled || !framed) {
++          killShaka(player);
++          return fatalStatus !== undefined && fatalStatus >= 400 ? "refused" : "stalled";
++        }
 +
-+      if (cancelled || !videoRef.current) return false;
++        // Frames are rendering: report any *later* mid-stream interruption for real.
++        player.addEventListener("error", (event) => {
++          if (cancelled) return;
++          const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
++          const code = detail?.detail?.code;
++          const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
++          const numeric = payload.find((d): d is number => typeof d === "number");
++          const status = code === 1001 ? numeric : undefined;
++          reportError(
++            status
++              ? `Direct CDN segment returned HTTP ${status}. Press Retry to refresh token.`
++              : `Live stream interrupted${code ? ` (Shaka ${code})` : ""}. Press Retry.`,
++          );
++        });
 +
-+      const shaka = window.shaka;
-+      const manifestType = shaka?.net?.NetworkingEngine?.RequestType?.MANIFEST ?? 0;
-+      const segmentType = shaka?.net?.NetworkingEngine?.RequestType?.SEGMENT ?? 1;
++        await syncShakaAudioAndPlay(player);
++        return "played";
++      };
 +
-+      for (const cand of candidates) {
++      const tryHlsCandidate = async (cand: DirectPlayCandidate): Promise<boolean> => {
 +        if (cancelled || !videoRef.current) return false;
-+
-+        if (cand.container === "hls") {
-+          directModeRef.current = true;
-+          const signedHls = cand.cookie
-+            ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
-+            : cand.url;
-+          startHls(signedHls, true);
++        cleanup();
++        directModeRef.current = true;
++        onContainerDetected?.("HLS");
++        setStatusMsg(`Trying ${cand.label}…`);
++        const signedHls = cand.cookie
++          ? `${cand.url}${cand.url.includes("?") ? "&" : "?"}${cand.cookie}`
++          : cand.url;
++        const el = videoRef.current;
++        const HlsCtor = window.Hls;
++        if (HlsCtor && HlsCtor.isSupported()) {
++          const hls = new HlsCtor({
++            lowLatencyMode: true,
++            backBufferLength: 30,
++            manifestLoadingMaxRetry: 1,
++            levelLoadingMaxRetry: 2,
++            fragLoadingMaxRetry: 2,
++            manifestLoadingRetryDelay: 500,
++            levelLoadingRetryDelay: 500,
++            fragLoadingRetryDelay: 500,
++          });
++          hlsRef.current = hls;
++          let fatal = false;
++          const syncTracks = () => {
++            const list = hls.audioTracks || [];
++            const opts: AudioTrackOption[] = list.map((t, idx) => ({
++              index: idx,
++              label: [t.name, t.lang].filter(Boolean).join(" · ") || `Track ${idx + 1}`,
++            }));
++            let preferred = hls.audioTrack;
++            const hindiIdx = list.findIndex((t) => /hin|^hi$/i.test(`${t.name ?? ""} ${t.lang ?? ""}`));
++            if (hindiIdx >= 0) {
++              hls.audioTrack = hindiIdx;
++              preferred = hindiIdx;
++            }
++            onAudioTracksChange?.(opts, preferred);
++          };
++          hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
++            syncTracks();
++            void safePlay();
++          });
++          hls.on(HlsCtor.Events.AUDIO_TRACKS_UPDATED, syncTracks);
++          hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
++            const d = data as { fatal?: boolean } | undefined;
++            if (d?.fatal) fatal = true;
++          });
++          hls.loadSource(signedHls);
++          hls.attachMedia(el);
++          const framed = await waitForFirstFrame(7000, () => fatal);
++          if (cancelled || !framed || fatal) {
++            try {
++              hls.destroy();
++            } catch {
++              // ignore teardown errors
++            }
++            if (hlsRef.current === hls) hlsRef.current = null;
++            return false;
++          }
++          hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
++            const d = data as { fatal?: boolean } | undefined;
++            if (d?.fatal && !cancelled) {
+               reportError(
+-                status
+-                  ? `Direct CDN segment returned HTTP ${status}. Press Retry to refresh token.`
+-                  : `Live stream interrupted${code ? ` (Shaka ${code})` : ""}. Press Retry.`,
++                activeSource === "jio"
++                  ? "This JioTV stream was interrupted. Press Retry to reload it with a fresh CDN token."
++                  : activeSource === "tgtv"
++                    ? "This TG TV stream was interrupted. Press Retry to reconnect."
++                    : "Live HLS stream interrupted. Press Retry to request a fresh stream token.",
+               );
+-            });
++            }
++          });
 +          return true;
 +        }
-+
-+        if (!shaka) continue;
-+        shaka.polyfill.installAll();
-+        if (!shaka.Player.isBrowserSupported()) continue;
-+        shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
-+
-+        const normalizedKeys: Record<string, string> = {};
-+        for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
-+          const kid = toHexKeyId(rawKid);
-+          const k = toHexKeyId(rawK);
-+          if (kid && k) normalizedKeys[kid] = k;
++        if (el.canPlayType("application/vnd.apple.mpegurl")) {
++          el.src = signedHls;
++          await safePlay();
++          const framed = await waitForFirstFrame(7000);
++          if (cancelled || !framed) {
++            el.removeAttribute("src");
++            el.load();
++            return false;
++          }
++          return true;
 +        }
++        return false;
++      };
+ 
+-            await syncShakaAudioAndPlay(player);
+-            return true;
+-          } catch {
+-            // Try next cookie mode / next server candidate!
++      const attemptAll = async (candidates: DirectPlayCandidate[]): Promise<boolean> => {
++        // Hard cap so one slow pass can never trap the player; the watchdog + fresh-token
++        // pass take over from there.
++        const passDeadline = Date.now() + 40000;
++        for (const cand of candidates) {
++          if (cancelled || !videoRef.current || Date.now() > passDeadline) return false;
 +
-+        // Mirror TgPlayer's failover: try `{ url, cookie }` first, then `{ url, cookie: "" }`.
-+        const cookieAttempts = cand.cookie ? [cand.cookie, ""] : [""];
-+        for (const activeCookie of cookieAttempts) {
-+          if (cancelled || !videoRef.current) return false;
-+          cleanup();
-+          directModeRef.current = true;
-+          onContainerDetected?.("DASH");
-+
-+          const player = new shaka.Player();
-+          shakaRef.current = player;
-+          player.configure({
-+            drm: {
-+              ...(Object.keys(normalizedKeys).length ? { clearKeys: normalizedKeys } : {}),
-+              advanced: {},
-+            },
-+            streaming: {
-+              lowLatencyMode: true,
-+              rebufferingGoal: 2,
-+              bufferingGoal: 20,
-+              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
-+            },
-+            manifest: {
-+              retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 },
-+            },
-+          });
-+
-+          const net = player.getNetworkingEngine?.();
-+          if (net && activeCookie) {
-+            net.registerRequestFilter((type, request) => {
-+              if ((type === manifestType || type === segmentType) && request.uris?.[0]) {
-+                const u = request.uris[0];
-+                if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
-+                  const base = u.split("?")[0]!;
-+                  request.uris[0] = `${base}?${activeCookie}`;
-+                }
-+              }
-+            });
++          if (cand.container === "hls") {
++            if (await tryHlsCandidate(cand)) return true;
++            continue;
 +          }
 +
-+          if (net && Object.keys(normalizedKeys).length > 0) {
-+            net.registerResponseFilter((type, response) => {
-+              if (type !== manifestType || !response.data) return;
-+              try {
-+                let xml = new TextDecoder().decode(response.data);
-+                if (!/<MPD[\s>]/i.test(xml)) return;
-+                const mpdKids = [...xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)]
-+                  .map((m) => toHexKeyId(m[1]!))
-+                  .filter((x): x is string => Boolean(x));
-+                const pairs = Object.entries(normalizedKeys);
-+                if (pairs.length === 1 && mpdKids.length > 0 && !normalizedKeys[mpdKids[0]!]) {
-+                  const expanded: Record<string, string> = { ...normalizedKeys };
-+                  for (const mk of mpdKids) expanded[mk] = pairs[0]![1];
-+                  player.configure({ drm: { clearKeys: expanded, advanced: {} } });
-+                }
-+                // Strip Widevine/PlayReady descriptors so ClearKey EME is selected cleanly on all browsers.
-+                xml = xml.replace(
-+                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi,
-+                  "",
-+                );
-+                xml = xml.replace(
-+                  /<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi,
-+                  "",
-+                );
-+                response.data = new TextEncoder().encode(xml).buffer;
-+              } catch {
-+                // leave manifest untouched if decoding fails
-+              }
-+            });
++          if (!shaka) continue;
++          shaka.polyfill.installAll();
++          if (!shaka.Player.isBrowserSupported()) continue;
++          shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
++
++          const normalizedKeys: Record<string, string> = {};
++          for (const [rawKid, rawK] of Object.entries(cand.clearKeys || {})) {
++            const kid = toHexKeyId(rawKid);
++            const k = toHexKeyId(rawK);
++            if (kid && k) normalizedKeys[kid] = k;
 +          }
 +
-+          try {
-+            await player.attach(videoRef.current);
-+            await player.load(cand.url);
-+            if (cancelled) return false;
-+
-+            // Attach runtime error handler after initial manifest+init load succeeds.
-+            player.addEventListener("error", (event) => {
-+              if (cancelled) return;
-+              const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
-+              const code = detail?.detail?.code;
-+              const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
-+              const numeric = payload.find((d): d is number => typeof d === "number");
-+              const status = code === 1001 ? numeric : undefined;
-+              reportError(
-+                status
-+                  ? `Direct CDN segment returned HTTP ${status}. Press Retry to refresh token.`
-+                  : `Live stream interrupted${code ? ` (Shaka ${code})` : ""}. Press Retry.`,
-+              );
-+            });
-+
-+            await syncShakaAudioAndPlay(player);
-+            return true;
-+          } catch {
-+            // Try next cookie mode / next server candidate!
-+          }
-+        }
-+      }
-+
-+      directModeRef.current = false;
-+      return false;
-+    };
-+
-     const startDash = (url: string, matched?: Array<{ kid: string; k: string }>) => {
-       if (cancelled || !videoRef.current) return;
-       cleanup();
-+      directModeRef.current = false;
-       const shaka = window.shaka;
-       if (!shaka) {
--        setHasError(true);
--        setStatusMsg("DASH playback engine did not load.");
-+        reportError("DASH playback engine did not load.");
-         return;
-       }
-       onContainerDetected?.("DASH");
-       try {
-         shaka.polyfill.installAll();
-         if (!shaka.Player.isBrowserSupported()) {
--          setHasError(true);
--          setStatusMsg("This browser cannot play protected DASH streams.");
-+          reportError("This browser cannot play protected DASH streams.");
-           return;
-         }
-         shaka.log?.setLevel(shaka.LogLevel?.NONE ?? 0);
-@@ -358,7 +575,6 @@ export function LiveVideoSurface({
-         player.configure({
-           drm: {
-             ...(Object.keys(clearKeys).length ? { clearKeys } : {}),
--            // Jio's CDN serves a clear-key licence; never block on a server cert.
-             advanced: {},
-           },
-           streaming: {
-@@ -375,15 +591,11 @@ export function LiveVideoSurface({
-           const detail = event as { detail?: { code?: number; data?: unknown[] } } | undefined;
-           const code = detail?.detail?.code;
-           const payload = Array.isArray(detail?.detail?.data) ? detail.detail.data : [];
--          // Shaka passes positional arguments, not named fields: BAD_HTTP_STATUS is
--          // [uris, status]. Searching for an object with `.status` never matched anything.
-           const uris = payload.find((d): d is string[] => Array.isArray(d) && typeof d[0] === "string");
-           const numeric = payload.find((d): d is number => typeof d === "number");
-           const status = code === 1001 ? numeric : undefined;
-           const firstUri = uris?.[0];
--          setHasError(true);
--          specificErrorRef.current = true;
--          setStatusMsg(
-+          reportError(
-             status
-               ? `The CDN refused a segment (HTTP ${status}).${firstUri ? ` ${firstUri.split("?")[0]}` : ""}`
-               : code === 6001 || code === 6002
-@@ -396,25 +608,16 @@ export function LiveVideoSurface({
-           try {
-             await player.attach(videoRef.current!);
-             await player.load(url);
--            if (cancelled) return;
--            const langs = player.getAudioLanguages() ?? [];
--            if (langs.length > 1) {
--              const hindi = langs.find((l) => /^hi/i.test(l));
--              if (hindi) player.selectAudioLanguage(hindi);
--            }
--            const opts: AudioTrackOption[] = langs.map((name, idx) => ({ index: idx, label: name }));
--            onAudioTracksChange?.(opts, Math.max(langs.indexOf(player.getAudioLanguage() ?? ""), 0));
--            await safePlay();
-+            await syncShakaAudioAndPlay(player);
-           } catch {
-             if (!cancelled) {
--              setHasError(true);
--              setStatusMsg("DASH playback failed to start.");
-+              const rescued = await tryBrowserDirect(true);
-+              if (!rescued && !cancelled) reportError("DASH playback failed to start.");
-             }
++          // Mirror TgPlayer's failover (`{ url, cookie }`, then bare `{ url }`), except a
++          // *stall* skips the bare retry: an expired token refuses fast with HTTP 403/450,
++          // while a hanging server would just hang twice.
++          const first = await tryDashAttempt(cand, cand.cookie || "", normalizedKeys);
++          if (first === "played" || cancelled) return first === "played";
++          if (first === "refused" && cand.cookie) {
++            const bare = await tryDashAttempt(cand, "", normalizedKeys);
++            if (bare === "played" || cancelled) return bare === "played";
            }
-         })();
-       } catch {
--        setHasError(true);
--        setStatusMsg("DASH playback failed to start.");
-+        reportError("DASH playback failed to start.");
-       }
-     };
- 
-@@ -452,17 +655,31 @@ export function LiveVideoSurface({
-         hls.on(HlsCtor.Events.ERROR, (_ev, data) => {
-           const d = data as { fatal?: boolean } | undefined;
-           if (d?.fatal && !cancelled) {
--            if (!triedDirectFallback && directUrl && url !== directUrl) {
--              startHls(directUrl, true);
-+            if (!triedDirectFallback) {
-+              void (async () => {
-+                if (await tryBrowserDirect(false)) return;
-+                if (!cancelled && directUrl && url !== directUrl) {
-+                  startHls(directUrl, true);
-+                  return;
-+                }
-+                if (!cancelled) {
-+                  reportError(
-+                    activeSource === "jio"
-+                      ? "This JioTV stream was interrupted. Press Retry to reload it with a fresh CDN token."
-+                      : activeSource === "tgtv"
-+                        ? "This TG TV stream was interrupted. Press Retry to reconnect."
-+                        : "Live HLS stream interrupted. Press Retry to request a fresh stream token.",
-+                  );
-+                }
-+              })();
-               return;
-             }
--            setHasError(true);
--            setStatusMsg(
-+            reportError(
-               activeSource === "jio"
-                 ? "This JioTV stream was interrupted. Press Retry to reload it with a fresh CDN token."
-                 : activeSource === "tgtv"
-                   ? "This TG TV stream was interrupted. Press Retry to reconnect."
--                  : "Live HLS stream interrupted. Press Retry to request a fresh maxTV token.",
-+                  : "Live HLS stream interrupted. Press Retry to request a fresh stream token.",
-             );
-           }
-         });
-@@ -470,14 +687,14 @@ export function LiveVideoSurface({
-         videoRef.current.src = url;
-         void safePlay();
-       } else {
--        setHasError(true);
--        setStatusMsg("HLS playback is not supported in this browser.");
-+        reportError("HLS playback is not supported in this browser.");
-       }
-     };
- 
-     const startMpegTs = (url: string, fallbackToHls: boolean) => {
-       if (cancelled || !videoRef.current) return;
-       cleanup();
-+      directModeRef.current = false;
-       onAudioTracksChange?.([], -1);
-       if (!window.mpegts || !window.mpegts.isSupported()) {
-         startHls(streamUrl(".m3u8"));
-@@ -499,22 +716,37 @@ export function LiveVideoSurface({
-         if (cancelled) return;
-         if (fallbackToHls) startHls(streamUrl(".m3u8"));
-         else {
--          setHasError(true);
--          setStatusMsg("Stream interrupted. Click Retry to request a fresh maxTV link.");
-+          void (async () => {
-+            if (await tryBrowserDirect(false)) return;
-+            if (!cancelled) reportError("Stream interrupted. Click Retry to request a fresh live link.");
-+          })();
          }
-       });
-     };
- 
-     async function run() {
-       specificErrorRef.current = false;
-+      directModeRef.current = false;
-       setHasError(false);
-       setStatusMsg(`Connecting to ${channelName}…`);
-       await ensurePlayerEnginesLoaded();
-       if (cancelled) return;
- 
-+      const forceRefresh = localRetry > 0 || reloadNonce > 0;
-+      const preferDirectFirst =
-+        activeSource === "jio" ||
-+        activeSource === "tgtv" ||
-+        /^(?:jio|tg):/i.test(channelId);
++        return false;
++      };
 +
-+      // JioTV and TG TV streams must play directly from the viewer's browser IP because
-+      // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
-+      if (preferDirectFirst) {
-+        const startedDirect = await tryBrowserDirect(forceRefresh);
-+        if (startedDirect || cancelled) return;
-+      }
-+
-       const probeCtrl = new AbortController();
-       const timer = setTimeout(() => probeCtrl.abort(), 8000);
--      // DASH manifests are not MPEG-TS: ask for the container the catalogue advertised.
-       const wantDash = (container || "").toLowerCase() === "dash";
-       const probeExt = wantDash ? ".mpd" : ".ts";
-       try {
-@@ -523,13 +755,18 @@ export function LiveVideoSurface({
-         if (!res.ok) {
-           const j = (await res.json().catch(() => ({}))) as { error?: string };
++      if (await attemptAll(await fetchCandidates(forceRefresh))) return true;
++      if (cancelled) return false;
++      if (!forceRefresh) {
++        // Cached tokens may have expired between page load and play: one automatic
++        // fresh-token pass before falling back to the (ASN-blocked) proxy path.
++        setStatusMsg(`Refreshing CDN token for ${channelName}…`);
++        if (await attemptAll(await fetchCandidates(true))) return true;
++        if (cancelled) return false;
+       }
+ 
+       directModeRef.current = false;
+@@ -740,7 +952,11 @@ export function LiveVideoSurface({
+ 
+       // JioTV and TG TV streams must play directly from the viewer's browser IP because
+       // Cloudflare Worker datacenter egress IPs receive HTTP 450/451 from cdn.jio.com.
++      // tryBrowserDirect already spends one cached-token pass plus one fresh-token pass,
++      // so a failed direct attempt is never repeated after the proxy probe.
++      let directAttempted = false;
+       if (preferDirectFirst) {
++        directAttempted = true;
+         const startedDirect = await tryBrowserDirect(forceRefresh);
+         if (startedDirect || cancelled) return;
+       }
+@@ -757,7 +973,8 @@ export function LiveVideoSurface({
            probeCtrl.abort();
-+          // When maxTV/Cloudflare Worker proxy gets HTTP 403/502, rescue the channel immediately
-+          // via Browser-Direct CDN playback matched by channel name/ID!
-+          if (!cancelled) {
-+            const rescued = await tryBrowserDirect(forceRefresh);
-+            if (rescued || cancelled) return;
-+          }
-           if (!cancelled && directUrl) {
-             startHls(directUrl, true);
-             return;
+           // When maxTV/Cloudflare Worker proxy gets HTTP 403/502, rescue the channel immediately
+           // via Browser-Direct CDN playback matched by channel name/ID!
+-          if (!cancelled) {
++          if (!cancelled && !directAttempted) {
++            directAttempted = true;
+             const rescued = await tryBrowserDirect(forceRefresh);
+             if (rescued || cancelled) return;
            }
-           if (!cancelled) {
--            setHasError(true);
--            setStatusMsg(j.error || `Stream unavailable (HTTP ${res.status})`);
-+            reportError(j.error || `Stream unavailable (HTTP ${res.status})`);
-           }
-           return;
-         }
-@@ -542,6 +779,8 @@ export function LiveVideoSurface({
+@@ -778,9 +995,12 @@ export function LiveVideoSurface({
+         else startMpegTs(streamUrl(".ts"), true);
        } catch {
          clearTimeout(timer);
-         if (!cancelled) {
-+          const rescued = await tryBrowserDirect(forceRefresh);
-+          if (rescued || cancelled) return;
+-        if (!cancelled) {
++        if (!cancelled && !directAttempted) {
++          directAttempted = true;
+           const rescued = await tryBrowserDirect(forceRefresh);
+           if (rescued || cancelled) return;
++        }
++        if (!cancelled) {
            if (directUrl) startHls(directUrl, true);
            else if (wantDash) startDash(streamUrl(".mpd"));
            else startMpegTs(streamUrl(".ts"), true);
+@@ -815,7 +1035,9 @@ export function LiveVideoSurface({
+         onTimeUpdate={() => {
+           clearOverlayIfRendering();
+         }}
+-        onWaiting={() => setStatusMsg("Buffering live broadcast…")}
++        onWaiting={() => {
++          if (!specificErrorRef.current) setStatusMsg("Buffering live broadcast…");
++        }}
+         className="h-full w-full object-contain"
+       />
+       {statusMsg && (
 diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
-index ca9d8dd..d01ec64 100644
+index d01ec64..64be3c5 100644
 --- a/src/lib/live-gateway.ts
 +++ b/src/lib/live-gateway.ts
-@@ -21,6 +21,14 @@ export interface LiveChannelItem {
-   mediaType?: "hls" | "dash" | "mp4";
- }
+@@ -2070,7 +2070,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
  
-+export interface DirectPlayCandidate {
-+  label: string;
-+  url: string;
-+  cookie: string;
-+  clearKeys: Record<string, string>;
-+  container: "dash" | "hls";
-+}
-+
- export interface LiveChannelDto {
-   id: string;
-   source: "maxtv" | "starshare" | "jio" | "tgtv";
-@@ -31,7 +39,7 @@ export interface LiveChannelDto {
-   embedUrl: string;
-   iframeCode: string;
-   streamUrl: string;
--  /** Optional direct HTTPS HLS stream URL for browser-side fallback if proxy ASN is geo-blocked. */
-+  /** Optional direct HTTPS stream URL for browser-side fallback if proxy ASN is geo-blocked. */
-   directUrl?: string;
-   /** Present only for DRM channels; the page hands these straight to Shaka. */
-   drm?: { type: "clearkey"; keys: Array<{ kid: string; k: string }> };
-@@ -1375,7 +1383,28 @@ async function loadJioCached(cfg: GatewayConfig, force = false): Promise<LiveCha
-     jioCache.error = null;
-     return live;
-   } catch (e) {
--    jioCache.error = e instanceof Error ? e.message : String(e);
-+    const primaryError = e instanceof Error ? e.message : String(e);
-+    // On Cloudflare Workers, allinonereborn2.online often blocks datacenter IPs (HTTP 403/415/450),
-+    // whereas giotv-6op.pages.dev/jstr4web.json serves the 1,176-channel Jio catalogue over Pages CDN.
-+    const gioFallback = await loadGioTvRawCached(force).catch(() => []);
-+    if (gioFallback.length > 0) {
-+      const mapped: LiveChannelItem[] = gioFallback.map((g) => ({
-+        id: `jio:${g.id}`,
-+        rawId: g.id,
-+        source: "jio" as const,
-+        name: g.name,
-+        category: g.category || "JioTV",
-+        logo: g.logo,
-+        cmd: g.urls[0]!,
-+        mediaType: jioMediaType(g.urls[0]!),
-+        ...(g.keys.length ? { drm: { type: "clearkey" as const, keys: g.keys } } : {}),
-+      }));
-+      jioCache.items = mapped;
-+      jioCache.fetchedAt = Date.now();
-+      jioCache.error = null;
-+      return mapped;
-+    }
-+    jioCache.error = primaryError;
-     return jioCache.items;
-   }
- }
-@@ -1494,6 +1523,732 @@ async function loadStarshareCached(cfg: GatewayConfig, force = false): Promise<L
-   }
- }
+   let result = await callFn(tgVerifiedFnId);
+   if (result.length === 0) {
+-    const discovered = await discoverTgServerFn(true);
++    // Reuse the 10-minute discovery cache on normal plays; only a forced refresh pays for
++    // full `_serverFn` re-discovery. Either way the caller races this whole resolver so a
++    // hanging TG RPC can never delay the GioTV candidates past the direct-config budget.
++    const discovered = await discoverTgServerFn(force);
+     for (const fnId of discovered) {
+       if (fnId === tgVerifiedFnId && !force) continue;
+       result = await callFn(fnId);
+@@ -2169,8 +2172,16 @@ async function resolveDirectPlayCandidates(
+   };
  
-+// ---------- Browser-Direct GioTV / Jstr4Web + TG TV Live RPC Resolvers ----------
-+//
-+// Why this exists:
-+// Lovable deploys `screen-safari-studio` onto Cloudflare Workers (`AS13335`). Upstream media CDNs
-+// (`new.maxtv.be` media edges -> HTTP 403, `jiotvmblive.cdn.jio.com` / `jiotvpllive.cdn.jio.com` /
-+// `allinonereborn2.online` -> HTTP 450/451) block Cloudflare Worker datacenter egress IPs whenever
-+// video manifests or segments are proxied server-side.
-+//
-+// Meanwhile, `jiotvmblive.cdn.jio.com` and `jiotvpllive.cdn.jio.com` send `Access-Control-Allow-Origin: *`
-+// and accept direct HTTPS requests from the viewer's own Indian residential browser IP when:
-+//   1. `Referer` is suppressed (`no-referrer`),
-+//   2. `__hdnea__=...` is appended to MANIFEST and SEGMENT URLs via Shaka's `registerRequestFilter`, and
-+//   3. ClearKey hex pairs are configured on `shaka.Player`.
-+//
-+// The metadata endpoints below (`giotv-6op.pages.dev` and `livetgtv.lovable.app/_serverFn/...`) answer
-+// `200 OK` even from Cloudflare Worker datacenter IPs, supplying fresh tokens + ClearKeys in ~150ms.
-+
-+const BROWSER_METADATA_UA =
-+  "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36";
-+const GIOTV_SITE = "https://giotv-6op.pages.dev";
-+const GIOTV_CATALOGUE_URLS = [
-+  "https://giotv-6op.pages.dev/jstr4web.json",
-+  "https://jjtvxweb.pages.dev/jstr4web.json",
-+];
-+const GIOTV_REGULAR_COOKIES_URL = "https://allinonereborn2.online/jstrweb2/cookies.json";
-+const GIOTV_STAR_COOKIES_URL = "https://giotv-6op.pages.dev/cookie.json";
-+const TG_LIVE_SITE = "https://livetgtv.lovable.app";
-+const TG_INITIAL_SERVER_FN = "211ba18c9fcbaf4e68e5bb262905070b60b7ed4ffe802d16fbbed00150f1c024";
-+
-+interface GioTvChannelRecord {
-+  id: string;
-+  name: string;
-+  category: string;
-+  logo: string;
-+  urls: string[];
-+  keys: ClearKeyPair[];
-+}
-+
-+const gioTvRawCache: { items: GioTvChannelRecord[]; fetchedAt: number } = {
-+  items: [],
-+  fetchedAt: 0,
-+};
-+
-+const gioCookieCache: {
-+  regular: { value: string; until: number } | null;
-+  starBody: { raw: string; until: number } | null;
-+} = {
-+  regular: null,
-+  starBody: null,
-+};
-+
-+let tgVerifiedFnId: string = TG_INITIAL_SERVER_FN;
-+let tgDiscoveredAt = 0;
-+const tgChannelCache = new Map<string, { until: number; candidates: DirectPlayCandidate[] }>();
-+
-+function extractHdneaToken(raw: string | undefined | null): string {
-+  if (!raw) return "";
-+  const m = /(?:^|[?;&\s])(__hdnea__=[^;\s&"'<>]+)/.exec(String(raw).trim());
-+  return m?.[1] ?? "";
-+}
-+
-+function hdneaExpiryMs(tokenOrCookie: string): number | null {
-+  const tok = extractHdneaToken(tokenOrCookie) || tokenOrCookie;
-+  if (!tok) return null;
-+  try {
-+    const decoded = decodeURIComponent(tok);
-+    const m = /(?:^|~)exp=(\d+)(?:~|$)/.exec(decoded);
-+    if (!m?.[1]) return null;
-+    const sec = Number.parseInt(m[1], 10);
-+    return Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
-+  } catch {
-+    return null;
-+  }
-+}
-+
-+function pickFreshestHdnea(values: string[]): string {
+   // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
++  // The TG leg is budget-raced: when `_serverFn` hangs or rotates its hash, GioTV candidates
++  // still reach the browser within the 7s `/api/live/direct-config` client budget instead of
++  // stalling behind discovery (the background TG call warms `tgVerifiedFnId` for the retry).
++  const tgBudgeted = (async (): Promise<DirectPlayCandidate[]> => {
++    if (!v1NumericId) return [];
++    const budget = new Promise<DirectPlayCandidate[]>((resolve) => setTimeout(() => resolve([]), 5000));
++    return Promise.race([resolveTgRpcCandidates(v1NumericId, force), budget]);
++  })();
+   const [tgCandidates, regularCookie, starCookie] = await Promise.all([
+-    v1NumericId ? resolveTgRpcCandidates(v1NumericId, force) : Promise.resolve([] as DirectPlayCandidate[]),
++    tgBudgeted,
+     matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
+     matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
+       ? fetchGioStarCookieForChannel(matchedGio.id, force)
+@@ -2242,10 +2253,31 @@ async function resolveDirectPlayCandidates(
+     }
+   }
+ 
++  // 4. Never waste player time on a provably-expired token when the same URL also has a
++  // fresh one, and order freshest-first (stable, so TG Server 1 still precedes Server 2).
 +  const now = Date.now();
-+  const candidates = values.map((v) => extractHdneaToken(v)).filter(Boolean);
-+  if (candidates.length === 0) return "";
-+  candidates.sort((a, b) => {
-+    const expA = hdneaExpiryMs(a);
-+    const expB = hdneaExpiryMs(b);
-+    const rank = (exp: number | null) => (exp === null ? 1 : exp > now + 10_000 ? 2 : 0);
-+    const rDiff = rank(expB) - rank(expA);
-+    if (rDiff !== 0) return rDiff;
-+    return (expB ?? Number.MIN_SAFE_INTEGER) - (expA ?? Number.MIN_SAFE_INTEGER);
-+  });
-+  return candidates[0]!;
-+}
-+
-+function toHex16(raw: string | undefined | null): string | null {
-+  const v = String(raw ?? "").trim();
-+  if (!v) return null;
-+  const cleanUuid = v.replace(/-/g, "");
-+  if (/^[0-9a-fA-F]{32}$/.test(cleanUuid)) return cleanUuid.toLowerCase();
-+  const norm = v.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
-+  if (!/^[A-Za-z0-9+/]+$/.test(norm)) return null;
-+  const padded = norm + "===".slice((norm.length + 3) % 4);
-+  try {
-+    const bin = atob(padded);
-+    if (bin.length !== 16) return null;
-+    let hex = "";
-+    for (let i = 0; i < 16; i++) hex += bin.charCodeAt(i).toString(16).padStart(2, "0");
-+    return hex;
-+  } catch {
-+    return null;
-+  }
-+}
-+
-+function pairsToHexRecord(pairs: ClearKeyPair[]): Record<string, string> {
-+  const out: Record<string, string> = {};
-+  for (const p of pairs) {
-+    const kid = toHex16(p.kid);
-+    const k = toHex16(p.k);
-+    if (kid && k) out[kid] = k;
-+  }
-+  return out;
-+}
-+
-+function parseGioTvCatalogue(body: string): GioTvChannelRecord[] {
-+  const trimmed = body.replace(/^\uFEFF/, "").trim();
-+  if (!trimmed || trimmed.startsWith("<")) return [];
-+  let parsed: unknown;
-+  try {
-+    parsed = JSON.parse(trimmed);
-+  } catch {
-+    return [];
-+  }
-+  if (!Array.isArray(parsed)) return [];
-+  const out: GioTvChannelRecord[] = [];
-+  const seen = new Set<string>();
-+  for (const raw of parsed) {
-+    if (!raw || typeof raw !== "object") continue;
-+    const item = raw as Record<string, unknown>;
-+    const id = String(item["id"] ?? item["channel_id"] ?? "").trim();
-+    const name = String(item["name"] ?? item["channel_name"] ?? "").trim();
-+    if (!id || !/^\d{1,10}$/.test(id) || !name || seen.has(id)) continue;
-+
-+    const urls: string[] = [];
-+    for (const field of ["url", "url1", "url2", "url3"]) {
-+      const val = item[field];
-+      if (typeof val === "string" && /^https?:\/\//i.test(val.trim())) {
-+        const normalized = val.trim().replace("bpk-tv//", "bpk-tv/");
-+        if (!urls.includes(normalized)) urls.push(normalized);
-+      }
-+    }
-+    if (urls.length === 0) continue;
-+
-+    const keys: ClearKeyPair[] = [];
-+    if (Array.isArray(item["keys"])) {
-+      for (const kp of item["keys"] as unknown[]) {
-+        if (!kp || typeof kp !== "object") continue;
-+        const rec = kp as Record<string, unknown>;
-+        const kid = toHex16(String(rec["keyId"] ?? rec["kid"] ?? ""));
-+        const k = toHex16(String(rec["key"] ?? rec["k"] ?? ""));
-+        if (kid && k) keys.push({ kid, k });
-+      }
-+    }
-+    if (keys.length === 0) {
-+      const kid = toHex16(String(item["keyId"] ?? item["kid"] ?? ""));
-+      const k = toHex16(String(item["key"] ?? item["k"] ?? ""));
-+      if (kid && k) keys.push({ kid, k });
-+    }
-+
-+    seen.add(id);
-+    out.push({
-+      id,
-+      name,
-+      category: String(item["category"] ?? "Live TV").trim() || "Live TV",
-+      logo: String(item["logo"] ?? "").trim(),
-+      urls,
-+      keys,
-+    });
-+  }
-+  return out;
-+}
-+
-+async function loadGioTvRawCached(force = false): Promise<GioTvChannelRecord[]> {
-+  if (!force && gioTvRawCache.items.length > 0 && Date.now() - gioTvRawCache.fetchedAt < CATALOGUE_TTL_MS) {
-+    return gioTvRawCache.items;
-+  }
-+  for (const candidateUrl of GIOTV_CATALOGUE_URLS) {
-+    const ctrl = new AbortController();
-+    const timer = setTimeout(() => ctrl.abort(), 9000);
-+    try {
-+      const res = await fetch(candidateUrl, {
-+        headers: {
-+          "User-Agent": BROWSER_METADATA_UA,
-+          Accept: "application/json, */*",
-+          "Cache-Control": "no-cache",
-+        },
-+        signal: ctrl.signal,
-+      });
-+      if (!res.ok) continue;
-+      const text = await res.text();
-+      const parsed = parseGioTvCatalogue(text);
-+      if (parsed.length > 0) {
-+        gioTvRawCache.items = parsed;
-+        gioTvRawCache.fetchedAt = Date.now();
-+        return parsed;
-+      }
-+    } catch {
-+      // try next mirror
-+    } finally {
-+      clearTimeout(timer);
-+    }
-+  }
-+  return gioTvRawCache.items;
-+}
-+
-+function isJioStarPlUrl(url: string): boolean {
-+  try {
-+    return new URL(url).hostname.toLowerCase() === "jiotvpllive.cdn.jio.com";
-+  } catch {
-+    return false;
-+  }
-+}
-+
-+async function fetchGioRegularCookie(force = false): Promise<string> {
-+  if (!force && gioCookieCache.regular && gioCookieCache.regular.until > Date.now()) {
-+    return gioCookieCache.regular.value;
-+  }
-+  const ctrl = new AbortController();
-+  const timer = setTimeout(() => ctrl.abort(), 6000);
-+  try {
-+    const res = await fetch(GIOTV_REGULAR_COOKIES_URL, {
-+      headers: { "User-Agent": BROWSER_METADATA_UA, Accept: "application/json, */*", "Cache-Control": "no-cache" },
-+      signal: ctrl.signal,
-+    });
-+    if (!res.ok) return gioCookieCache.regular?.value ?? "";
-+    const data = (await res.json()) as unknown;
-+    const rawCookies: string[] = [];
-+    if (Array.isArray(data)) {
-+      for (const row of data) {
-+        if (row && typeof row === "object" && typeof (row as Record<string, unknown>)["cookie"] === "string") {
-+          rawCookies.push((row as Record<string, string>)["cookie"]!);
-+        }
-+      }
-+    } else if (data && typeof data === "object" && typeof (data as Record<string, unknown>)["cookie"] === "string") {
-+      rawCookies.push((data as Record<string, string>)["cookie"]!);
-+    }
-+    const chosen = pickFreshestHdnea(rawCookies);
-+    if (chosen) {
-+      const exp = hdneaExpiryMs(chosen);
-+      const until = Math.min(Date.now() + 60_000, exp ? exp - 10_000 : Date.now() + 60_000);
-+      if (until > Date.now()) gioCookieCache.regular = { value: chosen, until };
-+    }
-+    return chosen;
-+  } catch {
-+    return gioCookieCache.regular?.value ?? "";
-+  } finally {
-+    clearTimeout(timer);
-+  }
-+}
-+
-+async function fetchGioStarCookieForChannel(channelId: string, force = false): Promise<string> {
-+  let raw = !force && gioCookieCache.starBody && gioCookieCache.starBody.until > Date.now()
-+    ? gioCookieCache.starBody.raw
-+    : "";
-+  if (!raw) {
-+    const ctrl = new AbortController();
-+    const timer = setTimeout(() => ctrl.abort(), 7000);
-+    try {
-+      const res = await fetch(GIOTV_STAR_COOKIES_URL, {
-+        headers: {
-+          "User-Agent": BROWSER_METADATA_UA,
-+          Origin: GIOTV_SITE,
-+          Accept: "application/json, */*",
-+          "Cache-Control": "no-cache",
-+        },
-+        signal: ctrl.signal,
-+      });
-+      if (res.ok) {
-+        raw = await res.text();
-+        gioCookieCache.starBody = { raw, until: Date.now() + 45_000 };
-+      }
-+    } catch {
-+      raw = gioCookieCache.starBody?.raw ?? "";
-+    } finally {
-+      clearTimeout(timer);
-+    }
-+  }
-+  if (!raw) return "";
-+  try {
-+    const root = JSON.parse(raw) as Record<string, unknown>;
-+    const found: string[] = [];
-+    for (const bucket of ["successful_results", "failed_results"]) {
-+      const arr = root[bucket];
-+      if (!Array.isArray(arr)) continue;
-+      for (const entry of arr) {
-+        if (!entry || typeof entry !== "object") continue;
-+        const item = entry as Record<string, unknown>;
-+        if (String(item["channel_id"] ?? "") !== String(channelId)) continue;
-+        const errDetails = item["error_details"] as Record<string, unknown> | undefined;
-+        const finalUrl = String(errDetails?.["final_url"] ?? item["final_url"] ?? "");
-+        const tok = extractHdneaToken(finalUrl);
-+        if (tok) found.push(tok);
-+      }
-+    }
-+    return pickFreshestHdnea(found);
-+  } catch {
-+    return "";
-+  }
-+}
-+
-+/** Decode TanStack Start Seroval / `application/x-tss-framed` RPC payloads (mirrors `TgProtocol.kt`). */
-+function decodeTgSerovalNode(node: unknown, refs: Map<number, unknown>, depth = 0): unknown {
-+  if (depth > 48 || node === null || node === undefined) return node;
-+  if (Array.isArray(node)) return node.map((x) => decodeTgSerovalNode(x, refs, depth + 1));
-+  if (typeof node !== "object") return node;
-+  const obj = node as Record<string, unknown>;
-+  const tag = obj["t"];
-+  if (tag && typeof tag === "object" && "f" in obj) return decodeTgSerovalNode(tag, refs, depth + 1);
-+  if (typeof tag !== "number") {
-+    const out: Record<string, unknown> = {};
-+    for (const [k, v] of Object.entries(obj)) out[k] = decodeTgSerovalNode(v, refs, depth + 1);
-+    return out;
-+  }
-+  const id = typeof obj["i"] === "number" ? (obj["i"] as number) : undefined;
-+  switch (tag) {
-+    case 0:
-+    case 1:
-+    case 3:
-+      return obj["s"];
-+    case 2:
-+      return obj["s"] === 2 ? true : obj["s"] === 3 ? false : null;
-+    case 4:
-+      return id !== undefined ? (refs.get(id) ?? null) : null;
-+    case 9: {
-+      const arr: unknown[] = [];
-+      if (id !== undefined) refs.set(id, arr);
-+      const items = Array.isArray(obj["a"]) ? (obj["a"] as unknown[]) : [];
-+      for (const it of items) arr.push(decodeTgSerovalNode(it, refs, depth + 1));
-+      return arr;
-+    }
-+    case 10:
-+    case 11: {
-+      const mapObj: Record<string, unknown> = {};
-+      if (id !== undefined) refs.set(id, mapObj);
-+      const props = (obj["p"] && typeof obj["p"] === "object" ? obj["p"] : {}) as Record<string, unknown>;
-+      const keys = Array.isArray(props["k"]) ? (props["k"] as unknown[]) : [];
-+      const vals = Array.isArray(props["v"]) ? (props["v"] as unknown[]) : [];
-+      const len = Math.min(keys.length, vals.length);
-+      for (let i = 0; i < len; i++) {
-+        const k = typeof keys[i] === "object" ? String(decodeTgSerovalNode(keys[i], refs, depth + 1)) : String(keys[i]);
-+        mapObj[k] = decodeTgSerovalNode(vals[i], refs, depth + 1);
-+      }
-+      return mapObj;
-+    }
-+    case 12:
-+      return obj["s"] === true || obj["s"] === 1 ? decodeTgSerovalNode(obj["f"], refs, depth + 1) : null;
-+    case 21:
-+      return decodeTgSerovalNode(obj["f"], refs, depth + 1);
-+    case 23: {
-+      const a = Array.isArray(obj["a"]) ? (obj["a"] as unknown[]) : [];
-+      return decodeTgSerovalNode(a[1], refs, depth + 1);
-+    }
-+    default:
-+      return null;
-+  }
-+}
-+
-+function parseTgFramedOrJsonRecords(bytes: Uint8Array, contentType: string): unknown[] {
-+  const ct = contentType.split(";")[0]!.trim().toLowerCase();
-+  if (ct === "application/x-tss-framed") {
-+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-+    const dec = new TextDecoder();
-+    const out: unknown[] = [];
-+    let pos = 0;
-+    while (pos + 9 <= bytes.byteLength) {
-+      const kind = view.getUint8(pos);
-+      const stream = view.getInt32(pos + 1, false);
-+      const length = view.getInt32(pos + 5, false);
-+      pos += 9;
-+      if (length < 0 || pos + length > bytes.byteLength) break;
-+      if (kind === 0 && stream === 0) {
-+        try {
-+          out.push(JSON.parse(dec.decode(bytes.subarray(pos, pos + length))));
-+        } catch {
-+          // ignore malformed frame
-+        }
-+      }
-+      pos += length;
-+    }
-+    return out;
-+  }
-+  const text = new TextDecoder().decode(bytes).replace(/^\uFEFF/, "").trim();
-+  if (!text) return [];
-+  try {
-+    return [JSON.parse(text)];
-+  } catch {
-+    const out: unknown[] = [];
-+    for (const line of text.split(/\r?\n/)) {
-+      const t = line.trim();
-+      if (t.startsWith("{") || t.startsWith("[")) {
-+        try {
-+          out.push(JSON.parse(t));
-+        } catch {
-+          // ignore line
-+        }
-+      }
-+    }
-+    return out;
-+  }
-+}
-+
-+async function discoverTgServerFn(force = false): Promise<string[]> {
-+  if (!force && tgVerifiedFnId && Date.now() - tgDiscoveredAt < 10 * 60_000) {
-+    return [tgVerifiedFnId];
-+  }
-+  const found = new Set<string>();
-+  const ctrl = new AbortController();
-+  const timer = setTimeout(() => ctrl.abort(), 7000);
-+  try {
-+    const pageUrl = `${TG_LIVE_SITE}/watch/892`;
-+    const pageRes = await fetch(pageUrl, {
-+      headers: { "User-Agent": BROWSER_METADATA_UA, Accept: "text/html,*/*" },
-+      signal: ctrl.signal,
-+    });
-+    if (pageRes.ok) {
-+      const html = await pageRes.text();
-+      const scriptMatches = [...html.matchAll(/["'`]((?:\/)?assets\/[^"'`<>\s]+\.m?js)["'`]/g)].map((m) =>
-+        new URL(m[1]!, `${TG_LIVE_SITE}/`).toString(),
-+      );
-+      scriptMatches.sort((a, b) => (a.includes("servers") ? -1 : 1) - (b.includes("servers") ? -1 : 1));
-+      for (const scriptUrl of scriptMatches.slice(0, 5)) {
-+        const sRes = await fetch(scriptUrl, {
-+          headers: { "User-Agent": BROWSER_METADATA_UA, Referer: pageUrl },
-+          signal: ctrl.signal,
-+        }).catch(() => null);
-+        if (!sRes || !sRes.ok) continue;
-+        const code = await sRes.text();
-+        for (const m of code.matchAll(/_serverFn\/([A-Za-z0-9_-]{16,128})/g)) found.add(m[1]!);
-+        for (const m of code.matchAll(/\(\s*["'`]([a-f0-9]{64})["'`]\s*\)/gi)) found.add(m[1]!);
-+        if (found.size > 0 && scriptUrl.includes("servers")) break;
-+      }
-+    }
-+  } catch {
-+    // keep fallback id
-+  } finally {
-+    clearTimeout(timer);
-+  }
-+  if (tgVerifiedFnId) found.add(tgVerifiedFnId);
-+  found.add(TG_INITIAL_SERVER_FN);
-+  tgDiscoveredAt = Date.now();
-+  return [...found];
-+}
-+
-+function extractTgCandidatesFromConfig(decoded: unknown): DirectPlayCandidate[] {
-+  if (!decoded || typeof decoded !== "object") return [];
-+  const root = decoded as Record<string, unknown>;
-+  const cfg = (root["result"] ?? root["data"] ?? root) as Record<string, unknown>;
-+  if (!cfg || typeof cfg !== "object") return [];
-+
-+  const extractClearKeys = (srv: Record<string, unknown>, fallbackKeys: Record<string, string>): Record<string, string> => {
-+    const out: Record<string, string> = { ...fallbackKeys };
-+    const ck = srv["clearKeys"];
-+    if (ck && typeof ck === "object" && !Array.isArray(ck)) {
-+      for (const [rawKid, rawK] of Object.entries(ck as Record<string, unknown>)) {
-+        const kid = toHex16(rawKid);
-+        const k = toHex16(String(rawK ?? ""));
-+        if (kid && k) out[kid] = k;
-+      }
-+    }
-+    const kidSingle = toHex16(String(srv["keyId"] ?? srv["kid"] ?? ""));
-+    const kSingle = toHex16(String(srv["key"] ?? srv["k"] ?? ""));
-+    if (kidSingle && kSingle) out[kidSingle] = kSingle;
-+    return out;
++  const rankCandidate = (c: DirectPlayCandidate): number => {
++    const exp = hdneaExpiryMs(c.cookie || c.url);
++    if (exp === null) return 1;
++    return exp > now + 5_000 ? 2 : 0;
 +  };
-+
-+  const baseKeys = extractClearKeys(cfg, {});
-+  const servers: Array<{ label: string; node: Record<string, unknown> }> = [];
-+  if (Array.isArray(cfg["urls"]) && cfg["urls"].length > 0) {
-+    servers.push({ label: "TG Live · Server 1", node: cfg });
++  const byUrl = new Map<string, DirectPlayCandidate[]>();
++  for (const c of candidates) {
++    const group = byUrl.get(c.url);
++    if (group) group.push(c);
++    else byUrl.set(c.url, [c]);
 +  }
-+  if (Array.isArray(cfg["backups"])) {
-+    (cfg["backups"] as unknown[]).forEach((b, idx) => {
-+      if (b && typeof b === "object") {
-+        servers.push({ label: `TG Live · Server ${servers.length + 1 || idx + 2}`, node: b as Record<string, unknown> });
-+      }
-+    });
++  const pruned: DirectPlayCandidate[] = [];
++  for (const group of byUrl.values()) {
++    const usable = group.filter((c) => rankCandidate(c) > 0);
++    pruned.push(...(usable.length > 0 ? usable : group));
 +  }
++  pruned.sort((a, b) => rankCandidate(b) - rankCandidate(a));
 +
-+  const out: DirectPlayCandidate[] = [];
-+  for (const srv of servers) {
-+    const urls = Array.isArray(srv.node["urls"]) ? (srv.node["urls"] as unknown[]) : [];
-+    const cookie = extractHdneaToken(String(srv.node["cookie"] ?? cfg["cookie"] ?? ""));
-+    const clearKeys = extractClearKeys(srv.node, baseKeys);
-+    for (const u of urls) {
-+      if (typeof u !== "string" || !/^https?:\/\//i.test(u.trim())) continue;
-+      const cleanUrl = u.trim().replace("bpk-tv//", "bpk-tv/");
-+      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(cleanUrl) ? "hls" : "dash";
-+      out.push({ label: srv.label, url: cleanUrl, cookie, clearKeys, container });
-+    }
-+  }
-+  return out;
-+}
-+
-+async function resolveTgRpcCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
-+  if (!/^\d{1,10}$/.test(numericId)) return [];
-+  if (!force) {
-+    const cached = tgChannelCache.get(numericId);
-+    if (cached && cached.until > Date.now()) return cached.candidates;
-+  }
-+
-+  const callFn = async (fnId: string): Promise<DirectPlayCandidate[]> => {
-+    const inner = {
-+      t: 10,
-+      i: 0,
-+      p: { k: ["data"], v: [{ t: 10, i: 1, p: { k: ["id"], v: [{ t: 1, s: numericId }] }, o: 0 }] },
-+      o: 0,
-+    };
-+    const payload = encodeURIComponent(JSON.stringify({ t: inner, f: 127, m: [] }));
-+    const rpcUrl = `${TG_LIVE_SITE}/_serverFn/${fnId}?payload=${payload}${force ? `&_aktv=${Date.now()}` : ""}`;
-+    const ctrl = new AbortController();
-+    const timer = setTimeout(() => ctrl.abort(), 6500);
-+    try {
-+      const res = await fetch(rpcUrl, {
-+        headers: {
-+          "User-Agent": BROWSER_METADATA_UA,
-+          Origin: TG_LIVE_SITE,
-+          Referer: `${TG_LIVE_SITE}/watch/${numericId}`,
-+          Accept: "application/x-tss-framed, application/x-ndjson, application/json",
-+          "x-tsr-serverfn": "true",
-+          "Cache-Control": "no-cache",
-+        },
-+        signal: ctrl.signal,
-+      });
-+      if (!res.ok) return [];
-+      const buf = new Uint8Array(await res.arrayBuffer());
-+      const records = parseTgFramedOrJsonRecords(buf, res.headers.get("content-type") || "");
-+      const refs = new Map<number, unknown>();
-+      const out: DirectPlayCandidate[] = [];
-+      for (const rec of records) {
-+        const decoded = decodeTgSerovalNode(rec, refs);
-+        out.push(...extractTgCandidatesFromConfig(decoded));
-+      }
-+      return out;
-+    } catch {
-+      return [];
-+    } finally {
-+      clearTimeout(timer);
-+    }
-+  };
-+
-+  let result = await callFn(tgVerifiedFnId);
-+  if (result.length === 0) {
-+    const discovered = await discoverTgServerFn(true);
-+    for (const fnId of discovered) {
-+      if (fnId === tgVerifiedFnId && !force) continue;
-+      result = await callFn(fnId);
-+      if (result.length > 0) {
-+        tgVerifiedFnId = fnId;
-+        break;
-+      }
-+    }
-+  }
-+
-+  if (result.length > 0) {
-+    const expiries = result.map((c) => hdneaExpiryMs(c.cookie || c.url)).filter((x): x is number => x !== null);
-+    const minExp = expiries.length > 0 ? Math.min(...expiries) : Date.now() + 30_000;
-+    const until = Math.min(Date.now() + 30_000, minExp - 10_000);
-+    if (until > Date.now()) tgChannelCache.set(numericId, { until, candidates: result });
-+  }
-+  return result;
-+}
-+
-+function normalizeChannelMatchTokens(rawName: string): { base: string; noQuality: string; numbers: string[]; tokens: string[] } {
-+  let s = rawName
-+    .toLowerCase()
-+    .replace(/^[|\[(\{\s]*(?:in|ind|india|indian|vip|hindi|uk|us)[|\])\}\s:\-–—]+/gi, "")
-+    .replace(/\b(?:sony\s+sports\s+ten)\b/g, "sony ten")
-+    .replace(/\b(?:sony\s+set)\b/g, "set")
-+    .replace(/\b(?:star\s+sports\s+hd\s*(\d+))\b/g, "star sports $1 hd")
-+    .replace(/&/g, " and ")
-+    .replace(/[^a-z0-9]+/g, " ")
-+    .trim();
-+  s = s.replace(/\s+/g, " ");
-+  const noQuality = s.replace(/\b(?:hd|sd|fhd|uhd|4k|live|tv|india)\b/g, " ").replace(/\s+/g, " ").trim();
-+  const numbers = [...s.matchAll(/\b\d+\b/g)].map((m) => m[0]!);
-+  const tokens = noQuality.split(" ").filter((t) => t.length > 0);
-+  return { base: s, noQuality, numbers, tokens };
-+}
-+
-+function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channelName: string): GioTvChannelRecord | null {
-+  const numericId = rawId.replace(/^(?:jio|tg|st|xt):/i, "").trim();
-+  // Direct numeric V1/Jio ID match ONLY when the channel actually came from jio/tgtv (not st:1001 maxTV IDs!)
-+  if (/^(?:jio|tg):/i.test(rawId) || (!rawId.includes(":") && /^\d+$/.test(rawId))) {
-+    const byId = records.find((r) => r.id === numericId);
-+    if (byId) return byId;
-+  }
-+  if (!channelName.trim()) return null;
-+
-+  const target = normalizeChannelMatchTokens(channelName);
-+  const wantsHd = /\bhd\b/i.test(channelName);
-+  let best: { rec: GioTvChannelRecord; score: number } | null = null;
-+
-+  for (const rec of records) {
-+    const cand = normalizeChannelMatchTokens(rec.name);
-+    // Channel numbers (1, 2, 3, 18, 24, etc.) must agree so Star Sports 1 never matches Star Sports 2
-+    if (target.numbers.join(",") !== cand.numbers.join(",")) continue;
-+    let score = 0;
-+    if (cand.base === target.base) score = 100;
-+    else if (cand.noQuality && cand.noQuality === target.noQuality) {
-+      const candHd = /\bhd\b/i.test(rec.name);
-+      score = candHd === wantsHd ? 95 : 88;
-+    } else if (target.tokens.length > 0 && cand.tokens.length > 0) {
-+      const tSet = new Set(target.tokens);
-+      const cSet = new Set(cand.tokens);
-+      let overlap = 0;
-+      for (const tok of tSet) if (cSet.has(tok)) overlap += 1;
-+      const union = new Set([...tSet, ...cSet]).size;
-+      const jaccard = union > 0 ? overlap / union : 0;
-+      if (jaccard >= 0.75) {
-+        score = Math.round(jaccard * 85) + (/\bhd\b/i.test(rec.name) === wantsHd ? 3 : 0);
-+      }
-+    }
-+    if (score > 0 && (!best || score > best.score)) {
-+      best = { rec, score };
-+    }
-+  }
-+  return best ? best.rec : null;
-+}
-+
-+async function resolveDirectPlayCandidates(
-+  cfg: GatewayConfig,
-+  rawId: string,
-+  channelName: string,
-+  force = false,
-+): Promise<{ matchedId: string | null; matchedName: string | null; candidates: DirectPlayCandidate[] }> {
-+  const gioRecords = await loadGioTvRawCached(force);
-+  const matchedGio = findBestGioTvMatch(gioRecords, rawId, channelName);
-+  const cleanPrefixId = rawId.replace(/^(?:jio|tg):/i, "").trim();
-+  const v1NumericId =
-+    matchedGio?.id ?? (/^(?:jio|tg):/i.test(rawId) && /^\d+$/.test(cleanPrefixId) ? cleanPrefixId : null);
-+
-+  const candidates: DirectPlayCandidate[] = [];
-+  const seenKey = new Set<string>();
-+  const pushCandidate = (c: DirectPlayCandidate) => {
-+    const k = `${c.url}|${c.cookie}`;
-+    if (seenKey.has(k)) return;
-+    seenKey.add(k);
-+    candidates.push(c);
-+  };
-+
-+  // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
-+  const [tgCandidates, regularCookie, starCookie] = await Promise.all([
-+    v1NumericId ? resolveTgRpcCandidates(v1NumericId, force) : Promise.resolve([] as DirectPlayCandidate[]),
-+    matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
-+    matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
-+      ? fetchGioStarCookieForChannel(matchedGio.id, force)
-+      : Promise.resolve(""),
-+  ]);
-+
-+  const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
-+
-+  for (const tc of tgCandidates) {
-+    pushCandidate({
-+      ...tc,
-+      clearKeys: Object.keys(tc.clearKeys).length > 0 ? tc.clearKeys : gioKeys,
-+    });
-+  }
-+
-+  // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
-+  if (matchedGio) {
-+    for (const rawUrl of matchedGio.urls) {
-+      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
-+      const embeddedToken = extractHdneaToken(rawUrl);
-+      const freshCookie = isJioStarPlUrl(rawUrl) ? starCookie : regularCookie;
-+      const baseCleanUrl = rawUrl.split("?")[0]!;
-+      if (freshCookie) {
-+        pushCandidate({
-+          label: "GioTV Direct · Fresh Token",
-+          url: baseCleanUrl,
-+          cookie: freshCookie,
-+          clearKeys: gioKeys,
-+          container,
-+        });
-+      }
-+      if (embeddedToken) {
-+        pushCandidate({
-+          label: "GioTV Direct · Embedded Token",
-+          url: baseCleanUrl,
-+          cookie: embeddedToken,
-+          clearKeys: gioKeys,
-+          container,
-+        });
-+      }
-+      if (!freshCookie && !embeddedToken) {
-+        pushCandidate({
-+          label: "GioTV Direct",
-+          url: rawUrl,
-+          cookie: "",
-+          clearKeys: gioKeys,
-+          container,
-+        });
-+      }
-+    }
-+  }
-+
-+  // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
-+  if (candidates.length === 0) {
-+    const pool = rawId.startsWith("tg:")
-+      ? await loadTgTvCached(cfg, false)
-+      : rawId.startsWith("jio:")
-+        ? await loadJioCached(cfg, false)
-+        : [];
-+    const ch = pool.find((c) => c.id === rawId || c.rawId === rawId);
-+    if (ch?.cmd && /^https:\/\//i.test(ch.cmd) && !ch.cmd.includes("allinonereborn")) {
-+      pushCandidate({
-+        label: "Playlist Direct",
-+        url: ch.cmd,
-+        cookie: extractHdneaToken(ch.cookie),
-+        clearKeys: ch.drm?.keys ? pairsToHexRecord(ch.drm.keys) : {},
-+        container: ch.mediaType === "hls" ? "hls" : "dash",
-+      });
-+    }
-+  }
-+
-+  return {
-+    matchedId: v1NumericId,
-+    matchedName: matchedGio?.name ?? (channelName || null),
-+    candidates,
-+  };
-+}
-+
- const tgtvCache: { items: LiveChannelItem[]; fetchedAt: number; error: string | null } = {
-   items: [],
-   fetchedAt: 0,
-@@ -1501,6 +2256,23 @@ const tgtvCache: { items: LiveChannelItem[]; fetchedAt: number; error: string |
- };
+   return {
+     matchedId: v1NumericId,
+     matchedName: matchedGio?.name ?? (channelName || null),
+-    candidates,
++    candidates: pruned,
+   };
+ }
  
- async function fetchTgTvCatalogue(cfg: GatewayConfig): Promise<LiveChannelItem[]> {
-+  // Primary: GioTV / TG V1 1,176-channel JSON catalogue (works on Cloudflare Workers with full ClearKeys).
-+  const gio = await loadGioTvRawCached(false);
-+  if (gio.length > 0) {
-+    return gio.map((g) => ({
-+      id: `tg:${g.id}`,
-+      rawId: g.id,
-+      source: "tgtv" as const,
-+      name: g.name,
-+      category: g.category || "TG TV",
-+      logo: g.logo,
-+      cmd: g.urls[0]!,
-+      mediaType: jioMediaType(g.urls[0]!),
-+      ...(g.keys.length ? { drm: { type: "clearkey" as const, keys: g.keys } } : {}),
-+    }));
-+  }
-+
-+  // Fallback: M3U playlist at `cfg.tgtvPlaylistUrl`
-   if (!cfg.tgtvPlaylistUrl) return [];
-   const ctrl = new AbortController();
-   const timer = setTimeout(() => ctrl.abort(), 10000);
-@@ -2451,6 +3223,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
- <head>
-   <meta charset="UTF-8" />
-   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-+  <meta name="referrer" content="no-referrer" />
-   <title>${ch.name.replace(/[<>&"]/g, "")} · STREAMR Live</title>
-   <style>
-     * { box-sizing: border-box; margin: 0; padding: 0; }
-@@ -2588,9 +3361,77 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3361,19 +3393,40 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
        mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
      }
-+    async function tryDirectPlay() {
-+      try {
-+        const dr = await fetch("/api/live/direct-config?id=" + encodeURIComponent(ch.id) + "&name=" + encodeURIComponent(ch.name || ""));
-+        if (!dr.ok) return false;
-+        const dd = await dr.json().catch(() => ({}));
-+        const cands = Array.isArray(dd.candidates) ? dd.candidates : [];
-+        if (!cands.length || !window.shaka) return false;
-+        shaka.polyfill.installAll();
-+        if (!shaka.Player.isBrowserSupported()) return false;
-+        if (shaka.log && shaka.LogLevel) shaka.log.setLevel(shaka.LogLevel.NONE);
-+        for (let idx = 0; idx < cands.length; idx++) {
-+          const cand = cands[idx];
-+          if (cand.container === "hls") { startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : "")); return true; }
-+          const attempts = cand.cookie ? [cand.cookie, ""] : [""];
-+          for (let a = 0; a < attempts.length; a++) {
-+            clean();
-+            sp = new shaka.Player();
-+            const activeCookie = attempts[a];
-+            const ck = cand.clearKeys || {};
-+            sp.configure({
-+              drm: Object.keys(ck).length ? { clearKeys: ck } : {},
-+              streaming: { lowLatencyMode: true, rebufferingGoal: 2, bufferingGoal: 20, retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } },
-+              manifest: { retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } }
-+            });
-+            const net = sp.getNetworkingEngine && sp.getNetworkingEngine();
-+            if (net && activeCookie) {
-+              net.registerRequestFilter(function (type, req) {
-+                if ((type === 0 || type === 1) && req.uris && req.uris[0]) {
-+                  const u = req.uris[0];
-+                  if (!u.includes("allinonereborn") && !u.includes("__hdnea__=")) {
-+                    req.uris[0] = u.split("?")[0] + "?" + activeCookie;
-+                  }
-+                }
-+              });
-+            }
-+            if (net && Object.keys(ck).length) {
-+              net.registerResponseFilter(function (type, resp) {
-+                if (type !== 0 || !resp.data) return;
-+                try {
-+                  let xml = new TextDecoder().decode(resp.data);
-+                  if (!/<MPD[\s>]/i.test(xml)) return;
-+                  const kids = Array.from(xml.matchAll(/default_KID\s*=\s*"([^"]+)"/gi)).map(function (m) { return m[1].replace(/-/g, "").toLowerCase(); });
-+                  const ckEntries = Object.entries(ck);
-+                  if (ckEntries.length === 1 && kids.length > 0 && !ck[kids[0]]) {
-+                    const extra = Object.assign({}, ck);
-+                    kids.forEach(function (kHex) { extra[kHex] = ckEntries[0][1]; });
-+                    sp.configure({ drm: { clearKeys: extra } });
-+                  }
-+                  xml = xml.replace(/<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*>[\s\S]*?<\/ContentProtection>/gi, "");
-+                  xml = xml.replace(/<ContentProtection\b[^>]*schemeIdUri="urn:uuid:(?:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed|9a04f079-9840-4286-ab92-e65be0885f95)"[^>]*\/>/gi, "");
-+                  resp.data = new TextEncoder().encode(xml).buffer;
-+                } catch {}
-+              });
-+            }
-+            try {
-+              await sp.attach(v);
-+              await sp.load(cand.url);
-+              v.play().catch(function () { v.muted = true; mu.textContent = "Unmute"; v.play().catch(function () {}); });
-+              return true;
-+            } catch {}
++    function waitDirectFrames(ms) {
++      return new Promise(function (resolve) {
++        const t0 = Date.now();
++        (function poll() {
++          if ((v.videoWidth > 0 && v.videoHeight > 0) || (!v.paused && v.currentTime > 0.3)) return resolve(true);
++          if (Date.now() - t0 > ms) return resolve(false);
++          setTimeout(poll, 250);
++        })();
++      });
++    }
+     async function tryDirectPlay() {
+       try {
+-        const dr = await fetch("/api/live/direct-config?id=" + encodeURIComponent(ch.id) + "&name=" + encodeURIComponent(ch.name || ""));
+-        if (!dr.ok) return false;
+-        const dd = await dr.json().catch(() => ({}));
+-        const cands = Array.isArray(dd.candidates) ? dd.candidates : [];
++        const dc = new AbortController(); const dtm = setTimeout(function () { dc.abort(); }, 7000);
++        let cands = [];
++        try {
++          const dr = await fetch("/api/live/direct-config?id=" + encodeURIComponent(ch.id) + "&name=" + encodeURIComponent(ch.name || ""), { signal: dc.signal });
++          if (!dr.ok) return false;
++          const dd = await dr.json().catch(() => ({}));
++          cands = Array.isArray(dd.candidates) ? dd.candidates : [];
++        } catch { return false; } finally { clearTimeout(dtm); }
+         if (!cands.length || !window.shaka) return false;
+         shaka.polyfill.installAll();
+         if (!shaka.Player.isBrowserSupported()) return false;
+         if (shaka.log && shaka.LogLevel) shaka.log.setLevel(shaka.LogLevel.NONE);
++        const passDeadline = Date.now() + 40000;
+         for (let idx = 0; idx < cands.length; idx++) {
++          if (Date.now() > passDeadline) return false;
+           const cand = cands[idx];
+-          if (cand.container === "hls") { startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : "")); return true; }
++          st.textContent = "Trying " + (cand.label || "direct server") + "…";
++          if (cand.container === "hls") {
++            startHls(cand.url + (cand.cookie ? (cand.url.includes("?") ? "&" : "?") + cand.cookie : ""));
++            if (await waitDirectFrames(7000)) return true;
++            continue;
 +          }
-+        }
-+      } catch {}
-+      return false;
-+    }
-     async function boot() {
-       clean(); ov.classList.remove("hide"); rt.style.display = "none"; st.textContent = "Connecting to " + ch.name + "…";
-       armWatchdog();
-+      if (ch.source === "jio" || ch.source === "tgtv" || /^(?:jio|tg):/i.test(String(ch.id || ""))) {
-+        if (await tryDirectPlay()) return;
-+      }
-       // Ask for the container the catalogue advertised. Probing ".ts" unconditionally
-       // made every DASH channel look like MPEG-TS, so the embed could never play one.
-       const wantDash = String(ch.container || "").toLowerCase() === "dash";
-@@ -2600,6 +3441,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
-         const r = await fetch(sUrl(probeExt, true), { signal: c.signal }); clearTimeout(tm);
-         if (!r.ok) {
-           const j = await r.json().catch(() => ({})); c.abort();
-+          if (await tryDirectPlay()) return;
-           if (ch.directUrl) { startHls(ch.directUrl); return; }
-           st.textContent = j.error || ("HTTP " + r.status); rt.style.display = "inline-block"; return;
+           const attempts = cand.cookie ? [cand.cookie, ""] : [""];
+           for (let a = 0; a < attempts.length; a++) {
+             clean();
+@@ -3382,8 +3435,8 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+             const ck = cand.clearKeys || {};
+             sp.configure({
+               drm: Object.keys(ck).length ? { clearKeys: ck } : {},
+-              streaming: { lowLatencyMode: true, rebufferingGoal: 2, bufferingGoal: 20, retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } },
+-              manifest: { retryParameters: { maxAttempts: 2, baseDelay: 400, backoffFactor: 2, timeout: 12000 } }
++              streaming: { lowLatencyMode: true, rebufferingGoal: 2, bufferingGoal: 20, retryParameters: { maxAttempts: 2, baseDelay: 300, backoffFactor: 2, timeout: 7000 } },
++              manifest: { retryParameters: { maxAttempts: 1, baseDelay: 300, backoffFactor: 2, timeout: 7000 } }
+             });
+             const net = sp.getNetworkingEngine && sp.getNetworkingEngine();
+             if (net && activeCookie) {
+@@ -3417,9 +3470,10 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+             }
+             try {
+               await sp.attach(v);
+-              await sp.load(cand.url);
++              await Promise.race([sp.load(cand.url), new Promise(function (_, rej) { setTimeout(function () { rej(new Error("direct-timeout")); }, 8000); })]);
+               v.play().catch(function () { v.muted = true; mu.textContent = "Unmute"; v.play().catch(function () {}); });
+-              return true;
++              // A manifest that loads but never renders must fail over, not trap the embed.
++              if (await waitDirectFrames(6000)) return true;
+             } catch {}
+           }
          }
-@@ -2607,7 +3449,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
-         if (kind === "dash") startDash(sUrl(".mpd"));
-         else if (kind === "hls") startHls(sUrl(".m3u8"));
-         else startTs(sUrl(".ts"), true);
--      } catch { clearTimeout(tm); if (wantDash) startDash(sUrl(".mpd")); else startTs(sUrl(".ts"), true); }
-+      } catch { clearTimeout(tm); if (await tryDirectPlay()) return; if (wantDash) startDash(sUrl(".mpd")); else startTs(sUrl(".ts"), true); }
+@@ -3470,7 +3524,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+         if (v.videoWidth > 0 && v.videoHeight > 0) return;
+         st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
+         rt.style.display = "inline-block"; ov.classList.remove("hide");
+-      }, 15000);
++      }, 25000);
      }
-     function hideIfPlaying() {
-       if ((v.videoWidth > 0 && v.videoHeight > 0 && !v.paused) || (!v.paused && v.currentTime > 0.6)) {
-@@ -2676,6 +3518,7 @@ function toDto(ch: LiveChannelItem, publicOrigin: string): LiveChannelDto {
-   const embedUrl = `${publicOrigin}/embed/${enc}`;
-   const isDirectHttpsHls =
-     ch.source === "tgtv" &&
-+    ch.mediaType === "hls" &&
-     typeof ch.cmd === "string" &&
-     /^https:\/\//i.test(ch.cmd) &&
-     !ch.cookie &&
-@@ -2766,6 +3609,27 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
-     });
-   }
- 
-+  if (path === "/api/live/direct-config") {
-+    const rawId = (url.searchParams.get("id") || "").trim();
-+    let channelName = (url.searchParams.get("name") || "").trim();
-+    const force = url.searchParams.get("refresh") === "1";
-+
-+    if (!channelName && rawId) {
-+      const pool = await getChannelsBySource(cfg, "all", false);
-+      const hit = pool.find((c) => c.id === rawId || c.rawId === rawId);
-+      if (hit) channelName = hit.name;
-+    }
-+
-+    const resolved = await resolveDirectPlayCandidates(cfg, rawId, channelName, force);
-+    return jsonResponse(200, {
-+      ok: true,
-+      channelId: rawId,
-+      matchedId: resolved.matchedId,
-+      matchedName: resolved.matchedName,
-+      candidates: resolved.candidates,
-+    });
-+  }
-+
-   if (path === "/api/live/channels") {
-     const source = url.searchParams.get("source") || "maxtv";
-     const filter = url.searchParams.get("filter") || "hindi";
-@@ -3321,12 +4185,18 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
- 
-     try {
-       const resolved = await resolveMaxtvLink(cfg, ch.cmd || "");
-+      const acct = stalkerAccount(cfg);
-+      const magCookie = `mac=${encodeURIComponent(acct.mac)}; stb_lang=en; timezone=Europe%2FLondon`;
-       return await proxyMediaStream(
-         resolved,
-         "mag",
-         publicOrigin,
-         cfg.proxySecret,
--        undefined,
-+        {
-+          "User-Agent": MAG_USER_AGENT,
-+          Cookie: magCookie,
-+          Referer: `${acct.portal.replace(/\/+$/, "")}/`,
-+        },
-         undefined,
-         request.headers.get("range"),
-         { isProbe, handoffId: ch.id },
-diff --git a/src/routes/live.tsx b/src/routes/live.tsx
-index 8a1520d..e459fa7 100644
---- a/src/routes/live.tsx
-+++ b/src/routes/live.tsx
-@@ -22,6 +22,7 @@ export const Route = createFileRoute("/live")({
-   head: () => ({
-     meta: [
-       { title: "Live TV — Streamr" },
-+      { name: "referrer", content: "no-referrer" },
-       { name: "description", content: "Watch maxTV & StarShare live channels with Hindi audio & OG embed codes." },
-       { property: "og:title", content: "Live TV — Streamr" },
-       { property: "og:description", content: "Watch maxTV & StarShare live channels with Hindi audio & OG embed codes." },
+     v.onpause = () => { pl.textContent = "Play"; };
+     pl.onclick = () => v.paused ? v.play() : v.pause();
 diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
-index 8b52df6..aecc8a2 100644
+index aecc8a2..6ddbf00 100644
 --- a/src/test/playback-fixes.test.ts
 +++ b/src/test/playback-fixes.test.ts
-@@ -201,3 +201,163 @@ https://cdn.tgtv.example/live/ss1h/index.m3u8
-     expect(json.channels[0]!.directUrl).toBe("https://cdn.tgtv.example/live/ss1h/index.m3u8");
+@@ -359,5 +359,52 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+     expect(body.channels.map((c) => c.id)).toContain("jio:165");
+     expect(body.channels[0]!.container).toBe("dash");
    });
- });
 +
-+describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare Worker ASN bypass", () => {
-+  const GIO_CATALOGUE = JSON.stringify([
-+    {
-+      id: "892",
-+      name: "Sony SAB HD",
-+      category: "Entertainment",
-+      logo: "https://cdn.example/sab.png",
-+      url: "https://jiotvmblive.cdn.jio.com/bpk-tv//Sony_SAB_HD_MOB/WDVLive/index.mpd",
-+      keys: [{ keyId: "400131994b445d8c8817202248760fda", key: "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" }],
-+    },
-+    {
-+      id: "165",
-+      name: "Star Sports 1 Hindi HD",
-+      category: "Sports",
-+      logo: "https://cdn.example/ss1h.png",
-+      url: "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/index.mpd",
-+      keyId: "a8e437645c175bc29ab021807569e5f9",
-+      key: "6ab0c15a3f11f89bfdd4a05ec1b1fc3c",
-+    },
-+    {
-+      id: "166",
-+      name: "Star Sports 2 HD",
-+      category: "Sports",
-+      logo: "https://cdn.example/ss2.png",
-+      url: "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD2_BTS/WDVLive/index.mpd",
-+      keyId: "11111111111111111111111111111111",
-+      key: "22222222222222222222222222222222",
-+    },
-+  ]);
-+
-+  const REGULAR_COOKIES = JSON.stringify([
-+    { cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=regular_token_abc" },
-+  ]);
-+
-+  const STAR_COOKIES = JSON.stringify({
-+    failed_results: [
++  it("prunes expired embedded tokens and orders freshest candidates first", async () => {
++    const EXPIRED_CATALOGUE = JSON.stringify([
 +      {
-+        channel_id: "165",
-+        error_details: {
-+          final_url:
-+            "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/index.mpd?__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=star_165_token_xyz",
-+        },
++        id: "892",
++        name: "Sony SAB HD",
++        category: "Entertainment",
++        logo: "https://cdn.example/sab.png",
++        url: "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1~exp=1000000000~acl=/*~hmac=expired_embedded",
++        keys: [{ keyId: "400131994b445d8c8817202248760fda", key: "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" }],
 +      },
-+    ],
-+  });
-+
-+  function makeFramedTgRpcResponse(payloadObj: unknown): Response {
-+    const jsonBytes = new TextEncoder().encode(JSON.stringify(payloadObj));
-+    const framed = new Uint8Array(9 + jsonBytes.byteLength);
-+    const view = new DataView(framed.buffer);
-+    view.setUint8(0, 0);
-+    view.setInt32(1, 0, false);
-+    view.setInt32(5, jsonBytes.byteLength, false);
-+    framed.set(jsonBytes, 9);
-+    return new Response(framed, {
-+      status: 200,
-+      headers: { "content-type": "application/x-tss-framed" },
-+    });
-+  }
-+
-+  it("decodes TG _serverFn x-tss-framed RPC + GioTV tokens and normalizes bpk-tv// URLs", async () => {
++    ]);
 +    vi.stubGlobal("fetch", async (url: string) => {
 +      const u = String(url);
-+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(EXPIRED_CATALOGUE, { status: 200 });
 +      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
 +      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
 +        return makeFramedTgRpcResponse({
 +          result: {
-+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv//Sony_SAB_HD_MOB/WDVLive/index.mpd"],
-+            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
-+            clearKeys: { "40013199-4b44-5d8c-8817-202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
-+            backups: [
-+              {
-+                urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/Fallback/index.mpd"],
-+                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv2_hmac",
-+              },
-+            ],
++            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/TGServer/index.mpd"],
++            cookie: "__hdnea__=st=1~exp=1000000000~acl=/*~hmac=expired_tg",
++            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
 +          },
 +        });
 +      }
@@ -1648,75 +781,20 @@ index 8b52df6..aecc8a2 100644
 +    );
 +    expect(res!.status).toBe(200);
 +    const body = (await res!.json()) as {
-+      ok: boolean;
-+      matchedId: string;
-+      candidates: Array<{ label: string; url: string; cookie: string; clearKeys: Record<string, string> }>;
++      candidates: Array<{ label: string; url: string; cookie: string }>;
 +    };
-+    expect(body.ok).toBe(true);
-+    expect(body.matchedId).toBe("892");
-+    expect(body.candidates.length).toBeGreaterThanOrEqual(3);
-+    // Double slash normalized to single slash so Jio CDN never returns 404
-+    expect(body.candidates[0]!.url).toBe("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd");
-+    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
-+    // Hyphenated UUID KID normalized to 32-char hex
-+    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe("2d56ef4bfcfb9fb0ae172f29b9cd6bfe");
-+  });
-+
-+  it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
-+    vi.stubGlobal("fetch", async (url: string) => {
-+      const u = String(url);
-+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
-+      if (u.includes("giotv-6op.pages.dev/cookie.json")) return new Response(STAR_COOKIES, { status: 200 });
-+      return new Response("", { status: 403 });
-+    });
-+
-+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
-+    const res = await maybeHandleLiveRequest(
-+      new Request(
-+        "https://screen-safari-studio.lovable.app/api/live/direct-config?id=st%3A1001&name=IN%3A%20Star%20Sports%201%20Hindi%20HD&refresh=1",
-+      ),
-+      {},
++    // Expired embedded token pruned: the same URL keeps only its fresh-token variant.
++    const gioVariants = body.candidates.filter(
++      (c) => c.url === "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd",
 +    );
-+    expect(res!.status).toBe(200);
-+    const body = (await res!.json()) as {
-+      matchedId: string;
-+      matchedName: string;
-+      candidates: Array<{ url: string; cookie: string; clearKeys: Record<string, string> }>;
-+    };
-+    expect(body.matchedId).toBe("165");
-+    expect(body.matchedName).toBe("Star Sports 1 Hindi HD");
-+    expect(body.candidates[0]!.url).toBe(
-+      "https://jiotvpllive.cdn.jio.com/bpk-tv/Star_Sports_HD1_Hindi_BTS/WDVLive/index.mpd",
-+    );
-+    expect(body.candidates[0]!.cookie).toContain("star_165_token_xyz");
-+    expect(body.candidates[0]!.clearKeys["a8e437645c175bc29ab021807569e5f9"]).toBe("6ab0c15a3f11f89bfdd4a05ec1b1fc3c");
++    expect(gioVariants.length).toBe(1);
++    expect(gioVariants[0]!.cookie).toContain("regular_token_abc");
++    // Freshest-first ordering: fresh Gio candidate precedes the expired TG fallback.
++    expect(body.candidates[0]!.cookie).toContain("regular_token_abc");
++    expect(body.candidates[body.candidates.length - 1]!.cookie).toContain("expired_tg");
 +  });
-+
-+  it("serves JioTV catalogue from giotv-6op.pages.dev/jstr4web.json when allinonereborn2.online blocks Cloudflare Workers", async () => {
-+    vi.stubGlobal("fetch", async (url: string) => {
-+      const u = String(url);
-+      if (u.includes("allinonereborn2.online")) return new Response("", { status: 450 });
-+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
-+      return new Response("", { status: 404 });
-+    });
-+
-+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
-+    const res = await maybeHandleLiveRequest(
-+      new Request("https://screen-safari-studio.lovable.app/api/live/channels?source=jio&filter=all&refresh=1"),
-+      {},
-+    );
-+    const body = (await res!.json()) as {
-+      servedBy: string;
-+      channels: Array<{ id: string; name: string; container?: string }>;
-+    };
-+    expect(body.servedBy).toBe("jio");
-+    expect(body.channels.length).toBe(3);
-+    expect(body.channels.map((c) => c.id)).toContain("jio:892");
-+    expect(body.channels.map((c) => c.id)).toContain("jio:165");
-+    expect(body.channels[0]!.container).toBe("dash");
-+  });
-+});
-+
+ });
+ 
 -- 
 2.39.5
 

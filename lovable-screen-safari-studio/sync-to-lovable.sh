@@ -19,4 +19,4 @@ cd "$TARGET_DIR"
 git status -s
 echo ""
 echo "Ready! Commit and push to deploy automatically to https://screen-safari-studio.lovable.app:"
-echo "  cd $TARGET_DIR && git add -A && git commit -m 'fix(live): fix Live TV playback across maxTV, JioTV ClearKey DASH & TG TV' && git push origin main"
+echo "  cd $TARGET_DIR && git add -A && git commit -m 'fix(live): auto-switch direct CDN token/server on slow frames + prune expired tokens' && git push origin main"
