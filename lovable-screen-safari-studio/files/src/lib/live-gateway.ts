@@ -2150,12 +2150,131 @@ function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channe
   return best ? best.rec : null;
 }
 
+interface PlaylistMint {
+  /** Final URL reached by following the playlist redirector (signed CDN address, or ""). */
+  finalUrl: string;
+  redirectHops: number;
+  lastStatus: number;
+  /** True when the walk reached a `*.cdn.jio.com` address for the browser to play. */
+  ok: boolean;
+}
+
+/**
+ * The Android app's channel-open probe (`JioM3uResolver.open`), headers-only half, for the worker.
+ *
+ * The app plays a JioTV channel by opening its playlist address (`jtv2.mpd?id=N`) with the
+ * playlist's own headers and following the 302 to the signed CDN address — that redirect
+ * mints a fresh per-request token. The browser cannot do this itself (its automatic `Origin`
+ * header gets HTTP 451 from the redirector, and the worker cannot proxy media), so the worker
+ * walks the redirect chain with `redirect: "manual"` and hands the browser the minted URL as
+ * JSON metadata. No media body is ever downloaded here: the walk stops at the first non-3xx
+ * response and captures its URL — even a worker-side HTTP 450 — because the viewer's own
+ * residential IP opens that same URL with HTTP 200.
+ */
+async function walkPlaylistRedirector(
+  entryUrl: string,
+  entryCookie: string,
+  entryUserAgent: string,
+  budgetMs: number,
+): Promise<PlaylistMint> {
+  const deadline = Date.now() + budgetMs;
+  const ua = entryUserAgent.trim() || JIO_UA_OVERRIDE;
+  // The app's shape order: the bare IPTV-player request first (the one that answers), the
+  // Origin/Referer shapes last (usually HTTP 451 before ever redirecting).
+  const shapes: Array<Record<string, string>> = [
+    { "User-Agent": ua, ...(entryCookie ? { Cookie: entryCookie } : {}) },
+    { "User-Agent": ua },
+    { "User-Agent": ua, ...(entryCookie ? { Cookie: entryCookie } : {}), Origin: JIO_SITE, Referer: `${JIO_SITE}/` },
+    { "User-Agent": BROWSER_METADATA_UA },
+  ];
+  let hops = 0;
+  let lastStatus = 0;
+  for (const headers of shapes) {
+    let current = entryUrl;
+    for (let hop = 0; hop < 5; hop++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 300) break;
+      // A URL that already carries its own minted token is opened bare: sending the coarse
+      // playlist cookie alongside it asks the CDN to honour two credentials and it answers
+      // 450 rather than choosing (the same rule `proxyMediaStream` applies per hop).
+      const hopHeaders: Record<string, string> = { Accept: "*/*", ...headers };
+      if (carriesOwnToken(current)) delete hopHeaders["Cookie"];
+      let res: Response | null = null;
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), Math.min(2500, remaining));
+        try {
+          res = await fetch(current, {
+            headers: hopHeaders,
+            redirect: "manual",
+            signal: ctrl.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        break;
+      }
+      if (!res) break;
+      lastStatus = res.status;
+      hops += 1;
+      if (res.status >= 300 && res.status < 400) {
+        try {
+          await res.arrayBuffer();
+        } catch {
+          // ignore drain errors
+        }
+        const loc = res.headers.get("location");
+        if (!loc) break;
+        try {
+          current = new URL(loc, current).toString();
+        } catch {
+          break;
+        }
+        continue;
+      }
+      // First non-redirect response: capture its URL. Media bodies are never downloaded — a
+      // 200 here would be a manifest (cancelled, not read), a 450 the known worker ASN block;
+      // either way the browser opens the captured URL itself on its own residential IP.
+      if (res.status !== 200) {
+        try {
+          await res.arrayBuffer();
+        } catch {
+          // ignore drain errors
+        }
+      } else {
+        try {
+          await res.body?.cancel();
+        } catch {
+          // ignore cancel errors
+        }
+      }
+      let host = "";
+      try {
+        host = new URL(current).hostname.toLowerCase();
+      } catch {
+        break;
+      }
+      if (host.endsWith(".cdn.jio.com") || host === "cdn.jio.com") {
+        return { finalUrl: current, redirectHops: hops, lastStatus, ok: true };
+      }
+      break;
+    }
+  }
+  return { finalUrl: "", redirectHops: hops, lastStatus, ok: false };
+}
+
 async function resolveDirectPlayCandidates(
   cfg: GatewayConfig,
   rawId: string,
   channelName: string,
   force = false,
-): Promise<{ matchedId: string | null; matchedName: string | null; candidates: DirectPlayCandidate[] }> {
+): Promise<{
+  matchedId: string | null;
+  matchedName: string | null;
+  candidates: DirectPlayCandidate[];
+  playlistMint: { tried: boolean; ok: boolean; hops: number; lastStatus: number; tokenSecondsLeft: number | null };
+}> {
   const gioRecords = await loadGioTvRawCached(force);
   const matchedGio = findBestGioTvMatch(gioRecords, rawId, channelName);
   const cleanPrefixId = rawId.replace(/^(?:jio|tg):/i, "").trim();
@@ -2180,29 +2299,40 @@ async function resolveDirectPlayCandidates(
     const budget = new Promise<DirectPlayCandidate[]>((resolve) => setTimeout(() => resolve([]), 5000));
     return Promise.race([resolveTgRpcCandidates(v1NumericId, force), budget]);
   })();
-  // The playlist's own per-channel `#EXTHTTP` cookie (`jtv39.m3u8`): BTS entries carry a token
-  // minted for exactly their channel path (`acl=/bpk-tv/<Ch>_BTS/WDVLive/*`), the rest a coarse
-  // site token — the same cookie the Android app plays with. Budget-raced so a blocked
-  // playlist fetch can never delay direct-config; the background load warms `jioCache`.
-  const playlistBudgeted = (async (): Promise<string> => {
-    if (!v1NumericId || !matchedGio) return "";
-    const budget = new Promise<string>((resolve) => setTimeout(() => resolve(""), 3000));
-    const lookup = (async () => {
+  // The playlist's own entry (`jtv39.m3u8`): its per-channel `#EXTHTTP` cookie (BTS entries
+  // carry a token minted for exactly their channel path) upgrades the Gio token choice, and its
+  // redirector address (`jtv2.mpd?id=N`) is walked headers-only to mint the fresh signed CDN URL
+  // the Android app plays. Budget-raced so a blocked playlist fetch can never delay
+  // direct-config; the background load warms `jioCache` for the next play.
+  const playlistBudgeted = (async (): Promise<{ cookie: string; entry: LiveChannelItem | null; mint: PlaylistMint | null }> => {
+    const empty = { cookie: "", entry: null, mint: null };
+    if (!v1NumericId || !matchedGio) return empty;
+    const budget = new Promise<typeof empty>((resolve) => setTimeout(() => resolve(empty), 5000));
+    const work = (async () => {
+      let hit: LiveChannelItem | null = null;
       try {
         const pool = await loadJioCached(cfg, false);
-        // GioTV-fallback items share the ids but carry no playlist cookie; only a real entry
+        // GioTV-fallback items share the ids but are not playlist entries; only a real entry
         // whose stream points at the playlist host counts.
-        const hit = pool.find(
-          (c) => c.rawId === v1NumericId && c.cmd && /allinonereborn/i.test(c.cmd),
-        );
-        return extractHdneaToken(hit?.cookie) || "";
+        hit = pool.find((c) => c.rawId === v1NumericId && c.cmd && /allinonereborn/i.test(c.cmd)) ?? null;
       } catch {
-        return "";
+        hit = null;
       }
+      const cookie = extractHdneaToken(hit?.cookie) || "";
+      let mint: PlaylistMint | null = null;
+      if (hit?.cmd) {
+        try {
+          const walked = await walkPlaylistRedirector(hit.cmd, cookie, hit.userAgent || "", 4000);
+          mint = walked.ok ? walked : { ...walked, finalUrl: "" };
+        } catch {
+          mint = null;
+        }
+      }
+      return { cookie, entry: hit, mint };
     })();
-    return Promise.race([lookup, budget]);
+    return Promise.race([work, budget]);
   })();
-  const [tgCandidates, regularCookie, starCookie, playlistCookie] = await Promise.all([
+  const [tgCandidates, regularCookie, starCookie, playlist] = await Promise.all([
     tgBudgeted,
     matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
     matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
@@ -2210,6 +2340,7 @@ async function resolveDirectPlayCandidates(
       : Promise.resolve(""),
     playlistBudgeted,
   ]);
+  const playlistCookie = playlist.cookie;
 
   const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
 
@@ -2263,12 +2394,35 @@ async function resolveDirectPlayCandidates(
     }
   }
 
-  // The app's JioTV tab connects to JioTV, not TG: a `jio:` channel tries its Jio CDN
-  // candidates before TG's servers, and only falls back to TG when Jio fails. TG TV tab
-  // (`tg:`) and maxTV rescue (`st:`) keep TG first. The freshest-first sort below is stable,
-  // so this preference holds among equally-fresh tokens while a working token always beats
-  // an expired one.
-  const ordered = rawId.toLowerCase().startsWith("jio:") ? [...jioList, ...tgList] : [...tgList, ...jioList];
+  // The playlist redirector's freshly-minted signed URL: exactly what the Android app plays
+  // after its channel-open probe. The cookie is the token the redirect minted onto that URL
+  // (falling back to the playlist `#EXTHTTP` cookie when the URL carries none), so the browser
+  // signs segments with the same per-request credential and the root request keeps its sibling
+  // params. Keys prefer the playlist's own key document, GioTV keys backfilling when the key
+  // document was unreachable.
+  const redirectList: DirectPlayCandidate[] = [];
+  if (playlist.mint?.ok && playlist.mint.finalUrl && playlist.entry) {
+    const entryKeys = playlist.entry.drm?.keys?.length
+      ? pairsToHexRecord(playlist.entry.drm.keys)
+      : gioKeys;
+    redirectList.push({
+      label: "JioTV Playlist · Redirector",
+      url: playlist.mint.finalUrl,
+      cookie: extractHdneaToken(playlist.mint.finalUrl) || playlistCookie,
+      clearKeys: entryKeys,
+      container: jioMediaType(playlist.mint.finalUrl) === "hls" ? "hls" : "dash",
+    });
+  }
+
+  // The app's JioTV tab connects to JioTV, not TG: a `jio:` channel tries the playlist-minted
+  // URL first, then its Jio CDN candidates, and only falls back to TG's servers when Jio fails.
+  // TG TV tab (`tg:`) and maxTV rescue (`st:`) keep TG first with the minted URL next. The
+  // freshest-first sort below is stable, so this preference holds among equally-fresh tokens
+  // while a working token always beats an expired one.
+  const isJio = rawId.toLowerCase().startsWith("jio:");
+  const ordered = isJio
+    ? [...redirectList, ...jioList, ...tgList]
+    : [...tgList, ...redirectList, ...jioList];
   for (const c of ordered) pushCandidate(c);
 
   // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
@@ -2291,30 +2445,37 @@ async function resolveDirectPlayCandidates(
   }
 
   // 4. Never waste player time on a provably-expired token when the same URL also has a
-  // fresh one, and order freshest-first (stable, so TG Server 1 still precedes Server 2).
+  // fresh one, and order freshest-first (stable, so the source-aware preference above survives
+  // among equally-fresh tokens and TG Server 1 still precedes Server 2). Pruning filters in
+  // place so a minted URL interleaved between two catalogue variants keeps its position.
   const now = Date.now();
   const rankCandidate = (c: DirectPlayCandidate): number => {
     const exp = hdneaExpiryMs(c.cookie || c.url);
     if (exp === null) return 1;
     return exp > now + 5_000 ? 2 : 0;
   };
-  const byUrl = new Map<string, DirectPlayCandidate[]>();
+  const usableByUrl = new Map<string, boolean>();
   for (const c of candidates) {
-    const group = byUrl.get(c.url);
-    if (group) group.push(c);
-    else byUrl.set(c.url, [c]);
+    if (rankCandidate(c) > 0) usableByUrl.set(c.url, true);
   }
-  const pruned: DirectPlayCandidate[] = [];
-  for (const group of byUrl.values()) {
-    const usable = group.filter((c) => rankCandidate(c) > 0);
-    pruned.push(...(usable.length > 0 ? usable : group));
-  }
+  const pruned = candidates.filter((c) => rankCandidate(c) > 0 || !usableByUrl.get(c.url));
   pruned.sort((a, b) => rankCandidate(b) - rankCandidate(a));
 
+  // Redacted mint diagnostics (lifetimes and statuses only, never token values): opening
+  // `/api/live/direct-config?id=jio:<n>` in a browser shows whether the worker reached the
+  // playlist redirector or fell back to catalogue candidates.
+  const mintExp = playlist.mint?.ok && playlist.mint.finalUrl ? hdneaExpiryMs(playlist.mint.finalUrl) : null;
   return {
     matchedId: v1NumericId,
     matchedName: matchedGio?.name ?? (channelName || null),
     candidates: pruned,
+    playlistMint: {
+      tried: playlist.entry !== null,
+      ok: playlist.mint?.ok ?? false,
+      hops: playlist.mint?.redirectHops ?? 0,
+      lastStatus: playlist.mint?.lastStatus ?? 0,
+      tokenSecondsLeft: mintExp === null ? null : Math.round((mintExp - now) / 1000),
+    },
   };
 }
 
@@ -3759,6 +3920,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
       matchedId: resolved.matchedId,
       matchedName: resolved.matchedName,
       candidates: resolved.candidates,
+      playlistMint: resolved.playlistMint,
     });
   }
 

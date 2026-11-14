@@ -1,6 +1,6 @@
 # Website Live TV Playback Fix (`creatorAkshanshsahu/screen-safari-studio`)
 
-Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 88 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
+Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 91 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
 
 > `main` already contains the Browser-Direct CDN release (PR #12). This update fixes JioTV channels not playing in the browser on top of it.
 
@@ -36,11 +36,12 @@ The Android app and the website resolve the **same** TG/JJTV URLs + `__hdnea__` 
    - `/api/live/direct-config` hands the browser **verbatim** catalogue URLs (query intact) + cookie separately, like the app's `JjtvProtocol.streams`; TG leg budget-raced at 5s; expired tokens pruned; freshest-first ordering.
    - **Playlist per-channel cookies**: when the worker can read `jtv39.m3u8`, the entry's own `#EXTHTTP` cookie (BTS entries carry a token minted for exactly their channel path, e.g. `acl=/bpk-tv/History_HD_BTS/WDVLive/*`) is preferred over the coarse `cookies.json` token via freshness comparison — the same cookie the Android app plays with. Budget-raced at 3s so a blocked playlist fetch never delays direct-config.
    - **Source-aware ordering + JioTV labels**: like the app, the JioTV tab (`jio:`) now tries its Jio CDN candidates first (`Trying JioTV Direct · Fresh Token…`) and only falls back to `TG Live · Server 1/2` when Jio fails; the TG TV tab and maxTV rescue keep TG first. Freshness still wins overall (a working token always beats an expired one).
+   - **Playlist redirector mint**: the worker now opens the channel's own `jtv2.mpd?id=N` address headers-only (no media downloaded) and follows the 302 to the freshly-minted signed CDN URL — exactly the app's channel-open probe. `jio:` tries `JioTV Playlist · Redirector` first, then catalogue Jio, then TG; `tg:` keeps TG first with the minted URL next. `/api/live/direct-config` reports redacted `playlistMint` diagnostics (`tried/ok/hops/lastStatus/tokenSecondsLeft`, never token values) so a browser URL shows whether the mint succeeded.
    - `/embed/:id` standalone player gets the same session-token + redirect-learning policy for both Shaka and hls.js.
 
 4. **`package.json`** — restores `@testing-library/dom@^10.4.2`, accidentally removed by `683ea35`, which broke all 18 Vitest suites.
 
-5. **New regression tests (`src/test/playback-fixes.test.ts`)** — token append/preserve/no-overwrite/replace rules, host scoping, playlist-vs-fragment detection, expired-token pruning with verbatim URLs, and `jtv39.m3u8` per-channel cookie preference.
+5. **New regression tests (`src/test/playback-fixes.test.ts`)** — token append/preserve/no-overwrite/replace rules, host scoping, playlist-vs-fragment detection, expired-token pruning with verbatim URLs, `jtv39.m3u8` per-channel cookie preference, and playlist-redirector mint ordering (`jio:` minted-first, `tg:` TG-first with minted next, mint-refusal fallback with diagnostics).
 
 ---
 
@@ -51,7 +52,7 @@ The Android app and the website resolve the **same** TG/JJTV URLs + `__hdnea__` 
 ./lovable-screen-safari-studio/sync-to-lovable.sh
 cd screen-safari-studio
 git add -A
-git commit -m "fix(live): JioTV tab connects to JioTV first, TG kept as fallback"
+git commit -m "fix(live): JioTV tab plays playlist-minted URL first like the app"
 git push origin main
 ```
 

@@ -482,6 +482,165 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
     expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
     expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
   });
+
+  it("plays jio: channels from the playlist redirector's minted URL first, like the Android app", async () => {
+    const PLAYLIST = [
+      "#EXTM3U",
+      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
+      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
+      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
+      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
+      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
+      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
+    ].join("\n");
+    const MINTED =
+      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1794000000~exp=1999999999~acl=/bpk-tv/Sony_SAB_HD_MOB/WDVLive/*~hmac=minted_892";
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
+      if (u === "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892") {
+        return new Response("", { status: 302, headers: { location: MINTED } });
+      }
+      if (u.startsWith("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd")) {
+        // The worker's datacenter IP is ASN-blocked (HTTP 450); the viewer's residential IP
+        // opens this same minted URL with HTTP 200, so the walk still hands it to the browser.
+        return new Response("worker asn block", { status: 450 });
+      }
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
+        return makeFramedTgRpcResponse({
+          result: {
+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
+            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
+            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+          },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string; clearKeys: Record<string, string> }>;
+      playlistMint: { tried: boolean; ok: boolean; hops: number; lastStatus: number; tokenSecondsLeft: number | null };
+    };
+    // The app's JioTV tab plays the redirector-minted URL, not TG: it is tried first.
+    expect(body.candidates[0]!.label).toBe("JioTV Playlist · Redirector");
+    expect(body.candidates[0]!.url).toBe(MINTED);
+    expect(body.candidates[0]!.cookie).toContain("minted_892");
+    // GioTV keys backfill when the playlist key document is unreachable.
+    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe(
+      "2d56ef4bfcfb9fb0ae172f29b9cd6bfe",
+    );
+    // Jio catalogue second, TG servers only as fallback.
+    expect(body.candidates[1]!.label).toBe("JioTV Direct · Fresh Token");
+    expect(body.candidates.some((c) => c.label === "TG Live · Server 1")).toBe(true);
+    // Redacted diagnostics prove the worker reached the redirector (lifetimes only, no tokens).
+    expect(body.playlistMint.tried).toBe(true);
+    expect(body.playlistMint.ok).toBe(true);
+    expect(body.playlistMint.hops).toBeGreaterThanOrEqual(2);
+    expect(body.playlistMint.lastStatus).toBe(450);
+    expect(body.playlistMint.tokenSecondsLeft).toBeGreaterThan(0);
+  });
+
+  it("keeps TG first for tg: channels with the playlist-minted URL as the next fallback", async () => {
+    const PLAYLIST = [
+      "#EXTM3U",
+      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
+      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
+      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
+      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
+      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
+      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
+    ].join("\n");
+    const MINTED =
+      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1794000000~exp=1999999999~acl=/bpk-tv/Sony_SAB_HD_MOB/WDVLive/*~hmac=minted_892";
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
+      if (u === "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892") {
+        return new Response("", { status: 302, headers: { location: MINTED } });
+      }
+      if (u.startsWith("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd")) {
+        return new Response("worker asn block", { status: 450 });
+      }
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
+        return makeFramedTgRpcResponse({
+          result: {
+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
+            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
+            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+          },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string }>;
+      playlistMint: { tried: boolean; ok: boolean };
+    };
+    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
+    expect(body.candidates[1]!.label).toBe("JioTV Playlist · Redirector");
+    expect(body.candidates[1]!.url).toBe(MINTED);
+    expect(body.playlistMint.tried).toBe(true);
+    expect(body.playlistMint.ok).toBe(true);
+  });
+
+  it("falls back to catalogue candidates with diagnostics when the redirector refuses to mint", async () => {
+    const PLAYLIST = [
+      "#EXTM3U",
+      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
+      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
+      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
+      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
+      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
+      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
+    ].join("\n");
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
+      if (u === "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892") {
+        // The redirector 451s requests that carry an Origin header before ever redirecting.
+        return new Response("refused", { status: 451 });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string }>;
+      playlistMint: { tried: boolean; ok: boolean; lastStatus: number };
+    };
+    // No minted URL: the Jio catalogue candidate with the playlist cookie still plays first.
+    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
+    expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
+    expect(body.candidates.some((c) => c.label === "JioTV Playlist · Redirector")).toBe(false);
+    expect(body.playlistMint.tried).toBe(true);
+    expect(body.playlistMint.ok).toBe(false);
+    expect(body.playlistMint.lastStatus).toBe(451);
+  });
 });
 
 describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {

@@ -1,16 +1,16 @@
-From b9d0ea86f8cba89065a8f7f459fc59450d559e87 Mon Sep 17 00:00:00 2001
+From 03cb6e131f9d719cb315373236d8eb3f6f3480df Mon Sep 17 00:00:00 2001
 From: STREAMR Bot <noreply@github.com>
-Date: Sat, 14 Nov 2026 03:56:46 +0000
-Subject: [PATCH] fix(live): JioTV tab connects to JioTV first, TG kept as
- fallback
+Date: Sat, 14 Nov 2026 04:05:57 +0000
+Subject: [PATCH] fix(live): JioTV tab plays playlist-minted URL first like the
+ app
 
 ---
  package.json                           |   1 +
  src/components/tv/LiveVideoSurface.tsx | 505 +++++++++++++++++++------
  src/lib/direct-token.ts                |  70 ++++
- src/lib/live-gateway.ts                | 216 +++++++++--
- src/test/playback-fixes.test.ts        | 162 +++++++-
- 5 files changed, 788 insertions(+), 166 deletions(-)
+ src/lib/live-gateway.ts                | 380 ++++++++++++++++---
+ src/test/playback-fixes.test.ts        | 321 +++++++++++++++-
+ 5 files changed, 1110 insertions(+), 167 deletions(-)
  create mode 100644 src/lib/direct-token.ts
 
 diff --git a/package.json b/package.json
@@ -713,7 +713,7 @@ index 0000000..41320bd
 +  return /\.m3u8(?:[?#]|$)/i.test(url);
 +}
 diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
-index d01ec64..2cac1c7 100644
+index d01ec64..abd3ee2 100644
 --- a/src/lib/live-gateway.ts
 +++ b/src/lib/live-gateway.ts
 @@ -2070,7 +2070,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
@@ -728,7 +728,140 @@ index d01ec64..2cac1c7 100644
      for (const fnId of discovered) {
        if (fnId === tgVerifiedFnId && !force) continue;
        result = await callFn(fnId);
-@@ -2169,51 +2172,88 @@ async function resolveDirectPlayCandidates(
+@@ -2147,12 +2150,131 @@ function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channe
+   return best ? best.rec : null;
+ }
+ 
++interface PlaylistMint {
++  /** Final URL reached by following the playlist redirector (signed CDN address, or ""). */
++  finalUrl: string;
++  redirectHops: number;
++  lastStatus: number;
++  /** True when the walk reached a `*.cdn.jio.com` address for the browser to play. */
++  ok: boolean;
++}
++
++/**
++ * The Android app's channel-open probe (`JioM3uResolver.open`), headers-only half, for the worker.
++ *
++ * The app plays a JioTV channel by opening its playlist address (`jtv2.mpd?id=N`) with the
++ * playlist's own headers and following the 302 to the signed CDN address — that redirect
++ * mints a fresh per-request token. The browser cannot do this itself (its automatic `Origin`
++ * header gets HTTP 451 from the redirector, and the worker cannot proxy media), so the worker
++ * walks the redirect chain with `redirect: "manual"` and hands the browser the minted URL as
++ * JSON metadata. No media body is ever downloaded here: the walk stops at the first non-3xx
++ * response and captures its URL — even a worker-side HTTP 450 — because the viewer's own
++ * residential IP opens that same URL with HTTP 200.
++ */
++async function walkPlaylistRedirector(
++  entryUrl: string,
++  entryCookie: string,
++  entryUserAgent: string,
++  budgetMs: number,
++): Promise<PlaylistMint> {
++  const deadline = Date.now() + budgetMs;
++  const ua = entryUserAgent.trim() || JIO_UA_OVERRIDE;
++  // The app's shape order: the bare IPTV-player request first (the one that answers), the
++  // Origin/Referer shapes last (usually HTTP 451 before ever redirecting).
++  const shapes: Array<Record<string, string>> = [
++    { "User-Agent": ua, ...(entryCookie ? { Cookie: entryCookie } : {}) },
++    { "User-Agent": ua },
++    { "User-Agent": ua, ...(entryCookie ? { Cookie: entryCookie } : {}), Origin: JIO_SITE, Referer: `${JIO_SITE}/` },
++    { "User-Agent": BROWSER_METADATA_UA },
++  ];
++  let hops = 0;
++  let lastStatus = 0;
++  for (const headers of shapes) {
++    let current = entryUrl;
++    for (let hop = 0; hop < 5; hop++) {
++      const remaining = deadline - Date.now();
++      if (remaining <= 300) break;
++      // A URL that already carries its own minted token is opened bare: sending the coarse
++      // playlist cookie alongside it asks the CDN to honour two credentials and it answers
++      // 450 rather than choosing (the same rule `proxyMediaStream` applies per hop).
++      const hopHeaders: Record<string, string> = { Accept: "*/*", ...headers };
++      if (carriesOwnToken(current)) delete hopHeaders["Cookie"];
++      let res: Response | null = null;
++      try {
++        const ctrl = new AbortController();
++        const timer = setTimeout(() => ctrl.abort(), Math.min(2500, remaining));
++        try {
++          res = await fetch(current, {
++            headers: hopHeaders,
++            redirect: "manual",
++            signal: ctrl.signal,
++          });
++        } finally {
++          clearTimeout(timer);
++        }
++      } catch {
++        break;
++      }
++      if (!res) break;
++      lastStatus = res.status;
++      hops += 1;
++      if (res.status >= 300 && res.status < 400) {
++        try {
++          await res.arrayBuffer();
++        } catch {
++          // ignore drain errors
++        }
++        const loc = res.headers.get("location");
++        if (!loc) break;
++        try {
++          current = new URL(loc, current).toString();
++        } catch {
++          break;
++        }
++        continue;
++      }
++      // First non-redirect response: capture its URL. Media bodies are never downloaded — a
++      // 200 here would be a manifest (cancelled, not read), a 450 the known worker ASN block;
++      // either way the browser opens the captured URL itself on its own residential IP.
++      if (res.status !== 200) {
++        try {
++          await res.arrayBuffer();
++        } catch {
++          // ignore drain errors
++        }
++      } else {
++        try {
++          await res.body?.cancel();
++        } catch {
++          // ignore cancel errors
++        }
++      }
++      let host = "";
++      try {
++        host = new URL(current).hostname.toLowerCase();
++      } catch {
++        break;
++      }
++      if (host.endsWith(".cdn.jio.com") || host === "cdn.jio.com") {
++        return { finalUrl: current, redirectHops: hops, lastStatus, ok: true };
++      }
++      break;
++    }
++  }
++  return { finalUrl: "", redirectHops: hops, lastStatus, ok: false };
++}
++
+ async function resolveDirectPlayCandidates(
+   cfg: GatewayConfig,
+   rawId: string,
+   channelName: string,
+   force = false,
+-): Promise<{ matchedId: string | null; matchedName: string | null; candidates: DirectPlayCandidate[] }> {
++): Promise<{
++  matchedId: string | null;
++  matchedName: string | null;
++  candidates: DirectPlayCandidate[];
++  playlistMint: { tried: boolean; ok: boolean; hops: number; lastStatus: number; tokenSecondsLeft: number | null };
++}> {
+   const gioRecords = await loadGioTvRawCached(force);
+   const matchedGio = findBestGioTvMatch(gioRecords, rawId, channelName);
+   const cleanPrefixId = rawId.replace(/^(?:jio|tg):/i, "").trim();
+@@ -2169,51 +2291,100 @@ async function resolveDirectPlayCandidates(
    };
  
    // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
@@ -742,29 +875,40 @@ index d01ec64..2cac1c7 100644
 +    const budget = new Promise<DirectPlayCandidate[]>((resolve) => setTimeout(() => resolve([]), 5000));
 +    return Promise.race([resolveTgRpcCandidates(v1NumericId, force), budget]);
 +  })();
-+  // The playlist's own per-channel `#EXTHTTP` cookie (`jtv39.m3u8`): BTS entries carry a token
-+  // minted for exactly their channel path (`acl=/bpk-tv/<Ch>_BTS/WDVLive/*`), the rest a coarse
-+  // site token — the same cookie the Android app plays with. Budget-raced so a blocked
-+  // playlist fetch can never delay direct-config; the background load warms `jioCache`.
-+  const playlistBudgeted = (async (): Promise<string> => {
-+    if (!v1NumericId || !matchedGio) return "";
-+    const budget = new Promise<string>((resolve) => setTimeout(() => resolve(""), 3000));
-+    const lookup = (async () => {
++  // The playlist's own entry (`jtv39.m3u8`): its per-channel `#EXTHTTP` cookie (BTS entries
++  // carry a token minted for exactly their channel path) upgrades the Gio token choice, and its
++  // redirector address (`jtv2.mpd?id=N`) is walked headers-only to mint the fresh signed CDN URL
++  // the Android app plays. Budget-raced so a blocked playlist fetch can never delay
++  // direct-config; the background load warms `jioCache` for the next play.
++  const playlistBudgeted = (async (): Promise<{ cookie: string; entry: LiveChannelItem | null; mint: PlaylistMint | null }> => {
++    const empty = { cookie: "", entry: null, mint: null };
++    if (!v1NumericId || !matchedGio) return empty;
++    const budget = new Promise<typeof empty>((resolve) => setTimeout(() => resolve(empty), 5000));
++    const work = (async () => {
++      let hit: LiveChannelItem | null = null;
 +      try {
 +        const pool = await loadJioCached(cfg, false);
-+        // GioTV-fallback items share the ids but carry no playlist cookie; only a real entry
++        // GioTV-fallback items share the ids but are not playlist entries; only a real entry
 +        // whose stream points at the playlist host counts.
-+        const hit = pool.find(
-+          (c) => c.rawId === v1NumericId && c.cmd && /allinonereborn/i.test(c.cmd),
-+        );
-+        return extractHdneaToken(hit?.cookie) || "";
++        hit = pool.find((c) => c.rawId === v1NumericId && c.cmd && /allinonereborn/i.test(c.cmd)) ?? null;
 +      } catch {
-+        return "";
++        hit = null;
 +      }
++      const cookie = extractHdneaToken(hit?.cookie) || "";
++      let mint: PlaylistMint | null = null;
++      if (hit?.cmd) {
++        try {
++          const walked = await walkPlaylistRedirector(hit.cmd, cookie, hit.userAgent || "", 4000);
++          mint = walked.ok ? walked : { ...walked, finalUrl: "" };
++        } catch {
++          mint = null;
++        }
++      }
++      return { cookie, entry: hit, mint };
 +    })();
-+    return Promise.race([lookup, budget]);
++    return Promise.race([work, budget]);
 +  })();
-+  const [tgCandidates, regularCookie, starCookie, playlistCookie] = await Promise.all([
++  const [tgCandidates, regularCookie, starCookie, playlist] = await Promise.all([
 +    tgBudgeted,
      matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
      matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
@@ -772,6 +916,7 @@ index d01ec64..2cac1c7 100644
        : Promise.resolve(""),
 +    playlistBudgeted,
    ]);
++  const playlistCookie = playlist.cookie;
  
    const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
  
@@ -836,55 +981,85 @@ index d01ec64..2cac1c7 100644
            url: rawUrl,
            cookie: "",
            clearKeys: gioKeys,
-@@ -2223,6 +2263,14 @@ async function resolveDirectPlayCandidates(
+@@ -2223,6 +2394,37 @@ async function resolveDirectPlayCandidates(
      }
    }
  
-+  // The app's JioTV tab connects to JioTV, not TG: a `jio:` channel tries its Jio CDN
-+  // candidates before TG's servers, and only falls back to TG when Jio fails. TG TV tab
-+  // (`tg:`) and maxTV rescue (`st:`) keep TG first. The freshest-first sort below is stable,
-+  // so this preference holds among equally-fresh tokens while a working token always beats
-+  // an expired one.
-+  const ordered = rawId.toLowerCase().startsWith("jio:") ? [...jioList, ...tgList] : [...tgList, ...jioList];
++  // The playlist redirector's freshly-minted signed URL: exactly what the Android app plays
++  // after its channel-open probe. The cookie is the token the redirect minted onto that URL
++  // (falling back to the playlist `#EXTHTTP` cookie when the URL carries none), so the browser
++  // signs segments with the same per-request credential and the root request keeps its sibling
++  // params. Keys prefer the playlist's own key document, GioTV keys backfilling when the key
++  // document was unreachable.
++  const redirectList: DirectPlayCandidate[] = [];
++  if (playlist.mint?.ok && playlist.mint.finalUrl && playlist.entry) {
++    const entryKeys = playlist.entry.drm?.keys?.length
++      ? pairsToHexRecord(playlist.entry.drm.keys)
++      : gioKeys;
++    redirectList.push({
++      label: "JioTV Playlist · Redirector",
++      url: playlist.mint.finalUrl,
++      cookie: extractHdneaToken(playlist.mint.finalUrl) || playlistCookie,
++      clearKeys: entryKeys,
++      container: jioMediaType(playlist.mint.finalUrl) === "hls" ? "hls" : "dash",
++    });
++  }
++
++  // The app's JioTV tab connects to JioTV, not TG: a `jio:` channel tries the playlist-minted
++  // URL first, then its Jio CDN candidates, and only falls back to TG's servers when Jio fails.
++  // TG TV tab (`tg:`) and maxTV rescue (`st:`) keep TG first with the minted URL next. The
++  // freshest-first sort below is stable, so this preference holds among equally-fresh tokens
++  // while a working token always beats an expired one.
++  const isJio = rawId.toLowerCase().startsWith("jio:");
++  const ordered = isJio
++    ? [...redirectList, ...jioList, ...tgList]
++    : [...tgList, ...redirectList, ...jioList];
 +  for (const c of ordered) pushCandidate(c);
 +
    // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
    if (candidates.length === 0) {
      const pool = rawId.startsWith("tg:")
-@@ -2242,10 +2290,31 @@ async function resolveDirectPlayCandidates(
+@@ -2242,10 +2444,38 @@ async function resolveDirectPlayCandidates(
      }
    }
  
 +  // 4. Never waste player time on a provably-expired token when the same URL also has a
-+  // fresh one, and order freshest-first (stable, so TG Server 1 still precedes Server 2).
++  // fresh one, and order freshest-first (stable, so the source-aware preference above survives
++  // among equally-fresh tokens and TG Server 1 still precedes Server 2). Pruning filters in
++  // place so a minted URL interleaved between two catalogue variants keeps its position.
 +  const now = Date.now();
 +  const rankCandidate = (c: DirectPlayCandidate): number => {
 +    const exp = hdneaExpiryMs(c.cookie || c.url);
 +    if (exp === null) return 1;
 +    return exp > now + 5_000 ? 2 : 0;
 +  };
-+  const byUrl = new Map<string, DirectPlayCandidate[]>();
++  const usableByUrl = new Map<string, boolean>();
 +  for (const c of candidates) {
-+    const group = byUrl.get(c.url);
-+    if (group) group.push(c);
-+    else byUrl.set(c.url, [c]);
++    if (rankCandidate(c) > 0) usableByUrl.set(c.url, true);
 +  }
-+  const pruned: DirectPlayCandidate[] = [];
-+  for (const group of byUrl.values()) {
-+    const usable = group.filter((c) => rankCandidate(c) > 0);
-+    pruned.push(...(usable.length > 0 ? usable : group));
-+  }
++  const pruned = candidates.filter((c) => rankCandidate(c) > 0 || !usableByUrl.get(c.url));
 +  pruned.sort((a, b) => rankCandidate(b) - rankCandidate(a));
 +
++  // Redacted mint diagnostics (lifetimes and statuses only, never token values): opening
++  // `/api/live/direct-config?id=jio:<n>` in a browser shows whether the worker reached the
++  // playlist redirector or fell back to catalogue candidates.
++  const mintExp = playlist.mint?.ok && playlist.mint.finalUrl ? hdneaExpiryMs(playlist.mint.finalUrl) : null;
    return {
      matchedId: v1NumericId,
      matchedName: matchedGio?.name ?? (channelName || null),
 -    candidates,
 +    candidates: pruned,
++    playlistMint: {
++      tried: playlist.entry !== null,
++      ok: playlist.mint?.ok ?? false,
++      hops: playlist.mint?.redirectHops ?? 0,
++      lastStatus: playlist.mint?.lastStatus ?? 0,
++      tokenSecondsLeft: mintExp === null ? null : Math.round((mintExp - now) / 1000),
++    },
    };
  }
  
-@@ -3273,10 +3342,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3273,10 +3503,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        au.style.display = "none"; au.innerHTML = "";
      }
      function sUrl(ext, probe) { return "/api/live/stream/" + encodeURIComponent(ch.id) + ext + "?_t=" + Date.now() + (probe ? "&probe=1" : ""); }
@@ -929,7 +1104,7 @@ index d01ec64..2cac1c7 100644
          hp.loadSource(url); hp.attachMedia(v);
          hp.on(Hls.Events.MANIFEST_PARSED, () => {
            const tr = hp.audioTracks || [];
-@@ -3361,44 +3462,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3361,44 +3623,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
        mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
      }
@@ -1019,7 +1194,7 @@ index d01ec64..2cac1c7 100644
                  try {
                    let xml = new TextDecoder().decode(resp.data);
                    if (!/<MPD[\s>]/i.test(xml)) return;
-@@ -3417,9 +3547,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3417,9 +3708,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
              }
              try {
                await sp.attach(v);
@@ -1033,7 +1208,7 @@ index d01ec64..2cac1c7 100644
              } catch {}
            }
          }
-@@ -3470,7 +3602,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3470,7 +3763,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
          if (v.videoWidth > 0 && v.videoHeight > 0) return;
          st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
          rt.style.display = "inline-block"; ov.classList.remove("hide");
@@ -1042,8 +1217,16 @@ index d01ec64..2cac1c7 100644
      }
      v.onpause = () => { pl.textContent = "Play"; };
      pl.onclick = () => v.paused ? v.play() : v.pause();
+@@ -3627,6 +3920,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+       matchedId: resolved.matchedId,
+       matchedName: resolved.matchedName,
+       candidates: resolved.candidates,
++      playlistMint: resolved.playlistMint,
+     });
+   }
+ 
 diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
-index aecc8a2..bf82be6 100644
+index aecc8a2..1f76194 100644
 --- a/src/test/playback-fixes.test.ts
 +++ b/src/test/playback-fixes.test.ts
 @@ -1,4 +1,10 @@
@@ -1108,7 +1291,7 @@ index aecc8a2..bf82be6 100644
    });
  
    it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
-@@ -359,5 +401,119 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+@@ -359,5 +401,278 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
      expect(body.channels.map((c) => c.id)).toContain("jio:165");
      expect(body.channels[0]!.container).toBe("dash");
    });
@@ -1192,6 +1375,165 @@ index aecc8a2..bf82be6 100644
 +    // Same channel-minted cookie the Android app plays with wins over cookies.json.
 +    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
 +    expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
++  });
++
++  it("plays jio: channels from the playlist redirector's minted URL first, like the Android app", async () => {
++    const PLAYLIST = [
++      "#EXTM3U",
++      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
++      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
++      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
++      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
++      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
++      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
++    ].join("\n");
++    const MINTED =
++      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1794000000~exp=1999999999~acl=/bpk-tv/Sony_SAB_HD_MOB/WDVLive/*~hmac=minted_892";
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
++      if (u === "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892") {
++        return new Response("", { status: 302, headers: { location: MINTED } });
++      }
++      if (u.startsWith("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd")) {
++        // The worker's datacenter IP is ASN-blocked (HTTP 450); the viewer's residential IP
++        // opens this same minted URL with HTTP 200, so the walk still hands it to the browser.
++        return new Response("worker asn block", { status: 450 });
++      }
++      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
++        return makeFramedTgRpcResponse({
++          result: {
++            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
++            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
++            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
++          },
++        });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; url: string; cookie: string; clearKeys: Record<string, string> }>;
++      playlistMint: { tried: boolean; ok: boolean; hops: number; lastStatus: number; tokenSecondsLeft: number | null };
++    };
++    // The app's JioTV tab plays the redirector-minted URL, not TG: it is tried first.
++    expect(body.candidates[0]!.label).toBe("JioTV Playlist · Redirector");
++    expect(body.candidates[0]!.url).toBe(MINTED);
++    expect(body.candidates[0]!.cookie).toContain("minted_892");
++    // GioTV keys backfill when the playlist key document is unreachable.
++    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe(
++      "2d56ef4bfcfb9fb0ae172f29b9cd6bfe",
++    );
++    // Jio catalogue second, TG servers only as fallback.
++    expect(body.candidates[1]!.label).toBe("JioTV Direct · Fresh Token");
++    expect(body.candidates.some((c) => c.label === "TG Live · Server 1")).toBe(true);
++    // Redacted diagnostics prove the worker reached the redirector (lifetimes only, no tokens).
++    expect(body.playlistMint.tried).toBe(true);
++    expect(body.playlistMint.ok).toBe(true);
++    expect(body.playlistMint.hops).toBeGreaterThanOrEqual(2);
++    expect(body.playlistMint.lastStatus).toBe(450);
++    expect(body.playlistMint.tokenSecondsLeft).toBeGreaterThan(0);
++  });
++
++  it("keeps TG first for tg: channels with the playlist-minted URL as the next fallback", async () => {
++    const PLAYLIST = [
++      "#EXTM3U",
++      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
++      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
++      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
++      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
++      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
++      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
++    ].join("\n");
++    const MINTED =
++      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd?__hdnea__=st=1794000000~exp=1999999999~acl=/bpk-tv/Sony_SAB_HD_MOB/WDVLive/*~hmac=minted_892";
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
++      if (u === "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892") {
++        return new Response("", { status: 302, headers: { location: MINTED } });
++      }
++      if (u.startsWith("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd")) {
++        return new Response("worker asn block", { status: 450 });
++      }
++      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
++        return makeFramedTgRpcResponse({
++          result: {
++            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
++            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
++            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
++          },
++        });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; url: string; cookie: string }>;
++      playlistMint: { tried: boolean; ok: boolean };
++    };
++    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
++    expect(body.candidates[1]!.label).toBe("JioTV Playlist · Redirector");
++    expect(body.candidates[1]!.url).toBe(MINTED);
++    expect(body.playlistMint.tried).toBe(true);
++    expect(body.playlistMint.ok).toBe(true);
++  });
++
++  it("falls back to catalogue candidates with diagnostics when the redirector refuses to mint", async () => {
++    const PLAYLIST = [
++      "#EXTM3U",
++      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
++      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
++      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
++      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
++      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
++      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
++    ].join("\n");
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
++      if (u === "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892") {
++        // The redirector 451s requests that carry an Origin header before ever redirecting.
++        return new Response("refused", { status: 451 });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; url: string; cookie: string }>;
++      playlistMint: { tried: boolean; ok: boolean; lastStatus: number };
++    };
++    // No minted URL: the Jio catalogue candidate with the playlist cookie still plays first.
++    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
++    expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
++    expect(body.candidates.some((c) => c.label === "JioTV Playlist · Redirector")).toBe(false);
++    expect(body.playlistMint.tried).toBe(true);
++    expect(body.playlistMint.ok).toBe(false);
++    expect(body.playlistMint.lastStatus).toBe(451);
 +  });
 +});
 +

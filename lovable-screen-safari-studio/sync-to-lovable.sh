@@ -19,4 +19,4 @@ cd "$TARGET_DIR"
 git status -s
 echo ""
 echo "Ready! Commit and push to deploy automatically to https://screen-safari-studio.lovable.app:"
-echo "  cd $TARGET_DIR && git add -A && git commit -m 'fix(live): JioTV tab connects to JioTV first, TG kept as fallback' && git push origin main"
+echo "  cd $TARGET_DIR && git add -A && git commit -m 'fix(live): JioTV tab plays playlist-minted URL first like the app' && git push origin main"
