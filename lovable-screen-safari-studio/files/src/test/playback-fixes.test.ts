@@ -641,6 +641,131 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
     expect(body.playlistMint.ok).toBe(false);
     expect(body.playlistMint.lastStatus).toBe(451);
   });
+
+  it("falls back to the TG public channel API when _serverFn has no source for the id", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) return new Response("", { status: 404 });
+      if (u.includes("livetgtv.lovable.app/api/public/channels/892")) {
+        return new Response(
+          JSON.stringify({
+            channel_id: "892",
+            name: "Sony SAB HD",
+            sources: [
+              {
+                url: "https://jiotvmblive.cdn.jio.com/bpk-tv//Sony_SAB_HD_MOB/WDVLive/index.mpd",
+                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_pub_srv1",
+                clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+              },
+              {
+                streamUrl: "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/Fallback/index.mpd",
+                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_pub_srv2",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string; clearKeys: Record<string, string> }>;
+    };
+    // The app's last native lookup rescues the channel: public sources become TG servers.
+    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
+    expect(body.candidates[0]!.cookie).toContain("tg_pub_srv1");
+    expect(body.candidates[0]!.url).toBe(
+      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd",
+    );
+    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe(
+      "2d56ef4bfcfb9fb0ae172f29b9cd6bfe",
+    );
+    expect(body.candidates[1]!.label).toBe("TG Live · Server 2");
+    expect(body.candidates[1]!.cookie).toContain("tg_pub_srv2");
+  });
+
+  it("never calls the public channel API while live RPC answers", async () => {
+    let publicCalls = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
+        return makeFramedTgRpcResponse({
+          result: {
+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
+            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
+            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+          },
+        });
+      }
+      if (u.includes("livetgtv.lovable.app/api/public/channels/")) {
+        publicCalls += 1;
+        return new Response(JSON.stringify({ channel_id: "892", sources: [] }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; cookie: string }>;
+    };
+    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
+    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
+    expect(publicCalls).toBe(0);
+  });
+
+  it("ignores a public API document that answers for another channel id", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) return new Response("", { status: 404 });
+      if (u.includes("livetgtv.lovable.app/api/public/channels/892")) {
+        return new Response(
+          JSON.stringify({
+            channel_id: "999",
+            sources: [
+              {
+                url: "https://jiotvmblive.cdn.jio.com/bpk-tv/Other_Channel/WDVLive/index.mpd",
+                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=wrong_channel",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; cookie: string }>;
+    };
+    // No TG source may be borrowed from another channel: GioTV catalogue carries the tune.
+    expect(body.candidates.length).toBeGreaterThan(0);
+    expect(body.candidates.every((c) => c.label.startsWith("JioTV"))).toBe(true);
+    expect(body.candidates.some((c) => c.cookie.includes("wrong_channel"))).toBe(false);
+  });
 });
 
 describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {

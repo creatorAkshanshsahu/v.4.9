@@ -1994,31 +1994,123 @@ function extractTgCandidatesFromConfig(decoded: unknown): DirectPlayCandidate[] 
   };
 
   const baseKeys = extractClearKeys(cfg, {});
-  const servers: Array<{ label: string; node: Record<string, unknown> }> = [];
-  if (Array.isArray(cfg["urls"]) && cfg["urls"].length > 0) {
-    servers.push({ label: "TG Live · Server 1", node: cfg });
-  }
-  if (Array.isArray(cfg["backups"])) {
-    (cfg["backups"] as unknown[]).forEach((b, idx) => {
-      if (b && typeof b === "object") {
-        servers.push({ label: `TG Live · Server ${servers.length + 1 || idx + 2}`, node: b as Record<string, unknown> });
+  // A server advertises its addresses as `urls[]` (`_serverFn`), as `sources[]`/`servers[]`/
+  // `streams[]` entries or bare URL strings (public channel API), or as one url-ish field.
+  const URL_KEYS = [
+    "playable",
+    "url",
+    "src",
+    "stream",
+    "streamUrl",
+    "manifestUrl",
+    "manifest",
+    "mpd",
+    "m3u8",
+    "hls",
+    "dash",
+    "link",
+  ];
+  const cleanUrl = (raw: unknown): string | null => {
+    if (typeof raw !== "string" || !/^https?:\/\//i.test(raw.trim())) return null;
+    return raw.trim().replace("bpk-tv//", "bpk-tv/");
+  };
+  const urlsOf = (node: Record<string, unknown>): string[] => {
+    const found: string[] = [];
+    if (Array.isArray(node["urls"])) {
+      for (const u of node["urls"] as unknown[]) {
+        const c = cleanUrl(u);
+        if (c && !found.includes(c)) found.push(c);
       }
-    });
+    }
+    for (const key of URL_KEYS) {
+      const c = cleanUrl(node[key]);
+      if (c && !found.includes(c)) found.push(c);
+    }
+    return found;
+  };
+  const servers: Array<{ node: Record<string, unknown>; urls: string[] }> = [];
+  const cfgUrls = urlsOf(cfg);
+  if (cfgUrls.length > 0) servers.push({ node: cfg, urls: cfgUrls });
+  for (const key of ["backups", "sources", "servers", "streams"]) {
+    if (!Array.isArray(cfg[key])) continue;
+    for (const item of cfg[key] as unknown[]) {
+      if (typeof item === "string") {
+        const c = cleanUrl(item);
+        if (c) servers.push({ node: cfg, urls: [c] });
+      } else if (item && typeof item === "object") {
+        const node = item as Record<string, unknown>;
+        const urls = urlsOf(node);
+        if (urls.length > 0) servers.push({ node, urls });
+      }
+    }
   }
 
   const out: DirectPlayCandidate[] = [];
-  for (const srv of servers) {
-    const urls = Array.isArray(srv.node["urls"]) ? (srv.node["urls"] as unknown[]) : [];
+  const seen = new Set<string>();
+  servers.forEach((srv, idx) => {
+    const label = `TG Live · Server ${idx + 1}`;
     const cookie = extractHdneaToken(String(srv.node["cookie"] ?? cfg["cookie"] ?? ""));
     const clearKeys = extractClearKeys(srv.node, baseKeys);
-    for (const u of urls) {
-      if (typeof u !== "string" || !/^https?:\/\//i.test(u.trim())) continue;
-      const cleanUrl = u.trim().replace("bpk-tv//", "bpk-tv/");
-      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(cleanUrl) ? "hls" : "dash";
-      out.push({ label: srv.label, url: cleanUrl, cookie, clearKeys, container });
+    for (const url of srv.urls) {
+      const dedupe = `${url}|${cookie}`;
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(url) ? "hls" : "dash";
+      out.push({ label, url, cookie, clearKeys, container });
     }
-  }
+  });
   return out;
+}
+
+/** The public channel endpoint answers per id; a document for another id is not this channel. */
+function tgResponseMatchesId(decoded: unknown, numericId: string): boolean {
+  if (!decoded || typeof decoded !== "object") return false;
+  const root = decoded as Record<string, unknown>;
+  const cfg = (root["result"] ?? root["data"] ?? root) as Record<string, unknown>;
+  if (!cfg || typeof cfg !== "object") return false;
+  const claimed = cfg["channelId"] ?? cfg["channel_id"] ?? cfg["id"];
+  if (claimed === undefined || claimed === null) return true;
+  return String(claimed) === numericId;
+}
+
+/**
+ * The app's last native TG lookup (`TgResolver.publicStreams`): `GET /api/public/channels/<id>`.
+ * Channels the `_serverFn` layer misses (removed function, changed response, id outside the RPC
+ * database) often still answer here with a plain playable source, which is why the TG TV tab left
+ * exactly those channels dark while the rest played.
+ */
+async function fetchTgPublicApiCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
+  const url = `${TG_LIVE_SITE}/api/public/channels/${numericId}${force ? `?_aktv=${Date.now()}` : ""}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6500);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": BROWSER_METADATA_UA,
+        Origin: TG_LIVE_SITE,
+        Referer: `${TG_LIVE_SITE}/watch/${numericId}`,
+        Accept: "application/x-tss-framed, application/x-ndjson, application/json",
+        "Cache-Control": "no-cache",
+      },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return [];
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > 4 * 1024 * 1024) return [];
+    const records = parseTgFramedOrJsonRecords(buf, res.headers.get("content-type") || "");
+    const refs = new Map<number, unknown>();
+    const out: DirectPlayCandidate[] = [];
+    for (const rec of records) {
+      const decoded = decodeTgSerovalNode(rec, refs);
+      if (!tgResponseMatchesId(decoded, numericId)) continue;
+      out.push(...extractTgCandidatesFromConfig(decoded));
+    }
+    return out;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function resolveTgRpcCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
@@ -2082,6 +2174,11 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
         break;
       }
     }
+  }
+  if (result.length === 0) {
+    // Last native lookup, like the app: the public channel API still answers ids the RPC
+    // layer misses. A datacenter block or unknown id just yields nothing — never an error.
+    result = await fetchTgPublicApiCandidates(numericId, force);
   }
 
   if (result.length > 0) {

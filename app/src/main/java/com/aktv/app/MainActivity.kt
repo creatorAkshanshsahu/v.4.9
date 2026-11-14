@@ -79,8 +79,15 @@ class MainActivity : AppCompatActivity() {
         val cmd: String = "",
         // A plain M3U playlist channel: [stream] is the address the playlist itself lists, so a tune needs
         // neither a provider lookup nor a portal handshake, and there is no guide to ask for.
+        // The playlist's own declarations for the entry travel along: its channel number (for the TG
+        // metadata fallback), player hints and DRM endpoint.
         val m3u: Boolean = false,
         val stream: String = "",
+        val tvg: String = "",
+        val ua: String = "",
+        val cookie: String = "",
+        val licenseType: String = "",
+        val licenseKey: String = "",
         // A StarShare / Xtream Codes live channel: resolved locally to MPEG-TS + HLS candidate streams.
         val xtream: Boolean = false
     ) {
@@ -1498,7 +1505,11 @@ class MainActivity : AppCompatActivity() {
                 // A playlist is not JSON: ask for anything and take the text as it comes.
                 val body = get(PLAYLIST_URL, accept = "*/*")
                 val channels = M3uPlaylist.parse(body).map { e ->
-                    Channel(id = e.id, name = e.name, category = e.group, logo = e.logo, m3u = true, stream = e.url)
+                    Channel(
+                        id = e.id, name = e.name, category = e.group, logo = e.logo,
+                        m3u = true, stream = e.url, tvg = e.tvgId, ua = e.userAgent,
+                        cookie = e.cookie, licenseType = e.licenseType, licenseKey = e.licenseKey
+                    )
                 }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
@@ -1538,37 +1549,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** A playlist channel needs no exchange: its address plays exactly as the file lists it. */
-    private fun playPlaylistChannel(ch: Channel) {
+    /**
+     * A playlist channel opens its own address first, armed with the file's declarations for it (user
+     * agent, cookie, DRM). When the entry names a TG channel number and the playlist address does not
+     * start, the normal provider cascade takes over: TG's live server configuration, then the JioTV
+     * playlist, which shares TG's numeric namespace.
+     */
+    private fun playPlaylistChannel(ch: Channel, fresh: Boolean = false) {
         ++playToken
         resolveJob?.cancel(true)
-        nativeProviders = emptyList(); nextNativeProvider = 0
-        currentNativeProvider = LiveProvider.JIOM3U
+        nativeProviders = TgPlaylist.fallbackProviders(ch.tvg); nextNativeProvider = 0; nativePassFresh = fresh
+        currentNativeProvider = LiveProvider.TG
         providerWindow.enter(SystemClock.elapsedRealtime())
         releasePlayer(); spinner.visibility = View.GONE
         infoNext.text = "TG TV · opening the playlist stream"
         infoNext.visibility = View.VISIBLE
         playMsg(null)
-        nativeSources = listOf(playlistStream(ch.stream)); serverIdx = 0
+        nativeSources = listOf(
+            TgPlaylist.toStream(
+                M3uChannel(
+                    id = ch.id, name = ch.name, group = ch.category, logo = ch.logo, url = ch.stream,
+                    tvgId = ch.tvg, userAgent = ch.ua, cookie = ch.cookie,
+                    licenseType = ch.licenseType, licenseKey = ch.licenseKey
+                )
+            )
+        )
+        serverIdx = 0
         startNative()
     }
 
-    /**
-     * A playlist address is a plain stream: no browser Origin or Referer, only the player's own user agent,
-     * the way an IPTV player opens a listed channel.
-     */
-    private fun playlistStream(url: String) = TgStream(
-        label = "TG TV",
-        url = url,
-        type = when {
-            url.contains(".mpd", true) -> "dash"
-            url.contains(".mp4", true) -> "mp4"
-            else -> "hls"
-        },
-        headers = mapOf("User-Agent" to UA),
-        omitReferrer = true,
-        omitOrigin = true
-    )
+    /** TG metadata is looked up by the playlist's own channel number, not the row's stable id. */
+    private fun metaId(ch: Channel) = if (ch.m3u && ch.tvg.isNotBlank()) ch.tvg else ch.id
 
     /** A portal client that starts from the address that last answered, when there is one. */
     private fun newPortal() = StalkerPortal(
@@ -1976,7 +1987,7 @@ class MainActivity : AppCompatActivity() {
                         .setTitle(title.name)
                         .setItems(labels) { _, idx ->
                             val ep = episodes[idx]
-                            val (urls, sourceLabels) = XtreamClient.seriesEpisodeSourcesFor(
+                            val (urls, sourceLabels) = XtreamClient.         val (urls, sourceLabels) = XtreamClient.seriesEpisodeSourcesFor(
                                 account = account,
                                 episodeId = ep.episodeId,
                                 containerExtension = ep.containerExtension,
@@ -2057,9 +2068,7 @@ class MainActivity : AppCompatActivity() {
                     android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             setOnFocusChangeListener { v, f ->
-                (v.background as? GradientDrawable)?.setStroke(px(if (f) 2 else 1).coerceAtLeast(1), if (f) Accent.SIGNAL else 0x33FFFFFF)
-            }
-        }
+                (v.background as? GradientDrawable)?.setStroke(px(if (f) 2 else 1).coerceAtLeast(1), if (f) Accen
 
         val serverInput = inputField("Server URL (e.g. http://livebox.pro:8080)", existing.server.ifBlank { XtreamClient.DEFAULT_SERVER })
         val userInput = inputField("Username", if (customOverride) existing.username else "")
@@ -3335,7 +3344,7 @@ class MainActivity : AppCompatActivity() {
         if (ch.portal) { resolvePortalChannel(ch); return }
         if (ch.xtream) { playXtreamChannel(ch); return }
         // A playlist channel carries its own address: hand it to the player, resolving nothing.
-        if (ch.m3u) { playPlaylistChannel(ch); return }
+        if (ch.m3u) { playPlaylistChannel(ch, fresh); return }
         val token = ++playToken
         resolveJob?.cancel(true)
         nativeSources = emptyList(); serverIdx = 0
@@ -3465,7 +3474,7 @@ class MainActivity : AppCompatActivity() {
         playMsg(null)
         resolveJob = playbackIo.submit {
             var failureReason = reason
-            val extra = try { LiveMetadataRequests.fetch(provider, ch.id, fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
+            val extra = try { LiveMetadataRequests.fetch(provider, metaId(ch), fresh = fresh, v2 = ch.v2) } catch (error: Exception) {
                 runOnUiThread { if (token == playToken) diagnostics.metadataFailed(PlaybackProblems.from(error), metadataFailureReason(provider, ch, error)) }
                 failureReason = metadataFailureReason(provider, ch, error)
                 emptyList()
@@ -3900,7 +3909,7 @@ class MainActivity : AppCompatActivity() {
         playMsg(null)
         resolveJob = playbackIo.submit {
             try {
-                val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = true, v2 = ch.v2)
+                val sources = LiveMetadataRequests.fetch(provider, metaId(ch), fresh = true, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
                     if (sources.isEmpty()) advanceNative("The provider supplied no refreshed stream")
@@ -3958,7 +3967,7 @@ class MainActivity : AppCompatActivity() {
                 Thread.currentThread().interrupt(); return@submit
             }
             try {
-                val sources = LiveMetadataRequests.fetch(provider, ch.id, fresh = true, v2 = ch.v2)
+                val sources = LiveMetadataRequests.fetch(provider, metaId(ch), fresh = true, v2 = ch.v2)
                 runOnUiThread {
                     if (token != playToken || !playbackActive || layer.visibility != View.VISIBLE) return@runOnUiThread
                     if (sources.isEmpty()) advanceNative("${providerName(provider)} returned no fresh source after the refused request")
@@ -4009,6 +4018,7 @@ class MainActivity : AppCompatActivity() {
                 // A playlist channel's token and key document both live behind the playlist lookup;
                 // a maxTV portal channel asks `create_link` for one fresh token.
                 if (ch.portal || ch.xtream || ch.m3u) {
+                    if (ch.m3u && ch.tvg.isNotBlank()) TgServers.invalidate(ch.tvg)
                     resolveAndStart(ch, fresh = true)
                 } else {
                     if (ch.jio) TgServers.invalidateJio() else TgServers.invalidate(ch.id, ch.v2)
@@ -4046,6 +4056,7 @@ class MainActivity : AppCompatActivity() {
         val ch = shown.getOrNull(current) ?: return
         recovery.reset(); beginNativeSession(ch)
         if (!ch.xtream && !ch.portal && !ch.m3u) TgServers.invalidate(ch.id, ch.v2)
+        if (ch.m3u && ch.tvg.isNotBlank()) TgServers.invalidate(ch.tvg)
         resolveAndStart(ch, fresh = true)
     }
 

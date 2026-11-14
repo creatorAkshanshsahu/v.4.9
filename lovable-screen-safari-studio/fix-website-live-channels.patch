@@ -1,16 +1,16 @@
-From 03cb6e131f9d719cb315373236d8eb3f6f3480df Mon Sep 17 00:00:00 2001
+From f29a6d46e7d686eadb058ecfbc8d3025551df147 Mon Sep 17 00:00:00 2001
 From: STREAMR Bot <noreply@github.com>
-Date: Sat, 14 Nov 2026 04:05:57 +0000
-Subject: [PATCH] fix(live): JioTV tab plays playlist-minted URL first like the
- app
+Date: Sat, 14 Nov 2026 04:20:58 +0000
+Subject: [PATCH] fix(live): TG public channel API fallback for ids the RPC
+ layer misses
 
 ---
  package.json                           |   1 +
- src/components/tv/LiveVideoSurface.tsx | 505 +++++++++++++++++++------
+ src/components/tv/LiveVideoSurface.tsx | 505 ++++++++++++++++++------
  src/lib/direct-token.ts                |  70 ++++
- src/lib/live-gateway.ts                | 380 ++++++++++++++++---
- src/test/playback-fixes.test.ts        | 321 +++++++++++++++-
- 5 files changed, 1110 insertions(+), 167 deletions(-)
+ src/lib/live-gateway.ts                | 511 ++++++++++++++++++++++---
+ src/test/playback-fixes.test.ts        | 446 ++++++++++++++++++++-
+ 5 files changed, 1349 insertions(+), 184 deletions(-)
  create mode 100644 src/lib/direct-token.ts
 
 diff --git a/package.json b/package.json
@@ -713,10 +713,153 @@ index 0000000..41320bd
 +  return /\.m3u8(?:[?#]|$)/i.test(url);
 +}
 diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
-index d01ec64..abd3ee2 100644
+index d01ec64..d981d0f 100644
 --- a/src/lib/live-gateway.ts
 +++ b/src/lib/live-gateway.ts
-@@ -2070,7 +2070,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
+@@ -1994,33 +1994,125 @@ function extractTgCandidatesFromConfig(decoded: unknown): DirectPlayCandidate[]
+   };
+ 
+   const baseKeys = extractClearKeys(cfg, {});
+-  const servers: Array<{ label: string; node: Record<string, unknown> }> = [];
+-  if (Array.isArray(cfg["urls"]) && cfg["urls"].length > 0) {
+-    servers.push({ label: "TG Live · Server 1", node: cfg });
+-  }
+-  if (Array.isArray(cfg["backups"])) {
+-    (cfg["backups"] as unknown[]).forEach((b, idx) => {
+-      if (b && typeof b === "object") {
+-        servers.push({ label: `TG Live · Server ${servers.length + 1 || idx + 2}`, node: b as Record<string, unknown> });
++  // A server advertises its addresses as `urls[]` (`_serverFn`), as `sources[]`/`servers[]`/
++  // `streams[]` entries or bare URL strings (public channel API), or as one url-ish field.
++  const URL_KEYS = [
++    "playable",
++    "url",
++    "src",
++    "stream",
++    "streamUrl",
++    "manifestUrl",
++    "manifest",
++    "mpd",
++    "m3u8",
++    "hls",
++    "dash",
++    "link",
++  ];
++  const cleanUrl = (raw: unknown): string | null => {
++    if (typeof raw !== "string" || !/^https?:\/\//i.test(raw.trim())) return null;
++    return raw.trim().replace("bpk-tv//", "bpk-tv/");
++  };
++  const urlsOf = (node: Record<string, unknown>): string[] => {
++    const found: string[] = [];
++    if (Array.isArray(node["urls"])) {
++      for (const u of node["urls"] as unknown[]) {
++        const c = cleanUrl(u);
++        if (c && !found.includes(c)) found.push(c);
+       }
+-    });
++    }
++    for (const key of URL_KEYS) {
++      const c = cleanUrl(node[key]);
++      if (c && !found.includes(c)) found.push(c);
++    }
++    return found;
++  };
++  const servers: Array<{ node: Record<string, unknown>; urls: string[] }> = [];
++  const cfgUrls = urlsOf(cfg);
++  if (cfgUrls.length > 0) servers.push({ node: cfg, urls: cfgUrls });
++  for (const key of ["backups", "sources", "servers", "streams"]) {
++    if (!Array.isArray(cfg[key])) continue;
++    for (const item of cfg[key] as unknown[]) {
++      if (typeof item === "string") {
++        const c = cleanUrl(item);
++        if (c) servers.push({ node: cfg, urls: [c] });
++      } else if (item && typeof item === "object") {
++        const node = item as Record<string, unknown>;
++        const urls = urlsOf(node);
++        if (urls.length > 0) servers.push({ node, urls });
++      }
++    }
+   }
+ 
+   const out: DirectPlayCandidate[] = [];
+-  for (const srv of servers) {
+-    const urls = Array.isArray(srv.node["urls"]) ? (srv.node["urls"] as unknown[]) : [];
++  const seen = new Set<string>();
++  servers.forEach((srv, idx) => {
++    const label = `TG Live · Server ${idx + 1}`;
+     const cookie = extractHdneaToken(String(srv.node["cookie"] ?? cfg["cookie"] ?? ""));
+     const clearKeys = extractClearKeys(srv.node, baseKeys);
+-    for (const u of urls) {
+-      if (typeof u !== "string" || !/^https?:\/\//i.test(u.trim())) continue;
+-      const cleanUrl = u.trim().replace("bpk-tv//", "bpk-tv/");
+-      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(cleanUrl) ? "hls" : "dash";
+-      out.push({ label: srv.label, url: cleanUrl, cookie, clearKeys, container });
++    for (const url of srv.urls) {
++      const dedupe = `${url}|${cookie}`;
++      if (seen.has(dedupe)) continue;
++      seen.add(dedupe);
++      const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(url) ? "hls" : "dash";
++      out.push({ label, url, cookie, clearKeys, container });
+     }
+-  }
++  });
+   return out;
+ }
+ 
++/** The public channel endpoint answers per id; a document for another id is not this channel. */
++function tgResponseMatchesId(decoded: unknown, numericId: string): boolean {
++  if (!decoded || typeof decoded !== "object") return false;
++  const root = decoded as Record<string, unknown>;
++  const cfg = (root["result"] ?? root["data"] ?? root) as Record<string, unknown>;
++  if (!cfg || typeof cfg !== "object") return false;
++  const claimed = cfg["channelId"] ?? cfg["channel_id"] ?? cfg["id"];
++  if (claimed === undefined || claimed === null) return true;
++  return String(claimed) === numericId;
++}
++
++/**
++ * The app's last native TG lookup (`TgResolver.publicStreams`): `GET /api/public/channels/<id>`.
++ * Channels the `_serverFn` layer misses (removed function, changed response, id outside the RPC
++ * database) often still answer here with a plain playable source, which is why the TG TV tab left
++ * exactly those channels dark while the rest played.
++ */
++async function fetchTgPublicApiCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
++  const url = `${TG_LIVE_SITE}/api/public/channels/${numericId}${force ? `?_aktv=${Date.now()}` : ""}`;
++  const ctrl = new AbortController();
++  const timer = setTimeout(() => ctrl.abort(), 6500);
++  try {
++    const res = await fetch(url, {
++      headers: {
++        "User-Agent": BROWSER_METADATA_UA,
++        Origin: TG_LIVE_SITE,
++        Referer: `${TG_LIVE_SITE}/watch/${numericId}`,
++        Accept: "application/x-tss-framed, application/x-ndjson, application/json",
++        "Cache-Control": "no-cache",
++      },
++      signal: ctrl.signal,
++    });
++    if (!res.ok) return [];
++    const buf = new Uint8Array(await res.arrayBuffer());
++    if (buf.byteLength === 0 || buf.byteLength > 4 * 1024 * 1024) return [];
++    const records = parseTgFramedOrJsonRecords(buf, res.headers.get("content-type") || "");
++    const refs = new Map<number, unknown>();
++    const out: DirectPlayCandidate[] = [];
++    for (const rec of records) {
++      const decoded = decodeTgSerovalNode(rec, refs);
++      if (!tgResponseMatchesId(decoded, numericId)) continue;
++      out.push(...extractTgCandidatesFromConfig(decoded));
++    }
++    return out;
++  } catch {
++    return [];
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
+ async function resolveTgRpcCandidates(numericId: string, force = false): Promise<DirectPlayCandidate[]> {
+   if (!/^\d{1,10}$/.test(numericId)) return [];
+   if (!force) {
+@@ -2070,7 +2162,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
  
    let result = await callFn(tgVerifiedFnId);
    if (result.length === 0) {
@@ -728,7 +871,19 @@ index d01ec64..abd3ee2 100644
      for (const fnId of discovered) {
        if (fnId === tgVerifiedFnId && !force) continue;
        result = await callFn(fnId);
-@@ -2147,12 +2150,131 @@ function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channe
+@@ -2080,6 +2175,11 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
+       }
+     }
+   }
++  if (result.length === 0) {
++    // Last native lookup, like the app: the public channel API still answers ids the RPC
++    // layer misses. A datacenter block or unknown id just yields nothing — never an error.
++    result = await fetchTgPublicApiCandidates(numericId, force);
++  }
+ 
+   if (result.length > 0) {
+     const expiries = result.map((c) => hdneaExpiryMs(c.cookie || c.url)).filter((x): x is number => x !== null);
+@@ -2147,12 +2247,131 @@ function findBestGioTvMatch(records: GioTvChannelRecord[], rawId: string, channe
    return best ? best.rec : null;
  }
  
@@ -861,7 +1016,7 @@ index d01ec64..abd3ee2 100644
    const gioRecords = await loadGioTvRawCached(force);
    const matchedGio = findBestGioTvMatch(gioRecords, rawId, channelName);
    const cleanPrefixId = rawId.replace(/^(?:jio|tg):/i, "").trim();
-@@ -2169,51 +2291,100 @@ async function resolveDirectPlayCandidates(
+@@ -2169,51 +2388,100 @@ async function resolveDirectPlayCandidates(
    };
  
    // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
@@ -981,7 +1136,7 @@ index d01ec64..abd3ee2 100644
            url: rawUrl,
            cookie: "",
            clearKeys: gioKeys,
-@@ -2223,6 +2394,37 @@ async function resolveDirectPlayCandidates(
+@@ -2223,6 +2491,37 @@ async function resolveDirectPlayCandidates(
      }
    }
  
@@ -1019,7 +1174,7 @@ index d01ec64..abd3ee2 100644
    // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
    if (candidates.length === 0) {
      const pool = rawId.startsWith("tg:")
-@@ -2242,10 +2444,38 @@ async function resolveDirectPlayCandidates(
+@@ -2242,10 +2541,38 @@ async function resolveDirectPlayCandidates(
      }
    }
  
@@ -1059,7 +1214,7 @@ index d01ec64..abd3ee2 100644
    };
  }
  
-@@ -3273,10 +3503,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3273,10 +3600,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        au.style.display = "none"; au.innerHTML = "";
      }
      function sUrl(ext, probe) { return "/api/live/stream/" + encodeURIComponent(ch.id) + ext + "?_t=" + Date.now() + (probe ? "&probe=1" : ""); }
@@ -1104,7 +1259,7 @@ index d01ec64..abd3ee2 100644
          hp.loadSource(url); hp.attachMedia(v);
          hp.on(Hls.Events.MANIFEST_PARSED, () => {
            const tr = hp.audioTracks || [];
-@@ -3361,44 +3623,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3361,44 +3720,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
        mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
      }
@@ -1194,7 +1349,7 @@ index d01ec64..abd3ee2 100644
                  try {
                    let xml = new TextDecoder().decode(resp.data);
                    if (!/<MPD[\s>]/i.test(xml)) return;
-@@ -3417,9 +3708,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3417,9 +3805,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
              }
              try {
                await sp.attach(v);
@@ -1208,7 +1363,7 @@ index d01ec64..abd3ee2 100644
              } catch {}
            }
          }
-@@ -3470,7 +3763,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3470,7 +3860,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
          if (v.videoWidth > 0 && v.videoHeight > 0) return;
          st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
          rt.style.display = "inline-block"; ov.classList.remove("hide");
@@ -1217,7 +1372,7 @@ index d01ec64..abd3ee2 100644
      }
      v.onpause = () => { pl.textContent = "Play"; };
      pl.onclick = () => v.paused ? v.play() : v.pause();
-@@ -3627,6 +3920,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+@@ -3627,6 +4017,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
        matchedId: resolved.matchedId,
        matchedName: resolved.matchedName,
        candidates: resolved.candidates,
@@ -1226,7 +1381,7 @@ index d01ec64..abd3ee2 100644
    }
  
 diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
-index aecc8a2..1f76194 100644
+index aecc8a2..5217de7 100644
 --- a/src/test/playback-fixes.test.ts
 +++ b/src/test/playback-fixes.test.ts
 @@ -1,4 +1,10 @@
@@ -1291,7 +1446,7 @@ index aecc8a2..1f76194 100644
    });
  
    it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
-@@ -359,5 +401,278 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+@@ -359,5 +401,403 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
      expect(body.channels.map((c) => c.id)).toContain("jio:165");
      expect(body.channels[0]!.container).toBe("dash");
    });
@@ -1534,6 +1689,131 @@ index aecc8a2..1f76194 100644
 +    expect(body.playlistMint.tried).toBe(true);
 +    expect(body.playlistMint.ok).toBe(false);
 +    expect(body.playlistMint.lastStatus).toBe(451);
++  });
++
++  it("falls back to the TG public channel API when _serverFn has no source for the id", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (u.includes("livetgtv.lovable.app/_serverFn/")) return new Response("", { status: 404 });
++      if (u.includes("livetgtv.lovable.app/api/public/channels/892")) {
++        return new Response(
++          JSON.stringify({
++            channel_id: "892",
++            name: "Sony SAB HD",
++            sources: [
++              {
++                url: "https://jiotvmblive.cdn.jio.com/bpk-tv//Sony_SAB_HD_MOB/WDVLive/index.mpd",
++                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_pub_srv1",
++                clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
++              },
++              {
++                streamUrl: "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/Fallback/index.mpd",
++                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_pub_srv2",
++              },
++            ],
++          }),
++          { status: 200, headers: { "content-type": "application/json" } },
++        );
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; url: string; cookie: string; clearKeys: Record<string, string> }>;
++    };
++    // The app's last native lookup rescues the channel: public sources become TG servers.
++    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
++    expect(body.candidates[0]!.cookie).toContain("tg_pub_srv1");
++    expect(body.candidates[0]!.url).toBe(
++      "https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd",
++    );
++    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe(
++      "2d56ef4bfcfb9fb0ae172f29b9cd6bfe",
++    );
++    expect(body.candidates[1]!.label).toBe("TG Live · Server 2");
++    expect(body.candidates[1]!.cookie).toContain("tg_pub_srv2");
++  });
++
++  it("never calls the public channel API while live RPC answers", async () => {
++    let publicCalls = 0;
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
++        return makeFramedTgRpcResponse({
++          result: {
++            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
++            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
++            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
++          },
++        });
++      }
++      if (u.includes("livetgtv.lovable.app/api/public/channels/")) {
++        publicCalls += 1;
++        return new Response(JSON.stringify({ channel_id: "892", sources: [] }), { status: 200 });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; cookie: string }>;
++    };
++    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
++    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
++    expect(publicCalls).toBe(0);
++  });
++
++  it("ignores a public API document that answers for another channel id", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (u.includes("livetgtv.lovable.app/_serverFn/")) return new Response("", { status: 404 });
++      if (u.includes("livetgtv.lovable.app/api/public/channels/892")) {
++        return new Response(
++          JSON.stringify({
++            channel_id: "999",
++            sources: [
++              {
++                url: "https://jiotvmblive.cdn.jio.com/bpk-tv/Other_Channel/WDVLive/index.mpd",
++                cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=wrong_channel",
++              },
++            ],
++          }),
++          { status: 200, headers: { "content-type": "application/json" } },
++        );
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; cookie: string }>;
++    };
++    // No TG source may be borrowed from another channel: GioTV catalogue carries the tune.
++    expect(body.candidates.length).toBeGreaterThan(0);
++    expect(body.candidates.every((c) => c.label.startsWith("JioTV"))).toBe(true);
++    expect(body.candidates.some((c) => c.cookie.includes("wrong_channel"))).toBe(false);
 +  });
 +});
 +

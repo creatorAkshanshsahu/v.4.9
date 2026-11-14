@@ -66,6 +66,62 @@ class M3uPlaylistTest {
     }
 
     @Test
+    fun `player declarations travel with their entry wherever they appear`() {
+        val armed = """
+            #EXTM3U
+            #KODIPROP:inputstream.adaptive.license_type=clearkey
+            #KODIPROP:inputstream.adaptive.license_key=https://livetgtv.lovable.app/api/key/143
+            #EXTVLCOPT:http-user-agent=TGPlayer
+            #EXTINF:-1 tvg-id="143" tvg-logo="https://cdn/x.png" group-title="Hindi",Colors HD
+            #EXTHTTP:{"cookie":"__hdnea__=st=1~exp=2~acl=/*~hmac=abc"}
+            https://cdn.tgtv.example/live/143/index.mpd
+        """.trimIndent()
+        val list = M3uPlaylist.parse(armed)
+        assertEquals(1, list.size)
+        val ch = list[0]
+        assertEquals("143", ch.tvgId)
+        assertEquals("clearkey", ch.licenseType)
+        assertEquals("https://livetgtv.lovable.app/api/key/143", ch.licenseKey)
+        assertEquals("TGPlayer", ch.userAgent)
+        assertEquals("__hdnea__=st=1~exp=2~acl=/*~hmac=abc", ch.cookie)
+        assertEquals("https://cdn.tgtv.example/live/143/index.mpd", ch.url)
+        assertEquals("the stable id is still the address hash", M3uPlaylist.id(ch.url), ch.id)
+    }
+
+    @Test
+    fun `declarations between the EXTINF and the address win over earlier ones`() {
+        val armed = """
+            #EXTM3U
+            #EXTVLCOPT:http-user-agent=Generic
+            #EXTINF:-1 tvg-id="143" group-title="Hindi",Colors HD
+            #EXTVLCOPT:http-user-agent=TGPlayer
+            https://cdn.tgtv.example/live/143/index.mpd
+        """.trimIndent()
+        assertEquals("TGPlayer", M3uPlaylist.parse(armed)[0].userAgent)
+    }
+
+    @Test
+    fun `a channel number from tvg-chno is kept when tvg-id is absent`() {
+        val armed = """
+            #EXTM3U
+            #EXTINF:-1 tvg-chno="872" group-title="Sports",Star Sports
+            https://cdn.tgtv.example/live/872/index.mpd
+        """.trimIndent()
+        assertEquals("872", M3uPlaylist.parse(armed)[0].tvgId)
+    }
+
+    @Test
+    fun `plain entries keep blank declarations and the old behaviour is unchanged`() {
+        val list = M3uPlaylist.parse(sample)
+        assertEquals(3, list.size)
+        assertEquals("", list[0].licenseType)
+        assertEquals("", list[0].licenseKey)
+        assertEquals("", list[0].userAgent)
+        assertEquals("", list[0].cookie)
+        assertEquals("143", list[0].tvgId)
+    }
+
+    @Test
     fun `the section puts the biggest groups first and caps each row`() {
         val items = List(300) { "A" } + List(5) { "B" } + List(2) { "C" } + List(1) { "D" }
         val rows = M3uPlaylist.sections(items) { it }
