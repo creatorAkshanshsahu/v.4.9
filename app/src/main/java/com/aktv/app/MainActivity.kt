@@ -2020,7 +2020,7 @@ class MainActivity : AppCompatActivity() {
                         .setTitle(title.name)
                         .setItems(labels) { _, idx ->
                             val ep = episodes[idx]
-                            val (urls, sourceLabels) = XtreamClient.         val (urls, sourceLabels) = XtreamClient.seriesEpisodeSourcesFor(
+                            val (urls, sourceLabels) = XtreamClient.seriesEpisodeSourcesFor(
                                 account = account,
                                 episodeId = ep.episodeId,
                                 containerExtension = ep.containerExtension,
@@ -2101,7 +2101,9 @@ class MainActivity : AppCompatActivity() {
                     android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             setOnFocusChangeListener { v, f ->
-                (v.background as? GradientDrawable)?.setStroke(px(if (f) 2 else 1).coerceAtLeast(1), if (f) Accen
+                (v.background as? GradientDrawable)?.setStroke(px(if (f) 2 else 1).coerceAtLeast(1), if (f) Accent.SIGNAL else 0x33FFFFFF)
+            }
+        }
 
         val serverInput = inputField("Server URL (e.g. http://livebox.pro:8080)", existing.server.ifBlank { XtreamClient.DEFAULT_SERVER })
         val userInput = inputField("Username", if (customOverride) existing.username else "")
