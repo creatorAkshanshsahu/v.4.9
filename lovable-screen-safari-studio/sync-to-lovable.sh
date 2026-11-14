@@ -19,4 +19,4 @@ cd "$TARGET_DIR"
 git status -s
 echo ""
 echo "Ready! Commit and push to deploy automatically to https://screen-safari-studio.lovable.app:"
-echo "  cd $TARGET_DIR && git add -A && git commit -m 'fix(live): apply app-identical hdnea token policy + learn redirect-minted manifest auth' && git push origin main"
+echo "  cd $TARGET_DIR && git add -A && git commit -m 'fix(live): apply app-identical hdnea token policy + playlist per-channel cookies' && git push origin main"

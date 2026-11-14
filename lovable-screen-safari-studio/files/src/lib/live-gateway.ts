@@ -2180,12 +2180,35 @@ async function resolveDirectPlayCandidates(
     const budget = new Promise<DirectPlayCandidate[]>((resolve) => setTimeout(() => resolve([]), 5000));
     return Promise.race([resolveTgRpcCandidates(v1NumericId, force), budget]);
   })();
-  const [tgCandidates, regularCookie, starCookie] = await Promise.all([
+  // The playlist's own per-channel `#EXTHTTP` cookie (`jtv39.m3u8`): BTS entries carry a token
+  // minted for exactly their channel path (`acl=/bpk-tv/<Ch>_BTS/WDVLive/*`), the rest a coarse
+  // site token — the same cookie the Android app plays with. Budget-raced so a blocked
+  // playlist fetch can never delay direct-config; the background load warms `jioCache`.
+  const playlistBudgeted = (async (): Promise<string> => {
+    if (!v1NumericId || !matchedGio) return "";
+    const budget = new Promise<string>((resolve) => setTimeout(() => resolve(""), 3000));
+    const lookup = (async () => {
+      try {
+        const pool = await loadJioCached(cfg, false);
+        // GioTV-fallback items share the ids but carry no playlist cookie; only a real entry
+        // whose stream points at the playlist host counts.
+        const hit = pool.find(
+          (c) => c.rawId === v1NumericId && c.cmd && /allinonereborn/i.test(c.cmd),
+        );
+        return extractHdneaToken(hit?.cookie) || "";
+      } catch {
+        return "";
+      }
+    })();
+    return Promise.race([lookup, budget]);
+  })();
+  const [tgCandidates, regularCookie, starCookie, playlistCookie] = await Promise.all([
     tgBudgeted,
     matchedGio && matchedGio.urls.some((u) => !isJioStarPlUrl(u)) ? fetchGioRegularCookie(force) : Promise.resolve(""),
     matchedGio && matchedGio.urls.some((u) => isJioStarPlUrl(u))
       ? fetchGioStarCookieForChannel(matchedGio.id, force)
       : Promise.resolve(""),
+    playlistBudgeted,
   ]);
 
   const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
@@ -2204,7 +2227,10 @@ async function resolveDirectPlayCandidates(
     for (const rawUrl of matchedGio.urls) {
       const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
       const embeddedToken = extractHdneaToken(rawUrl);
-      const freshCookie = isJioStarPlUrl(rawUrl) ? starCookie : regularCookie;
+      const coarseCookie = isJioStarPlUrl(rawUrl) ? starCookie : regularCookie;
+      // Channel-minted playlist cookie wins over the coarse site cookie when it is fresher;
+      // an expired playlist cookie loses automatically, so no extra candidate is needed.
+      const freshCookie = playlistCookie ? pickFreshestHdnea([playlistCookie, coarseCookie]) : coarseCookie;
       if (freshCookie) {
         pushCandidate({
           label: "GioTV Direct · Fresh Token",

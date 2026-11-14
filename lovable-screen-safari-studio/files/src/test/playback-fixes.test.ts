@@ -414,6 +414,38 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
     expect(body.candidates[0]!.cookie).toContain("regular_token_abc");
     expect(body.candidates[body.candidates.length - 1]!.cookie).toContain("expired_tg");
   });
+
+  it("prefers the jtv39.m3u8 per-channel cookie over the coarse site cookie for direct playback", async () => {
+    const PLAYLIST = [
+      "#EXTM3U",
+      '#EXTINF:-1 tvg-id="892" group-title="Entertainment" tvg-logo="https://cdn.example/sab.png",Sony SAB HD',
+      "#KODIPROP:inputstream.adaptive.license_type=clearkey",
+      "#KODIPROP:inputstream.adaptive.license_key=https://allinonereborn2.online/jtv-fetch/keyid.php?id=892",
+      "#EXTVLCOPT:http-user-agent=@allinone_reborn",
+      '#EXTHTTP:{"cookie":"__hdnea__=st=1794000000~exp=2099999999~acl=/*~hmac=playlist_channel_892"}',
+      "https://allinonereborn2.online/jiotv-m3u/jtv2.mpd?id=892",
+    ].join("\n");
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (/jiotv-m3u\/jtv\d{1,3}\.m3u8$/i.test(u)) return new Response(PLAYLIST, { status: 200 });
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=jio%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string }>;
+    };
+    // Same channel-minted cookie the Android app plays with wins over cookies.json.
+    expect(body.candidates[0]!.label).toBe("GioTV Direct · Fresh Token");
+    expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
+  });
 });
 
 describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {
