@@ -53,9 +53,24 @@ jobs:
       - name: Verify the working playback contracts during UI rebuild
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Test stream resolution and build both APKs
+        env:
+          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER || secrets.STARSHARE_URL }}
+          STARSHARE_USER: ${{ secrets.STARSHARE_USER || secrets.STARSHARE_USERNAME }}
+          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
-          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+          mkdir -p out
+          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then
+            echo "included" > out/starshare-prebake-status.txt
+          else
+            echo "not-set" > out/starshare-prebake-status.txt
+          fi
+          env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
+            gradle testArm32DebugUnitTest testArm64DebugUnitTest --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+          ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
+          ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
+          ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
+            gradle assembleArm32Release assembleArm64Release --no-daemon --stacktrace --console=plain 2>&1 | tee -a "$RUNNER_TEMP/aktv-gradle.log"
       - name: Report deterministic tests for both APK variants
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
@@ -78,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-native-ui-previews
+          name: STREAMR-native-ui-previews
           path: app/build/reports/ui-preview/*.webp
           if-no-files-found: error
           retention-days: 14
@@ -99,23 +114,65 @@ jobs:
       - name: Rename APKs
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
-          cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+          cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
+          cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
       - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
           python3 .github/scripts/verify-apk-archives.py out
       - uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-apks
+          name: STREAMR-apks
           path: |
             out/*.apk
             out/SHA256SUMS
             out/apk-validation.json
+            out/starshare-prebake-status.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-arm32-install
+          name: STREAMR-arm32-install
           path: |
-            out/AK-TV-arm32.apk
+            out/STREAMR-arm32.apk
             out/SHA256SUMS
             out/apk-validation.json
+
+  # Publishes the rolling "latest" release the app updates itself from. The app reads update.json,
+  # compares versionCode/checksum, downloads the matching ABI asset and installs it over itself.
+  publish:
+    needs: build
+    if: >
+      github.event_name == 'workflow_dispatch' && inputs.mode != 'inspect' ||
+      github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') ||
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: STREAMR-apks
+          path: out
+      - name: Build the in-app update manifest
+        run: |
+          python3 .github/scripts/publish-update.test.py
+          python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          if [ -f out/starshare-prebake-status.txt ] && [ "$(cat out/starshare-prebake-status.txt)" = "included" ]; then
+            printf "\nInbuilt StarShare login: **Included (Secret override)**\n" >> out/update-notes.md
+          else
+            printf "\nInbuilt StarShare login: **Included (Inbuilt default)**\n" >> out/update-notes.md
+          fi
+      - name: Publish the rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NEW_CODE=$(python3 -c 'import json; print(json.load(open("out/update.json"))["versionCode"])')
+          EXISTING_CODE=$(gh release download latest -p update.json -O - 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("versionCode", 0))' 2>/dev/null || echo 0)
+          if [ "${EXISTING_CODE:-0}" -gt "$NEW_CODE" ]; then
+            echo "Skipping latest release publish: existing versionCode ($EXISTING_CODE) > current ($NEW_CODE)"
+            exit 0
+          fi
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \
+            --title "STREAMR latest build" --notes-file out/update-notes.md

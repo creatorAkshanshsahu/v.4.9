@@ -26,7 +26,10 @@ internal data class FrostTitle(val id: Int, val type: String, val season: Int = 
 }
 
 internal enum class FrostProvider(val id: String, val label: String) {
-    FROST("tgflix", "TG FROST"), OUT("tgout", "TG OUT")
+    FROST("tgflix", "TG FROST"), OUT("tgout", "TG OUT"),
+    // theogpiratebot.online's own servers (Vidstuck, Vidfast, Vidlink…), read from each server's page and
+    // played by this same native player: the addresses are media, not embeds.
+    OG("og", "OG")
     // TG BOLT and TGVID are iframe players, not verified native source contracts.
 }
 
@@ -45,6 +48,9 @@ internal class FrostSource(
     val subtitles: List<FrostSubtitle>, val credentialOrigin: String = url, val scraperName: String = ""
 ) {
     val label get() = listOf(provider.label, scraperName, quality, language, format.name).filter { it.isNotBlank() }.joinToString(" · ")
+    /** The same address asked for as the other container, for a label this provider got wrong. */
+    fun withFormat(value: VodFormat) =
+        FrostSource(provider, identity, url, value, quality, language, hevc, headers, subtitles, credentialOrigin, scraperName)
     override fun toString() = "FrostSource(${provider.name}, ${format.name}, $quality)"
 }
 
@@ -89,14 +95,25 @@ internal object FrostProtocol {
     private fun text(value: Any?, max: Int = 60): String = (value as? String).orEmpty()
         .replace(Regex("[\\p{Cntrl}]+"), " ").trim().take(max)
 
-    private fun format(type: String, url: String): VodFormat? = when (type.lowercase(Locale.US)) {
-        "dash", "mpd", "application/dash+xml" -> VodFormat.DASH
-        "hls", "m3u8", "application/x-mpegurl", "application/vnd.apple.mpegurl" -> VodFormat.HLS
-        "mp4", "video/mp4" -> VodFormat.MP4
-        "", "video" -> when (URI(url).path.substringAfterLast('.', "").lowercase(Locale.US)) {
-            "mpd" -> VodFormat.DASH; "m3u8" -> VodFormat.HLS; "mp4" -> VodFormat.MP4; else -> null
+    /**
+     * The container the **address** names decides, because a label is a claim and the path is a fact.
+     *
+     * TG OUT has been seen labelling an HLS master `type: "mp4"`; trusting the label handed Media3 an
+     * MP4 extractor, which rejects a playlist on its first bytes and moves the viewer to the next
+     * provider in under a second - "the stream is found, then skipped instantly".
+     */
+    private fun format(type: String, url: String): VodFormat? {
+        when (runCatching { URI(url).path.orEmpty().substringAfterLast('.', "").lowercase(Locale.US) }.getOrDefault("")) {
+            "mpd" -> return VodFormat.DASH
+            "m3u8", "m3u" -> return VodFormat.HLS
+            "mp4", "m4v" -> return VodFormat.MP4
         }
-        else -> null
+        return when (type.lowercase(Locale.US)) {
+            "dash", "mpd", "application/dash+xml" -> VodFormat.DASH
+            "hls", "m3u8", "application/x-mpegurl", "application/vnd.apple.mpegurl" -> VodFormat.HLS
+            "mp4", "video/mp4", "video" -> VodFormat.MP4
+            else -> null
+        }
     }
 
     private fun headers(value: JSONObject?): Map<String, String> = buildMap {
@@ -191,8 +208,145 @@ internal class FrostResolver(
         .readTimeout(25, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).build()
 ) {
+    /**
+     * What the site's own player played for a title, remembered, so a second attempt is instant.
+     */
+    private data class Memo(val until: Long, val sources: List<FrostSource>)
+    private val memo = HashMap<String, Memo>()
+    private fun memoKey(t: FrostTitle, p: FrostProvider) = "${p.id}:${t.type}:${t.id}:${t.season}:${t.episode}"
+
+    /**
+     * The address of the page a viewer opens on the site, which is what the fallback runs when the app's own
+     * request for this title comes back empty or with nothing this player can use.
+     */
+    /**
+     * Runs the site's own player and takes the stream it plays. The site hops servers silently until one
+     * answers, which is exactly the work this app used to leave to the viewer; doing it here means the first
+     * attempt plays instead of the second one.
+     */
+    /**
+     * Every address where this family of sites plays a title, best first:
+     *
+     * - `tgvid.lovable.app/embed/movie/{id}` - the documented embed player, no profile screen in front of it;
+     * - `tgflix.lovable.app/play/{id}` - the route the viewer uses, behind "Who's Watching?";
+     * - `tgfrost.lovable.app/watch/movie/{id}` - the host the app's own API has always used.
+     *
+     * The second element is the Referer to send; the third is null when the page must be loaded directly so a
+     * profile screen can be passed and the title re-opened.
+     */
+    private fun sitePages(title: FrostTitle, provider: FrostProvider): List<Pair<String, String?>> {
+        val tv = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
+        val server = if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
+        return buildList<Pair<String, String?>> {
+            // The embed's own documentation (`tgvid.lovable.app/docs`) publishes these exact addresses,
+            // and says a Hindi-dub server is listed first when `lang` asks for one.
+            add("https://tgvid.lovable.app/embed/$tv${if (server.isEmpty()) "?lang=hi" else "$server&lang=hi"}" to "https://tgvid.lovable.app/")
+            add("https://tgvid.lovable.app/embed/$tv$server" to "https://tgvid.lovable.app/")
+            add("https://tgflix.lovable.app/play/${title.id}" to null)
+            add("${FrostProtocol.SITE}/watch/$tv$server" to "${FrostProtocol.SITE}/")
+            // The documented player route, addressed by id: the page that has served this player across builds.
+            add("https://tgvid.lovable.app/docs?id=${title.id}&type=${if (title.isSeries) "tv" else "movie"}" to "https://tgvid.lovable.app/docs")
+            if (title.isSeries) add("https://tgflix.lovable.app/play/${title.id}?season=${title.season}&episode=${title.episode}" to null)
+        }.distinctBy { it.first }
+    }
+
+    private fun sitePlayback(title: FrostTitle, provider: FrostProvider): FrostSource? {
+        // The page a viewer opens is read as text: the address it plays is in what it serves. No browser
+        // engine, and the page that named the address becomes the Referer the CDN expects.
+        for ((page, referer) in sitePages(title, provider)) {
+            val hits = try { PageCrawl.crawl(page, referer ?: page, 9_000) } catch (_: Exception) { emptyList() }
+            for (hit in hits) {
+                val source = FrostSource(
+                    provider = provider,
+                    identity = "site:${provider.id}:${title.id}:${hit.url.hashCode()}",
+                    url = hit.url,
+                    format = hit.format,
+                    quality = "",
+                    language = "",
+                    hevc = null,
+                    headers = mapOf(
+                        "User-Agent" to TgHttp.USER_AGENT,
+                        "Referer" to hit.page,
+                        "Origin" to (PageCrawl.origin(hit.page) ?: FrostProtocol.SITE)
+                    ),
+                    subtitles = emptyList(),
+                    credentialOrigin = hit.url,
+                    scraperName = "site player"
+                )
+                // The page named it; that is not the same as the address still answering.
+                if (FrostPreflight.check(source) != FrostPreflight.Verdict.DEAD) return source
+            }
+        }
+        return null
+    }
+
     /** No bundled sources, browser context, global cookie jar, or cached credentials. */
-    fun resolve(title: FrostTitle, provider: FrostProvider = FrostProvider.FROST): List<FrostSource> {
+    fun resolve(title: FrostTitle, provider: FrostProvider = FrostProvider.FROST, fresh: Boolean = false): List<FrostSource> {
+        // OG has no endpoint of this app's own: its sources are the media addresses each of that site's
+        // servers names on its page for the title, so they are resolved per server instead.
+        if (provider == FrostProvider.OG) return OgNative.resolve(title, fresh)
+        synchronized(memo) { memo[memoKey(title, provider)] }
+            ?.takeIf { !fresh && it.until > System.currentTimeMillis() }?.let { return it.sources }
+        val watchPage = sitePages(title, provider).firstOrNull { it.first.contains("/watch/") }?.first
+            ?: "${FrostProtocol.SITE}/"
+        val listed = try {
+            withSiteReferer(direct(title, provider), watchPage)
+        } catch (error: FrostResolveException) {
+            // The site itself would have moved on to its next server; so do we, before telling anyone it failed.
+            sitePlayback(title, provider)?.let { sniffed ->
+                remember(title, provider, listOf(sniffed)); return listOf(sniffed)
+            }
+            throw error
+        }
+        // A DASH manifest from these hosts is Widevine, which this player does not open: a source list made
+        // only of those is, for the viewer, an empty list.
+        val playable = FrostPreflight.keep(listed.filter { it.format != VodFormat.DASH })
+        if (playable.isNotEmpty()) { remember(title, provider, playable); return playable }
+        // The endpoint answered, but every address it named is gone. The site's own player still works, so
+        // take the stream it plays rather than showing a dead one.
+        sitePlayback(title, provider)?.let { sniffed ->
+            if (FrostPreflight.keep(listOf(sniffed)).isEmpty()) return@let
+            val result = listOf(sniffed) + playable
+            remember(title, provider, result)
+            return result
+        }
+        val usable = FrostPreflight.keep(listed)
+        if (usable.isEmpty() && listed.isNotEmpty()) throw FrostResolveException(kind = "stale")
+        return usable
+    }
+
+    /**
+     * A page that serves a manifest to a player refuses it to a request that names no page.
+     *
+     * These CDNs check the `Referer`, and the app's own endpoint answer carries none. A browser on
+     * `tgfrost.lovable.app` always sends one, so the app sends the page the viewer would be on. Only
+     * `referer`/`origin` are added: a source's own authorization, cookie and `x-` headers stay exactly as
+     * it published them, and none of them is ever logged.
+     */
+    private fun withSiteReferer(sources: List<FrostSource>, page: String): List<FrostSource> {
+        if (sources.isEmpty()) return sources
+        val origin = PageCrawl.origin(page) ?: FrostProtocol.SITE
+        return sources.flatMap { source ->
+            when {
+                source.headers.keys.any { it.equals("referer", true) } -> listOf(source)
+                VidLinkClient.isMovieBoxCdn(source.url) -> VidLinkClient.movieBoxVariants(source)
+                else -> listOf(
+                    FrostSource(
+                        source.provider, source.identity, source.url, source.format, source.quality, source.language,
+                        source.hevc, source.headers + mapOf("referer" to page, "origin" to origin), source.subtitles,
+                        source.credentialOrigin, source.scraperName
+                    )
+                )
+            }
+        }
+    }
+
+    private fun remember(title: FrostTitle, provider: FrostProvider, sources: List<FrostSource>) {
+        if (sources.isEmpty()) return
+        synchronized(memo) { memo[memoKey(title, provider)] = Memo(System.currentTimeMillis() + 30 * 60_000, sources) }
+    }
+
+    private fun direct(title: FrostTitle, provider: FrostProvider): List<FrostSource> {
         val request = Request.Builder().url(FrostProtocol.endpoint(base, provider, title))
             .header("User-Agent", TgHttp.USER_AGENT).header("Accept", "application/json")
             .header("Cache-Control", "no-store").build()
@@ -215,7 +369,17 @@ internal class FrostResolver(
         }
     }
 
-    fun cancel() { client.dispatcher.cancelAll() }
+    fun cancel() { client.dispatcher.cancelAll(); OgNative.cancel() }
+}
+
+/**
+ * TG's own lookup, reachable without a player screen: the sites whose player *is* TG underneath (the
+ * theogpiratebot pages offer TG FROST and TG OUT for the same title id) ask it here instead of paying for the
+ * same work twice. One resolver, so the five-minute memo is shared with the movie player.
+ */
+internal object TgNative {
+    private val resolver = FrostResolver()
+    fun resolve(title: FrostTitle, provider: FrostProvider): List<FrostSource> = resolver.resolve(title, provider)
 }
 
 /** Independent VOD transport. Never applies Jio token rewriting, live offsets or ClearKey overrides. */
@@ -228,11 +392,15 @@ internal object FrostHttp {
         return transport.newBuilder().addNetworkInterceptor { chain ->
             val request = chain.request()
             val sameOrigin = origin.scheme == request.url.scheme && origin.host == request.url.host && origin.port == request.url.port
+            val movieBoxRedirect = !sameOrigin && VidLinkClient.isMovieBoxCdn(request.url.toString())
             val builder = request.newBuilder().header("User-Agent", TgHttp.USER_AGENT)
             source.headers.forEach { (name, value) ->
                 builder.removeHeader(name)
                 val scoped = name.equals("authorization", true) || name.equals("cookie", true) || name.startsWith("x-", true)
-                if (!scoped || sameOrigin) builder.header(name, value)
+                val foreignRefererOnMovieBox = movieBoxRedirect &&
+                    (name.equals("referer", true) || name.equals("origin", true)) &&
+                    !value.contains("moviebox", true) && !value.contains("inmoviebox", true) && !value.contains("aoneroom", true)
+                if ((!scoped || sameOrigin) && !foreignRefererOnMovieBox) builder.header(name, value)
             }
             chain.proceed(builder.build())
         }.build()

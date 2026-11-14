@@ -31,29 +31,73 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
+import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 /** Native TG Frost VOD. No Gecko session, browser URL scraping or live-TV DRM/token policy. */
 class MoviePlayerActivity : Activity() {
     companion object {
-        fun open(context: Context, title: Movies.Title, season: Int, episode: Int, episodes: List<Movies.Episode>) {
-            context.startActivity(playbackIntent(context, title, season, episode, episodes))
+        fun open(
+            context: Context,
+            title: Movies.Title,
+            season: Int,
+            episode: Int,
+            episodes: List<Movies.Episode>,
+            provider: String? = null
+        ) {
+            context.startActivity(playbackIntent(context, title, season, episode, episodes, provider))
         }
-        internal fun playbackIntent(context: Context, title: Movies.Title, season: Int, episode: Int, episodes: List<Movies.Episode>) =
+        internal fun playbackIntent(
+            context: Context,
+            title: Movies.Title,
+            season: Int,
+            episode: Int,
+            episodes: List<Movies.Episode>,
+            provider: String? = null
+        ) =
             Intent(context, MoviePlayerActivity::class.java)
                 .putExtra("tmdb", title.tmdb).putExtra("type", if (title.isSeries) "tv" else "movie")
                 .putExtra("season", if (title.isSeries) season else 0).putExtra("episode", if (title.isSeries) episode else 0)
                 .putExtra("name", title.name)
                 .putExtra("episodes", (if (title.isSeries) episodes else emptyList()).take(2000)
                     .flatMap { listOf(it.season, it.episode) }.toIntArray())
+                .apply {
+                    val rt = VodDurationGuard.parseMinutes(title.runtime)
+                    if (rt > 0) putExtra("runtime", rt)
+                    if (!provider.isNullOrBlank()) putExtra("provider", provider)
+                }
+
+        fun openDirect(
+            context: Context,
+            streamId: Int,
+            name: String,
+            urls: ArrayList<String>,
+            labels: ArrayList<String>,
+            isSeries: Boolean = false,
+            season: Int = 0,
+            episode: Int = 0
+        ) {
+            val intent = Intent(context, MoviePlayerActivity::class.java)
+                .putExtra("tmdb", streamId.coerceAtLeast(1))
+                .putExtra("type", if (isSeries) "tv" else "movie")
+                .putExtra("season", if (isSeries) season.coerceAtLeast(1) else 0)
+                .putExtra("episode", if (isSeries) episode.coerceAtLeast(1) else 0)
+                .putExtra("name", name)
+                .putStringArrayListExtra("direct_urls", urls)
+                .putStringArrayListExtra("direct_labels", labels)
+            context.startActivity(intent)
+        }
     }
 
     private val ui = Handler(Looper.getMainLooper())
@@ -65,18 +109,26 @@ class MoviePlayerActivity : Activity() {
     private val lowMemory by lazy { (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true }
     private lateinit var title: FrostTitle
     private var titleName = ""
+    private var expectedRuntimeMinutes = 0
+    private var pinnedOg = false
+    private var directSources = emptyList<FrostSource>()
     private var initialized = false
     private var foreground = false
     private var generation = 0
     private var lookup: Future<*>? = null
     private var episodeLookup: Future<*>? = null
+    private var runtimeLookup: Future<*>? = null
     private var episodesLoading = false
     private var episodes = emptyList<Pair<Int, Int>>()
     private var provider = FrostProvider.FROST
     private var sources = emptyList<FrostSource>()
+    /** OG sources found for this title in this session: they stay in the menu even after another provider runs. */
+    private var ogCache = emptyList<FrostSource>()
     private var currentSource: FrostSource? = null
     private val recovery = VodRecovery()
     private val sourceRecovery = VodStartupPolicy()
+    /** One probe per provider per playback session; retries reuse the order it produced. */
+    private val probed = HashSet<FrostProvider>()
     private val softwareRetried = HashSet<FrostProvider>()
     private var compatible = false
     private var diagnostics = PlaybackDiagnostics()
@@ -102,33 +154,70 @@ class MoviePlayerActivity : Activity() {
     private lateinit var overlay: FrameLayout
     private lateinit var heading: TextView
     private lateinit var episodeLine: TextView
+    private lateinit var timeLine: TextView
+    /** One container correction per address: a mislabelled source is retried once, never in a loop. */
+    private val containerRetried = HashSet<String>()
+    private val subtitleRetried = HashSet<String>()
+    private val bogusClipSkipped = HashSet<String>()
+    private val startedIdentities = HashSet<String>()
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
     private lateinit var nextButton: TextView
     private lateinit var sourcesButton: TextView
     private lateinit var episodesButton: TextView
     private lateinit var autoNextButton: TextView
-    private val actionButtons = mutableListOf<TextView>()
+    private val actionButtons = mutableListOf<View>()
 
     override fun onCreate(saved: Bundle?) {
         super.onCreate(saved)
+        CrashLog.install(this)
         try {
             title = FrostTitle(intent.getIntExtra("tmdb", 0), intent.getStringExtra("type").orEmpty(),
                 saved?.getInt("season") ?: intent.getIntExtra("season", 0),
                 saved?.getInt("episode") ?: intent.getIntExtra("episode", 0))
-        } catch (_: IllegalArgumentException) {
+        } catch (bad: IllegalArgumentException) {
             Toast.makeText(this, "This movie or episode has no valid TMDB identity.", Toast.LENGTH_LONG).show()
-            finish(); return
+            CrashLog.record(this, bad); finish(); return
         }
         titleName = intent.getStringExtra("name").orEmpty().take(180)
-        provider = FrostProvider.values().firstOrNull { it.id == prefs.getString("vod_provider_${title.progressKey}", null) }
-            ?: FrostProvider.FROST
+        expectedRuntimeMinutes = (saved?.getInt("runtime") ?: intent.getIntExtra("runtime", 0)).coerceAtLeast(0)
+        val explicitProvider = saved?.getString("provider") ?: intent.getStringExtra("provider")
+        pinnedOg = saved?.getBoolean("pinned_og") ?: (explicitProvider == FrostProvider.OG.id)
+        provider = FrostProvider.values().firstOrNull {
+            it.id == (explicitProvider ?: prefs.getString("vod_provider_${title.progressKey}", null))
+        } ?: FrostProvider.FROST
         episodes = VodProgress.episodes(intent.getIntArrayExtra("episodes"))
+        val rawDirectUrls = intent.getStringArrayListExtra("direct_urls").orEmpty()
+        val rawDirectLabels = intent.getStringArrayListExtra("direct_labels").orEmpty()
+        directSources = rawDirectUrls.mapIndexedNotNull { idx, u ->
+            val trimmed = u.trim()
+            if (!trimmed.startsWith("http", true)) null
+            else FrostSource(
+                provider = FrostProvider.OG,
+                identity = "xtream_direct:$idx:${title.id}",
+                url = trimmed,
+                format = if (trimmed.substringBefore('?').endsWith(".m3u8", true)) VodFormat.HLS else VodFormat.MP4,
+                quality = "",
+                language = "",
+                hevc = false,
+                headers = mapOf("User-Agent" to XtreamClient.PLAYER_USER_AGENT),
+                subtitles = emptyList(),
+                credentialOrigin = XtreamClient.XTREAM_ORIGIN_TAG,
+                scraperName = rawDirectLabels.getOrNull(idx)?.takeIf { it.isNotBlank() } ?: "StarShare"
+            )
+        }
         desiredPlay = saved?.getBoolean("play", true) ?: true
         restoreProgress()
         saved?.getLong("position")?.let { lastPosition = it.coerceAtLeast(0) }
-        buildUi()
-        initialized = true
+        try {
+            buildUi()
+            initialized = true
+        } catch (error: Throwable) {
+            // A player that cannot build its own surface closes politely and leaves the reason behind.
+            CrashLog.record(this, error)
+            Toast.makeText(this, "The player could not open this title.", Toast.LENGTH_LONG).show()
+            finish()
+        }
     }
 
     private fun buildUi() {
@@ -149,27 +238,45 @@ class MoviePlayerActivity : Activity() {
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
-            setPlayedColor(Accent.CRIMSON_BRIGHT); setScrubberColor(Accent.GLOSS_HI)
-            setBufferedColor(0x887E4050.toInt()); setUnplayedColor(0x557E4050)
+            setPlayedColor(Accent.LIVE); setScrubberColor(Accent.BRAND)
+            setBufferedColor(0x4D98AFD5); setUnplayedColor(0x29FFFFFF)
         }
 
         overlay = FrameLayout(this)
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(0xF00A0512.toInt(), 0xB80C0710.toInt(), 0x38140712, Color.TRANSPARENT))
+                intArrayOf(0xF2020107.toInt(), 0xB3060410.toInt(), 0x33060410, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(245), Gravity.TOP))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(0xF50A0512.toInt(), 0xC50C0710.toInt(), 0x32140712, Color.TRANSPARENT))
+                intArrayOf(0xF7020107.toInt(), 0xC7060410.toInt(), 0x33060410, Color.TRANSPARENT))
         }, FrameLayout.LayoutParams(-1, px(380), Gravity.BOTTOM))
 
-        val brand = ImageView(this).apply {
-            setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "AK TV"; alpha = 0.94f
+        // Top bar: a glass back circle, the title, and the S/E line underneath — the site's watch header.
+        val topBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         }
-        overlay.addView(brand, FrameLayout.LayoutParams(px(74), px(60), Gravity.TOP or Gravity.START).apply {
-            leftMargin = px(42); topMargin = px(30)
-        })
+        // An ImageView with centre scaling: the arrow is drawn in the middle of the glass circle. As a
+        // compound drawable on an empty TextView it was pinned to the start edge and sat against the rim.
+        val back = ImageView(this).apply {
+            background = androidx.core.content.res.ResourcesCompat.getDrawable(resources, R.drawable.circle_glass, theme)
+            setImageResource(R.drawable.ic_back)
+            scaleType = ImageView.ScaleType.CENTER
+            contentDescription = "Back"; isFocusable = true; isClickable = true
+            setOnClickListener { finish() }
+            setOnFocusChangeListener { v, focused ->
+                v.animate().scaleX(if (focused) 1.1f else 1f).scaleY(if (focused) 1.1f else 1f)
+                    .setDuration(150).start()
+                if (focused) { setOverlayVisible(true); if (!failed) view.showController() }
+            }
+        }
+        actionButtons += back
+        topBar.addView(back, LinearLayout.LayoutParams(px(46), px(46)))
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(px(14), 0, 0, 0)
+        }
+        topBar.addView(titles, LinearLayout.LayoutParams(-2, -2))
         val clock = android.widget.TextClock(this).apply {
             format12Hour = "h:mm"; format24Hour = "HH:mm"
             textSize = 16f; setTextColor(Accent.TEXT)
@@ -179,32 +286,41 @@ class MoviePlayerActivity : Activity() {
             rightMargin = px(40); topMargin = px(34)
         })
 
+        heading = TextView(this).apply {
+            textSize = 24f; setTextColor(Accent.TEXT); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = px(680)
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_bold)
+            includeFontPadding = false
+            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
+        }
+        titles.addView(heading, LinearLayout.LayoutParams(-2, -2))
+        episodeLine = TextView(this).apply {
+            textSize = 13f; letterSpacing = 0.02f; setTextColor(Accent.DIM); maxLines = 1
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.manrope)
+            setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
+        }
+        titles.addView(episodeLine, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(3) })
+        overlay.addView(topBar, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+            leftMargin = px(42); topMargin = px(28)
+        })
+
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 0, 0, px(8))
         }
-        info.addView(TextView(this).apply {
-            text = if (title.isSeries) "AK SERIES  /  NOW PLAYING" else "AK CINEMA  /  NOW PLAYING"
-            textSize = 10f; letterSpacing = 0.17f
-            setTextColor(if (title.isSeries) Accent.ION else Accent.SIGNAL)
-            setTypeface(null, Typeface.BOLD)
-        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(9) })
-        heading = TextView(this).apply {
-            textSize = 34f; setTextColor(Accent.TEXT); setTypeface(null, Typeface.BOLD); maxLines = 2
-            setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
-        }
-        info.addView(heading, LinearLayout.LayoutParams(-1, -2))
-        episodeLine = TextView(this).apply {
-            textSize = 13f; letterSpacing = 0.02f; setTextColor(0xFFD6DCE5.toInt()); maxLines = 1
+        // Elapsed over duration, the one piece of state the site keeps at the bottom of the watch screen.
+        timeLine = TextView(this).apply {
+            textSize = 14f; letterSpacing = 0.04f; setTextColor(Accent.TEXT); maxLines = 1
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
             setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
         }
-        info.addView(episodeLine, LinearLayout.LayoutParams(-1, -2).apply { topMargin = px(7) })
+        info.addView(timeLine, LinearLayout.LayoutParams(-1, -2))
         status = TextView(this).apply {
             textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
             background = GradientDrawable().apply {
-                cornerRadius = px(14).toFloat(); setColor(0xD005070C.toInt())
-                setStroke(px(1), 0x50F8F9FC)
+                cornerRadius = px(14).toFloat(); setColor(0xCC020107.toInt())
+                setStroke(px(1), 0x5500ECF7)
             }
         }
         info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
@@ -214,16 +330,20 @@ class MoviePlayerActivity : Activity() {
         })
 
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(button("Exit") { finish() })
         sourcesButton = button("Change source") { showSources() }.also(row::addView)
-        row.addView(button("Audio & subtitles") { showTracks() })
+        if (directSources.isEmpty()) {
+            row.addView(button("OG Server") { desiredPlay = true; pinnedOg = true; begin(FrostProvider.OG, fresh = true) })
+            row.addView(button("TG Server") { desiredPlay = true; pinnedOg = false; begin(FrostProvider.FROST, fresh = true) })
+        }
+        row.addView(button("Audio") { showQuickAudioMenu() })
+        row.addView(button("Audio & Subtitles") { showTracks() })
         episodesButton = button("Episodes") { showEpisodes() }.also(row::addView)
         nextButton = button("Next episode") { nextEpisode() }.also(row::addView)
         autoNextButton = button("") {
             prefs.edit().putBoolean("vod_auto_next", !prefs.getBoolean("vod_auto_next", true)).apply()
             updateTitle()
         }.also(row::addView)
-        row.addView(button("Retry") { desiredPlay = true; begin(provider) })
+        row.addView(button("Retry") { desiredPlay = true; begin(provider, fresh = true) })
         row.addView(button("Playback details") { showDetails() })
         val scroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false; clipToPadding = false; addView(row)
@@ -233,7 +353,7 @@ class MoviePlayerActivity : Activity() {
         })
         root.addView(overlay, FrameLayout.LayoutParams(-1, -1))
         spinner = ProgressBar(this).apply {
-            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.ION else Accent.SIGNAL)
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(if (title.isSeries) Accent.BRAND_LIGHT else Accent.BRAND)
         }
         root.addView(spinner, FrameLayout.LayoutParams(px(48), px(48), Gravity.CENTER))
         setContentView(root)
@@ -268,19 +388,22 @@ class MoviePlayerActivity : Activity() {
     private fun px(value: Int) = (value * dp).toInt()
     private fun button(label: String, click: () -> Unit): TextView {
         val action = TextView(this).apply {
-            text = label; textSize = 12f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
-            isFocusable = true; isClickable = true; setPadding(px(18), px(13), px(18), px(13))
-            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(10) }
+            text = label; textSize = 14f; setTextColor(Accent.TEXT); gravity = Gravity.CENTER
+            isFocusable = true; isClickable = true; setPadding(px(22), px(12), px(22), px(12))
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(12) }
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
             fun style(focused: Boolean) {
-                // Focused: lacquered crimson gradient. Resting: translucent wine with a thin rim.
-                background = if (focused) GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                    intArrayOf(Accent.CRIMSON_BRIGHT, Accent.CRIMSON, Accent.CRIMSON_DEEP)).apply {
-                    cornerRadius = px(16).toFloat()
-                    setStroke(px(2), 0xAAFFEBEE.toInt())
-                } else GradientDrawable().apply {
-                    cornerRadius = px(16).toFloat()
-                    setColor(0xE00C0710.toInt())
-                    setStroke(px(1), 0x59FF3448)
+                // Cyber control row (watch.$id.tsx): rounded-xl cyber glass, electric cyan ring on focus;
+                // "Next episode" uses primary cyber magenta (`bg-primary`).
+                val primary = label.startsWith("Next")
+                val hairline = px(1).coerceAtLeast(1)
+                background = GradientDrawable().apply {
+                    cornerRadius = px(12).toFloat()
+                    setColor(if (primary) Accent.BRAND else if (focused) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
+                    setStroke(
+                        if (focused) px(2) else if (primary) 0 else hairline,
+                        if (focused) Accent.SIGNAL else 0x4000ECF7
+                    )
                 }
                 setTextColor(Accent.TEXT)
                 elevation = if (focused) px(9).toFloat() else 0f
@@ -300,15 +423,34 @@ class MoviePlayerActivity : Activity() {
         return action
     }
 
+    private fun watchTime(positionMs: Long, durationMs: Long): String {
+        fun clock(ms: Long): String {
+            val total = (ms.coerceAtLeast(0) / 1000)
+            val h = total / 3600; val m = (total % 3600) / 60; val sec = total % 60
+            return if (h > 0) String.format("%d:%02d:%02d", h, m, sec) else String.format("%02d:%02d", m, sec)
+        }
+        return "${clock(positionMs)}  /  ${clock(durationMs)}"
+    }
+
+    private fun updateWatchTime() {
+        if (!::timeLine.isInitialized) return
+        val owner = player
+        val duration = owner?.duration?.takeIf { it > 0 } ?: 0L
+        val position = owner?.currentPosition?.coerceAtLeast(0) ?: 0L
+        timeLine.text = if (duration > 0) watchTime(position, duration) else watchTime(position, lastDuration)
+        timeLine.visibility = if (failed || title.isSeries) View.GONE else View.VISIBLE
+    }
+
     private fun updateTitle() {
         heading.text = titleName.ifBlank { "TMDB ${title.id}" }
         episodeLine.text = if (title.isSeries) "SEASON ${title.season}  ·  EPISODE ${title.episode}" else ""
         episodeLine.visibility = if (title.isSeries) View.VISIBLE else View.GONE
-        episodesButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
+        val showEpisodeControls = title.isSeries && directSources.isEmpty()
+        episodesButton.visibility = if (showEpisodeControls) View.VISIBLE else View.GONE
         episodesButton.isEnabled = true
-        nextButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
+        nextButton.visibility = if (showEpisodeControls) View.VISIBLE else View.GONE
         nextButton.isEnabled = VodProgress.next(title, episodes) != null
-        autoNextButton.visibility = if (title.isSeries) View.VISIBLE else View.GONE
+        autoNextButton.visibility = if (showEpisodeControls) View.VISIBLE else View.GONE
         autoNextButton.text = "Auto next: ${if (prefs.getBoolean("vod_auto_next", true)) "On" else "Off"}"
     }
 
@@ -323,16 +465,58 @@ class MoviePlayerActivity : Activity() {
         super.onStart()
         if (!initialized || isFinishing) return
         foreground = true
-        begin(provider)
-        loadEpisodes()
+        if (directSources.isEmpty()) {
+            loadMovieRuntime()
+            begin(provider)
+            loadEpisodes()
+        } else {
+            begin(provider)
+        }
         ui.post(tick)
     }
 
-    private fun begin(nextProvider: FrostProvider, selected: FrostSource? = null) {
+    private fun loadMovieRuntime() {
+        if (directSources.isNotEmpty() || title.isSeries || expectedRuntimeMinutes > 0 || runtimeLookup != null) return
+        val id = title.id
+        runtimeLookup = io.submit {
+            val mins = try {
+                VodDurationGuard.parseMinutes(Movies.details("movie", id).first?.runtime)
+            } catch (_: Exception) { 0 }
+            ui.post {
+                runtimeLookup = null
+                if (!foreground || isDestroyed || title.id != id || mins <= 0) return@post
+                expectedRuntimeMinutes = mins
+            }
+        }
+    }
+
+    /**
+     * When the viewer explicitly opened OG (`pinnedOg == true`) and OG resolved at least one
+     * native stream (`ogCache.isNotEmpty()`), keep playback on OG rather than auto-switching to
+     * TG FROST / TG OUT (the viewer can always switch manually via TG Server or Change source).
+     */
+    private fun nextAlternativeProvider(): FrostProvider? {
+        if (directSources.isNotEmpty()) return null
+        if (pinnedOg && ogCache.isNotEmpty()) return null
+        return recovery.alternative()
+    }
+
+    private fun hasUntriedSources(): Boolean =
+        !recovery.exhausted() && sources.any { it.identity !in startedIdentities }
+
+    private fun begin(nextProvider: FrostProvider, selected: FrostSource? = null, fresh: Boolean = false) {
         captureProgress()
-        recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); diagnostics = PlaybackDiagnostics()
+        recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); probed.clear(); diagnostics = PlaybackDiagnostics()
         failed = false; lastFailure = ""; compatible = false; startupAt = SystemClock.elapsedRealtime()
-        if (selected == null) resolve(nextProvider)
+        containerRetried.clear(); subtitleRetried.clear(); bogusClipSkipped.clear(); startedIdentities.clear()
+        if (directSources.isNotEmpty()) {
+            generation++; lookup?.cancel(true); resolver.cancel()
+            provider = FrostProvider.OG; recovery.visit(provider)
+            sources = if (selected != null) listOf(selected) + directSources.filter { it.identity != selected.identity } else directSources
+            nextSource()
+            return
+        }
+        if (selected == null) resolve(nextProvider, fresh = fresh)
         else {
             generation++; lookup?.cancel(true); resolver.cancel()
             provider = nextProvider; recovery.visit(provider)
@@ -341,7 +525,12 @@ class MoviePlayerActivity : Activity() {
         }
     }
 
-    private fun resolve(nextProvider: FrostProvider, preferred: String? = null, avoidIdentity: String? = null) {
+    private fun resolve(
+        nextProvider: FrostProvider,
+        preferred: String? = null,
+        avoidIdentity: String? = null,
+        fresh: Boolean = false
+    ) {
         captureProgress(); releasePlayer(); dialog?.dismiss()
         provider = nextProvider; recovery.visit(provider); currentSource = null
         val request = title
@@ -350,22 +539,47 @@ class MoviePlayerActivity : Activity() {
         diagnostics.resolving(if (provider == FrostProvider.FROST) PlaybackDiagnostics.Provider.FROST else PlaybackDiagnostics.Provider.OUT)
         message("Resolving ${provider.label} · native movie sources…", true)
         lookup = io.submit {
-            val result = try { Result.success(resolver.resolve(request, nextProvider)) } catch (error: Exception) { Result.failure(error) }
+            val result = try { Result.success(resolver.resolve(request, nextProvider, fresh)) } catch (error: Exception) { Result.failure(error) }
             ui.post {
                 if (!foreground || token != generation || request != title) return@post
                 result.fold(onSuccess = { list ->
+                    if (nextProvider == FrostProvider.OG && list.isNotEmpty()) ogCache = list
                     val remembered = prefs.getString("vod_source_${request.progressKey}", null)
                     val favored = preferred ?: remembered?.takeUnless { it == avoidIdentity }
-                    sources = VodSourceOrder.prioritize(list, favored, avoidIdentity)
-                    nextSource()
+                    val ordered = VodSourceOrder.prioritize(list, favored, avoidIdentity)
+                    val first = ordered.firstOrNull()
+                    val rememberedFirst = preferred == null && first != null && first.identity == favored
+                    if (rememberedFirst || !probed.add(nextProvider)) {
+                        // Either the source that played last time is first again, or this provider was
+                        // already probed in this session: start immediately.
+                        sources = ordered
+                        startupAt = SystemClock.elapsedRealtime()
+                        message("Starting ${first?.label.orEmpty()}…", true)
+                        nextSource()
+                        return@fold
+                    }
+                    // The website moves past a dead source inside one page load. A native player would
+                    // spend a full startup cycle on it, which is what makes the app need a second try.
+                    message("Checking native sources · ${minOf(ordered.size, VodPreflight.MAX_CANDIDATES)} of ${ordered.size}…", true)
+                    val minProbeSec = VodDurationGuard.minProbeSeconds(request.isSeries, expectedRuntimeMinutes)
+                    io.submit {
+                        val reachable = try { VodPreflight.verify(ordered, minDurationSeconds = minProbeSec) } catch (_: Exception) { emptySet() }
+                        ui.post {
+                            if (!foreground || token != generation || request != title) return@post
+                            sources = VodPreflight.rank(ordered, reachable)
+                            startupAt = SystemClock.elapsedRealtime()
+                            nextSource()
+                        }
+                    }
                 }, onFailure = { error ->
                     diagnostics.metadataFailed(PlaybackProblems.from(error))
                     val problem = error as? FrostResolveException
-                    lastFailure = problem?.message ?: "Movie source lookup failed."
+                    lastFailure = (problem?.message ?: "Movie source lookup failed.") +
+                        if (nextProvider == FrostProvider.OG) "\nOG servers: ${OgNative.lastOutcome()}" else ""
                     when {
                         problem?.status == 429 -> fail(lastFailure)
-                        sourceRecovery.retryMetadata(nextProvider, problem?.status, problem?.kind) -> resolve(nextProvider)
-                        else -> recovery.alternative()?.let { resolve(it) } ?: fail(lastFailure)
+                        sourceRecovery.retryMetadata(nextProvider, problem?.status, problem?.kind) -> resolve(nextProvider, fresh = true)
+                        else -> nextAlternativeProvider()?.let { resolve(it) } ?: fail(lastFailure)
                     }
                 })
             }
@@ -384,15 +598,16 @@ class MoviePlayerActivity : Activity() {
         currentSource?.let(::forgetFailedSource)
         captureProgress(); releasePlayer(); dialog?.dismiss()
         if (startupAt == 0L) startupAt = SystemClock.elapsedRealtime()
-        if (SystemClock.elapsedRealtime() - startupAt > 120_000) { fail("No picture within two minutes. Try another source or retry."); return }
+        if (SystemClock.elapsedRealtime() - startupAt > 60_000) { fail("No picture within 60 seconds. Try another source or retry."); return }
         val next = sources.firstOrNull { recovery.take(it) }
         if (next != null) startSource(next, softwareRetried.contains(next.provider))
-        else recovery.alternative()?.let { resolve(it) } ?: fail(lastFailure.ifBlank { "No playable native movie source. Try again later or select another provider." })
+        else nextAlternativeProvider()?.let { resolve(it) } ?: fail(lastFailure.ifBlank { "No playable native movie source. Try again later or select another provider." })
     }
 
     private fun startSource(source: FrostSource, software: Boolean) {
         if (!foreground) return
         captureProgress(); releasePlayer(); dialog?.dismiss()
+        startedIdentities.add(source.identity)
         currentSource = source; compatible = software; frame = false; frameAt = 0L; framePosition = 0L; sourceConfirmed = false; failed = false
         val attempt = diagnostics.begin(if (source.provider == FrostProvider.FROST) PlaybackDiagnostics.Provider.FROST else PlaybackDiagnostics.Provider.OUT,
             when (source.format) { VodFormat.DASH -> PlaybackDiagnostics.Media.DASH; VodFormat.HLS -> PlaybackDiagnostics.Media.HLS; VodFormat.MP4 -> PlaybackDiagnostics.Media.FILE },
@@ -402,7 +617,9 @@ class MoviePlayerActivity : Activity() {
         attemptAt = SystemClock.elapsedRealtime(); bufferingAt = 0
         try {
             val profile = NativePlaybackPolicy.profile(television, lowMemory, software, if (television) 720 else 1080)
-            val selector = FrostMedia.tracks(this, profile, source.language.contains("Hindi", true))
+            val preferHindi = getSharedPreferences("aktv", MODE_PRIVATE).getString("preferred_audio_lang", "hi") != "en" ||
+                source.language.contains("Hindi", true)
+            val selector = FrostMedia.tracks(this, profile, preferHindi)
             val owner = ExoPlayer.Builder(this, NativePlaybackPolicy.renderers(this, profile))
                 .setTrackSelector(selector).setLoadControl(FrostMedia.buffers(profile))
                 .setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build()
@@ -411,7 +628,12 @@ class MoviePlayerActivity : Activity() {
             owner.setHandleAudioBecomingNoisy(true)
             owner.addAnalyticsListener(NativePlaybackDiagnostics(attempt))
             owner.addListener(listener(owner, attempt))
-            owner.setMediaSource(FrostMedia.create(source), lastPosition)
+            val mediaSource = if (source.credentialOrigin == XtreamClient.XTREAM_ORIGIN_TAG) {
+                XtreamClient.vodMediaSource(source.url, source.identity)
+            } else {
+                FrostMedia.create(source)
+            }
+            owner.setMediaSource(mediaSource, lastPosition)
             owner.playWhenReady = desiredPlay
             if (!desiredPlay) { attemptAt = 0; startupAt = 0; bufferingAt = 0 }
             prepareOnSurface(owner, attempt)
@@ -445,14 +667,30 @@ class MoviePlayerActivity : Activity() {
         if (holder.surface.isValid) callback.surfaceCreated(holder)
     }
 
+    private fun skipIfBogusShortClip(owner: ExoPlayer): Boolean {
+        val source = currentSource ?: return false
+        val durationMs = owner.duration
+        if (!VodDurationGuard.isBogusShortClip(title.isSeries, expectedRuntimeMinutes, durationMs, hasUntriedSources())) {
+            return false
+        }
+        if (!bogusClipSkipped.add(source.identity)) return false
+        forgetFailedSource(source)
+        lastPosition = 0L
+        lastFailure = "Skipped mismatched short clip (${durationMs / 1000}s) · loading full stream…"
+        ui.post { if (player === owner && foreground && !failed) nextSource() }
+        return true
+    }
+
     private fun listener(owner: ExoPlayer, attempt: PlaybackDiagnostics.Attempt) = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             if (player !== owner) return
             attempt.state(when (state) { Player.STATE_BUFFERING -> "BUFFERING"; Player.STATE_READY -> "READY"; Player.STATE_ENDED -> "ENDED"; else -> "IDLE" })
             if (state == Player.STATE_BUFFERING) { if (bufferingAt == 0L) bufferingAt = SystemClock.elapsedRealtime() } else bufferingAt = 0
             if (state == Player.STATE_READY) {
+                if (skipIfBogusShortClip(owner)) return
                 if (owner.duration > 0) lastDuration = owner.duration
                 if (frame) spinner.visibility = View.GONE
+                if (desiredPlay && owner.playWhenReady && !owner.isPlaying) owner.play()
             }
             if (state == Player.STATE_ENDED) {
                 prefs.edit().putLong(title.progressKey, 0).putLong(title.progressKey + "_duration", lastDuration).apply()
@@ -464,9 +702,13 @@ class MoviePlayerActivity : Activity() {
         }
         override fun onRenderedFirstFrame() {
             if (player !== owner) return
+            if (skipIfBogusShortClip(owner)) return
             frame = true; frameAt = SystemClock.elapsedRealtime(); framePosition = owner.currentPosition; sourceConfirmed = false
-            failed = false; startupAt = 0; attemptAt = 0; bufferingAt = 0
-            attempt.frameRendered(); spinner.visibility = View.GONE
+            failed = false; startupAt = 0; attemptAt = 0
+            bufferingAt = if (owner.playbackState == Player.STATE_BUFFERING) SystemClock.elapsedRealtime() else 0L
+            attempt.frameRendered()
+            if (owner.playbackState == Player.STATE_READY) spinner.visibility = View.GONE
+            if (desiredPlay && !owner.playWhenReady) owner.playWhenReady = true
             status.text = "Picture received · confirming stream stability · ${currentSource?.label.orEmpty()}"
             view.hideController()
         }
@@ -508,22 +750,76 @@ class MoviePlayerActivity : Activity() {
             forgetFailedSource(source)
             ui.post {
                 if (player !== owner || !foreground) return@post
+                if (startupAt == 0L) startupAt = SystemClock.elapsedRealtime()
+                // Media3 MergingMediaSource tears down the whole video if any side-loaded SRT/VTT
+                // returns 403/404/429 or malformed text — retry the working video stream once without
+                // external subtitles before abandoning it.
+                if (retryWithoutSubtitles(source)) return@post
                 if (problem.http == 429) {
-                    val alternative = recovery.alternative()
-                    if (alternative != null) resolve(alternative)
-                    else fail("All native movie providers are rate limited (HTTP 429). Please wait before retrying.")
+                    // Per-CDN 429 on one mirror must try remaining mirrors/lanes in `sources` first
+                    // rather than immediately dumping OG for another provider.
+                    nextSource()
                     return@post
                 }
-                if (startupAt == 0L) startupAt = SystemClock.elapsedRealtime()
+                // A source that dies on its first bytes was labelled wrong, not dead: ask for the same
+                // address as the other container before spending the viewer's next provider on it.
+                if (problem.http == null && retryOtherContainer(source, problem)) return@post
                 when {
                     problem.family == PlaybackDiagnostics.Family.DECODER && retrySoftware(source) -> Unit
                     sourceRecovery.refreshNotFound(source.provider, problem.http) ->
-                        resolve(source.provider, avoidIdentity = source.identity)
-                    recovery.refresh(source.provider, problem.http) -> resolve(source.provider, preferred = source.identity)
+                        resolve(source.provider, avoidIdentity = source.identity, fresh = true)
+                    recovery.refresh(source.provider, problem.http) -> resolve(source.provider, preferred = source.identity, fresh = true)
                     else -> nextSource()
                 }
             }
         }
+    }
+
+    private fun retryWithoutSubtitles(source: FrostSource): Boolean {
+        if (!foreground || failed || source.subtitles.isEmpty()) return false
+        if (!subtitleRetried.add(source.identity)) return false
+        lastFailure = "Retrying stream without external subtitles · ${source.label}"
+        val cleanSource = FrostSource(
+            provider = source.provider,
+            identity = source.identity,
+            url = source.url,
+            format = source.format,
+            quality = source.quality,
+            language = source.language,
+            hevc = source.hevc,
+            headers = source.headers,
+            subtitles = emptyList(),
+            credentialOrigin = source.credentialOrigin,
+            scraperName = source.scraperName
+        )
+        startSource(cleanSource, compatible)
+        return true
+    }
+
+    /**
+     * The same address, opened as the other container, once.
+     *
+     * TG OUT has served an HLS master labelled `type: "mp4"`; Media3 then feeds a playlist to the MP4
+     * extractor, which rejects it on the first bytes. Without this the app burned the source in under a
+     * second and moved on - the viewer saw a stream found and instantly skipped.
+     */
+    private fun retryOtherContainer(source: FrostSource, problem: PlaybackDiagnostics.Problem): Boolean {
+        if (!foreground || failed) return false
+        val fast = attemptAt > 0 && SystemClock.elapsedRealtime() - attemptAt <= 4_000
+        val parseFailure = (problem.code ?: 0) in 3_001..3_999 ||
+            problem.detail.contains("ParserException", true) ||
+            problem.detail.contains("UnrecognizedInputFormat", true) ||
+            problem.detail.contains("ContainerUnsupported", true)
+        if (!fast || !parseFailure) return false
+        val other = when (source.format) {
+            VodFormat.HLS -> VodFormat.MP4
+            VodFormat.MP4 -> VodFormat.HLS
+            VodFormat.DASH -> return false
+        }
+        if (!containerRetried.add("${source.identity}|${source.format.name}")) return false
+        lastFailure = "Retrying this source as ${other.name} · the stream was labelled ${source.format.name}."
+        ui.post { if (foreground && !failed) startSource(source.withFormat(other), compatible) }
+        return true
     }
 
     private fun retrySoftware(source: FrostSource): Boolean {
@@ -539,6 +835,16 @@ class MoviePlayerActivity : Activity() {
             val owner = player
             if (!failed && (owner == null || owner.playWhenReady)) {
                 val activeSource = currentSource
+                if (owner != null && !sourceConfirmed && owner.duration > 0) {
+                    if (skipIfBogusShortClip(owner)) {
+                        ui.postDelayed(this, 1000)
+                        return
+                    }
+                }
+                if (owner != null && frame && desiredPlay && owner.playWhenReady &&
+                    owner.playbackState == Player.STATE_READY && !owner.isPlaying) {
+                    owner.play()
+                }
                 if (!sourceConfirmed && frameAt > 0L && activeSource != null && VodSourceConfirmation.shouldRemember(
                         frameRendered = frame,
                         ready = owner?.playbackState == Player.STATE_READY,
@@ -551,20 +857,31 @@ class MoviePlayerActivity : Activity() {
                     sourceConfirmed = true
                     status.text = "Playing · ${activeSource.label}"
                 }
+                val rebufferBudgetMs = if (sourceConfirmed) 45_000L else 18_000L
                 when {
-                    startupAt > 0 && now - startupAt >= 120_000 -> fail("Native movie startup timed out. Retry or choose another provider.")
-                    !frame && attemptAt > 0 && now - attemptAt >= 30_000 -> {
+                    startupAt > 0 && now - startupAt >= 60_000 -> fail("No picture within 60 seconds. Retry or choose another provider.")
+                    // A source that has not produced a picture in sixteen seconds is buffering, not starting:
+                    // move on rather than leave the viewer watching a spinner.
+                    !frame && attemptAt > 0 && now - attemptAt >= 16_000 -> {
                         trace?.timeout()
-                        lastFailure = "No picture from this movie source within 30 seconds."
+                        lastFailure = "No picture from this movie source within 16 seconds."
                         val source = currentSource
-                        if (source == null || trace?.canRetryDecoder() != true || !retrySoftware(source)) nextSource()
+                        if (source == null || (!retryWithoutSubtitles(source) && (trace?.canRetryDecoder() != true || !retrySoftware(source)))) {
+                            nextSource()
+                        }
                     }
-                    frame && bufferingAt > 0 && now - bufferingAt >= 40_000 -> {
-                        lastFailure = "The movie stream stopped responding."
-                        nextSource()
+                    frame && bufferingAt > 0 && now - bufferingAt >= rebufferBudgetMs -> {
+                        val source = currentSource
+                        if (source != null && retryWithoutSubtitles(source)) {
+                            // Retried same stream without slow/broken sidecar subtitles.
+                        } else {
+                            lastFailure = "The movie stream stopped responding."
+                            nextSource()
+                        }
                     }
                 }
             }
+            updateWatchTime()
             if (now - savedAt >= 5000) { captureProgress(); savedAt = now }
             ui.postDelayed(this, 1000)
         }
@@ -589,7 +906,10 @@ class MoviePlayerActivity : Activity() {
         val id = title.id
         episodesLoading = true
         episodeLookup = io.submit {
-            val list = try { Movies.details("series", id).second.map { it.season to it.episode } } catch (_: Exception) { emptyList() }
+            val tmdbEps = try { Movies.details("series", id).second.map { it.season to it.episode } } catch (_: Exception) { emptyList() }
+            val list = tmdbEps.ifEmpty {
+                try { ElfuraClient.episodes(id).map { it.season to it.episode } } catch (_: Exception) { emptyList() }
+            }
             ui.post {
                 episodesLoading = false
                 if (!foreground || isDestroyed || title.id != id) return@post
@@ -620,18 +940,127 @@ class MoviePlayerActivity : Activity() {
         }.setNegativeButton("Close", null).create())
     }
     private fun showSources() {
-        val labels = mutableListOf("Reload TG FROST (native)", "Try TG OUT (native)")
-        labels.addAll(sources.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
-        val snapshot = sources
+        if (directSources.isNotEmpty()) {
+            val items = directSources.mapIndexed { idx, s ->
+                val active = if (currentSource?.identity == s.identity) "Now playing · " else ""
+                "$active${idx + 1}. ${s.label}"
+            }.toTypedArray()
+            showDialog(AlertDialog.Builder(this).setTitle("StarShare stream format")
+                .setItems(items) { _, index ->
+                    directSources.getOrNull(index)?.let { chosen ->
+                        desiredPlay = true
+                        begin(FrostProvider.OG, chosen)
+                    }
+                }.setNegativeButton("Close", null).create())
+            return
+        }
+        val labels = mutableListOf(
+            "Reload OG · Elfura (native · embed.theogpiratebot.online)",
+            "Try TG FROST (native)",
+            "Try TG OUT (native)"
+        )
+        // The OG sources this title already produced stay listable: picking another provider used to replace
+        // the list, so the only OG entry disappeared exactly when it was needed again.
+        val ogFound = (ogCache.ifEmpty { OgNative.cached(title) }).distinctBy { it.identity }
+        val firstFound = labels.size
+        labels.addAll(ogFound.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
+        val firstSource = labels.size
+        val listed = sources.filter { source -> ogFound.none { it.identity == source.identity } }
+        labels.addAll(listed.mapIndexed { index, source -> "${index + 1}. ${source.label}" })
+        // Native only. The site-server entries and the browser-engine switch were removed with the engine: on a
+        // television that engine is what took the app down, so every entry here plays in this player.
         val request = title
-        showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language")
+        showDialog(AlertDialog.Builder(this).setTitle("Movie source / quality / language / server")
             .setItems(labels.toTypedArray()) { _, index ->
                 if (title != request) return@setItems
                 desiredPlay = true
-                when (index) { 0 -> begin(FrostProvider.FROST); 1 -> begin(FrostProvider.OUT)
-                    else -> snapshot.getOrNull(index - 2)?.let { begin(it.provider, it) } }
+                when {
+                    index == 0 -> { pinnedOg = true; begin(FrostProvider.OG, fresh = true) }
+                    index == 1 -> { pinnedOg = false; begin(FrostProvider.FROST, fresh = true) }
+                    index == 2 -> { pinnedOg = false; begin(FrostProvider.OUT, fresh = true) }
+                    index >= firstSource -> listed.getOrNull(index - firstSource)?.let {
+                        pinnedOg = (it.provider == FrostProvider.OG)
+                        begin(it.provider, it)
+                    }
+                    else -> ogFound.getOrNull(index - firstFound)?.let {
+                        pinnedOg = true
+                        begin(it.provider, it)
+                    }
+                }
             }.setNegativeButton("Close", null).create())
     }
+
+    private fun formatVodAudioLabel(format: Format, fallbackIndex: Int): String {
+        val rawLang = format.language?.trim().orEmpty()
+        val langName = when {
+            rawLang.isBlank() || rawLang.equals("und", true) -> ""
+            rawLang.equals("hi", true) || rawLang.equals("hin", true) -> "Hindi"
+            rawLang.equals("en", true) || rawLang.equals("eng", true) -> "English"
+            else -> runCatching {
+                Locale.forLanguageTag(rawLang).getDisplayLanguage(Locale.ENGLISH)
+                    .takeIf { it.isNotBlank() && !it.equals(rawLang, true) }
+            }.getOrNull() ?: rawLang.uppercase(Locale.ROOT)
+        }
+        val titleLabel = format.label?.trim().orEmpty()
+        val primary = when {
+            langName.isNotBlank() && titleLabel.isNotBlank() && !titleLabel.equals(langName, true) -> "$langName ($titleLabel)"
+            langName.isNotBlank() -> langName
+            titleLabel.isNotBlank() -> titleLabel
+            else -> "Track ${fallbackIndex + 1}"
+        }
+        val channels = when (format.channelCount) {
+            1 -> "Mono"; 2 -> "Stereo"; 6 -> "5.1"; 8 -> "7.1"
+            else -> if (format.channelCount > 0) "${format.channelCount}ch" else ""
+        }
+        val codec = when (val mime = format.sampleMimeType.orEmpty()) {
+            MimeTypes.AUDIO_AAC -> "AAC"
+            MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
+            MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital+"
+            MimeTypes.AUDIO_MPEG -> "MP2/MP3"
+            MimeTypes.AUDIO_OPUS -> "Opus"
+            else -> mime.substringAfter('/', "").uppercase(Locale.ROOT)
+        }
+        val details = listOf(codec, channels).filter { it.isNotBlank() }.joinToString(" · ")
+        return if (details.isNotBlank()) "$primary  ·  $details" else primary
+    }
+
+    private fun showQuickAudioMenu() {
+        val owner = player ?: run { showSources(); return }
+        val audioGroups = owner.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        if (audioGroups.isEmpty()) {
+            Toast.makeText(this, "No selectable audio tracks yet.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        var counter = 0
+        for (group in audioGroups) {
+            for (i in 0 until group.length) {
+                if (!group.isTrackSupported(i)) { counter++; continue }
+                val fmt = group.getTrackFormat(i)
+                val selected = group.isTrackSelected(i)
+                val label = "${if (selected) "✓  " else ""}${formatVodAudioLabel(fmt, counter)}"
+                val mediaGroup = group.mediaTrackGroup
+                val trackIdx = i
+                items += label to {
+                    if (player === owner) {
+                        val langCode = fmt.language?.trim()?.lowercase(Locale.ROOT).orEmpty()
+                        if (langCode.startsWith("hi")) prefs.edit().putString("preferred_audio_lang", "hi").apply()
+                        else if (langCode.startsWith("en")) prefs.edit().putString("preferred_audio_lang", "en").apply()
+                        owner.trackSelectionParameters = owner.trackSelectionParameters.buildUpon()
+                            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                            .addOverride(TrackSelectionOverride(mediaGroup, listOf(trackIdx)))
+                            .build()
+                        Toast.makeText(this, "Audio: ${formatVodAudioLabel(fmt, trackIdx).substringBefore("  ·  ")}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                counter++
+            }
+        }
+        showDialog(AlertDialog.Builder(this).setTitle("Audio track")
+            .setItems(items.map { it.first }.toTypedArray()) { _, idx -> items[idx].second() }
+            .setNegativeButton("Close", null).create())
+    }
+
     private fun showTracks() {
         val owner = player ?: run { showSources(); return }
         showDialog(AlertDialog.Builder(this).setTitle("Native track controls")
@@ -656,7 +1085,9 @@ class MoviePlayerActivity : Activity() {
                 "App process: ${if (android.os.Process.is64Bit()) "64-bit" else "32-bit"}\n" +
                 "TMDB ${title.id} · ${title.type} · S${title.season} E${title.episode}\n" +
                 "TV reported codec-limit fallback: $television\n" +
-                "No Gecko, live offsets or Jio authentication is used.\n\n${diagnostics.report()}"
+                "No Gecko, live offsets or Jio authentication is used.\n" +
+                (if (OgNative.lastReport().isNotBlank()) "\nOG servers:\n${OgNative.lastReport()}\n" else "") +
+                "\n${diagnostics.report()}"
         }
         showDialog(AlertDialog.Builder(this).setTitle("Movie playback details")
             .setView(ScrollView(this).apply { addView(text) }).setPositiveButton("Close", null).create())
@@ -718,15 +1149,19 @@ class MoviePlayerActivity : Activity() {
     private fun hideSystemUi() = ImmersiveUi.hide(window)
     override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) hideSystemUi() }
     override fun onSaveInstanceState(out: Bundle) {
-        if (initialized) { captureProgress(); out.putInt("season", title.season); out.putInt("episode", title.episode)
-            out.putLong("position", lastPosition); out.putBoolean("play", desiredPlay) }
+        if (initialized) {
+            captureProgress()
+            out.putInt("season", title.season); out.putInt("episode", title.episode)
+            out.putInt("runtime", expectedRuntimeMinutes); out.putBoolean("pinned_og", pinnedOg)
+            out.putLong("position", lastPosition); out.putBoolean("play", desiredPlay); out.putString("provider", provider.id)
+        }
         super.onSaveInstanceState(out)
     }
     override fun finish() {
         // Detach the SurfaceView before revealing the detail screen, including on older TV firmware.
         if (initialized) {
             captureProgress(); foreground = false; generation++
-            lookup?.cancel(true); resolver.cancel(); dialog?.dismiss(); releasePlayer()
+            lookup?.cancel(true); runtimeLookup?.cancel(true); runtimeLookup = null; resolver.cancel(); dialog?.dismiss(); releasePlayer()
             ui.removeCallbacksAndMessages(null)
         }
         super.finish()
@@ -735,7 +1170,8 @@ class MoviePlayerActivity : Activity() {
     override fun onStop() {
         foreground = false; generation++
         if (initialized) captureProgress()
-        lookup?.cancel(true); episodeLookup?.cancel(true); episodesLoading = false; resolver.cancel()
+        lookup?.cancel(true); episodeLookup?.cancel(true); runtimeLookup?.cancel(true); runtimeLookup = null
+        episodesLoading = false; resolver.cancel()
         dialog?.dismiss(); releasePlayer(); ui.removeCallbacksAndMessages(null)
         super.onStop()
     }

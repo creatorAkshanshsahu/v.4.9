@@ -5,12 +5,18 @@ import org.junit.Test
 
 class LiveProvidersTest {
     @Test fun `untried V1 channels start on JJTV rather than inheriting another channels TG success`() {
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, null))
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, "https://unknown.example"))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U), LiveProviders.order(false, null))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U), LiveProviders.order(false, "https://unknown.example"))
     }
 
     @Test fun `a known working JJTV source is tried first without removing TG recovery`() {
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, JjtvResolver.SITE))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U), LiveProviders.order(false, JjtvResolver.SITE))
+    }
+
+    @Test fun `the playlist provider is only ever a fallback until it is the remembered one`() {
+        assertEquals(LiveProvider.JJTV, LiveProviders.order(false, null).first())
+        assertEquals(LiveProvider.TG, LiveProviders.order(false, TgResolver.SITE).first())
+        assertEquals(LiveProvider.JIOM3U, LiveProviders.order(false, JioM3uResolver.SITE).first())
     }
 
     @Test fun `V2 must never reinterpret its numeric channel ids as Jio ids even with a JJTV request`() {
@@ -27,13 +33,13 @@ class LiveProvidersTest {
     }
 
     @Test fun `a working TG source is retained for that channel only`() {
-        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, TgResolver.SITE))
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, null))
+        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U), LiveProviders.order(false, TgResolver.SITE))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U), LiveProviders.order(false, null))
     }
 
     @Test fun `explicit JJTV choice overrides even a previously remembered TG source`() {
-        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG), LiveProviders.order(false, TgResolver.SITE, LiveProvider.JJTV))
-        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV), LiveProviders.order(false, JjtvResolver.SITE, LiveProvider.TG))
+        assertEquals(listOf(LiveProvider.JJTV, LiveProvider.TG, LiveProvider.JIOM3U), LiveProviders.order(false, TgResolver.SITE, LiveProvider.JJTV))
+        assertEquals(listOf(LiveProvider.TG, LiveProvider.JJTV, LiveProvider.JIOM3U), LiveProviders.order(false, JjtvResolver.SITE, LiveProvider.TG))
     }
 
     @Test fun `provider identity uses its explicit origin rather than an upstream server label`() {

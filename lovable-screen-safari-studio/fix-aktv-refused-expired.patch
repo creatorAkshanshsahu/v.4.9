@@ -1,0 +1,281 @@
+diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
+index dd606bd..e3ae381 100644
+--- a/src/lib/live-gateway.ts
++++ b/src/lib/live-gateway.ts
+@@ -2373,6 +2373,11 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
+ export function normalizeChannelMatchTokens(rawName: string): { base: string; noQuality: string; numbers: string[]; tokens: string[] } {
+   let s = rawName
+     .toLowerCase()
++    // A reseller tag is not the channel: "CNBC Awaaz By Premium PlugX" never equals Jio's
++    // "CNBC Awaaz", so the JioTV browser-direct rescue rejected every reseller entry by name.
++    // Strip a trailing "by <tag>" first — the replaces below re-punctuate the tail and would
++    // hide it. End-anchored with a word after "by", so "Baby TV" and a bare trailing "by" survive.
++    .replace(/\s+by\s+[a-z0-9][a-z0-9 .&'()+\/-]*?\s*$/, "")
+     .replace(/^[|\[(\{\s]*(?:in|ind|india|indian|vip|hindi|uk|us)[|\])\}\s:\-–—]+/gi, "")
+     .replace(/\b(?:sony\s+sports\s+ten)\b/g, "sony ten")
+     .replace(/\b(?:sony\s+set)\b/g, "set")
+@@ -3860,6 +3865,22 @@ function saveStreamHandoff(channelId: string | undefined, entry: ProbeHandoffEnt
+   streamHandoffCache.set(channelId, entry);
+ }
+ 
++/**
++ * What the first bytes of a 200 body say when they contradict the manifest the URL promised.
++ *
++ * Extension sniffing calls anything at a `.m3u8` address HLS, but a reseller whose link expired
++ * answers 200 with an HTML error page, and some `.m3u8` addresses serve raw MPEG-TS. Serving
++ * either to hls.js as a playlist produces "not an HLS playlist" fatals in the browser for a
++ * body the server already held. `null` means the head confirms nothing either way and the
++ * existing content-type/extension verdict stands.
++ */
++export function sniffUpstreamHead(headText: string, firstByte: number | undefined): "html" | "ts" | null {
++  if (/^<!doctype|^<html|^<head|^<title|^<body/i.test(headText)) return "html";
++  // 0x47 is the MPEG-TS sync byte: no playlist (`#`), MPD (`<`) or HTML page starts with it.
++  if (firstByte === 0x47) return "ts";
++  return null;
++}
++
+ async function proxyMediaStream(
+   upstreamUrl: string,
+   mode: "mag" | "xtream",
+@@ -3940,9 +3961,11 @@ async function proxyMediaStream(
+       // Built here, not earlier: resolving a redirector costs a round trip, and it is only worth
+       // spending on the path where the browser is about to be handed the address.
+       const recipe = typeof refusalRecipe === "function" ? await refusalRecipe() : refusalRecipe;
++      // Terminal wording, not a promise: the player shows this only after the recipe, the
++      // direct-config candidates and the direct-URL fallback have all failed.
+       return jsonResponse(502, {
+         ok: false,
+-        error: `The stream host refused this server's address (HTTP ${status}). Playing it directly from your browser instead.`,
++        error: `The stream host refused this server's address (HTTP ${status}), and the browser-direct fallback failed too. Try the same channel from another source, or press Retry.`,
+         directPlay: recipe,
+       });
+     }
+@@ -3963,8 +3986,43 @@ async function proxyMediaStream(
+   const pathLower = currentUrl.split("?")[0]!.toLowerCase();
+   const isHls = ctype.includes("mpegurl") || pathLower.endsWith(".m3u8") || headText.startsWith("#EXTM3U");
+   const isDash = ctype.includes("dash+xml") || pathLower.endsWith(".mpd") || /^<\?xml|^<MPD/i.test(headText);
++  const headSniff = sniffUpstreamHead(headText, first.value[0]);
++
++  if (headSniff === "html") {
++    // HTTP 200 with an error page where the manifest should be: the reseller link has most
++    // likely expired (or this address is banned and the page says so). Served as a playlist
++    // this becomes a browser-side "not an HLS playlist" fatal; refused here it names the
++    // cause, and the browser still gets the recipe in case the page was meant for this IP only.
++    recordSegment(mode, {
++      at: Date.now(),
++      url: diagnosticUrl(currentUrl),
++      status: upRes.status,
++      bytes: first.value.byteLength,
++      range: range ?? null,
++    });
++    await reader.cancel().catch(() => undefined);
++    if (refusalRecipe) {
++      const recipe = typeof refusalRecipe === "function" ? await refusalRecipe() : refusalRecipe;
++      return jsonResponse(502, {
++        ok: false,
++        error:
++          "This channel's link answered with an error page instead of a playlist — it has most likely expired — and the browser-direct fallback failed too. Try the same channel from another source, or press Retry.",
++        directPlay: recipe,
++      });
++    }
++    return jsonResponse(502, {
++      ok: false,
++      error:
++        "This channel's link answered with an error page instead of a playlist — it has most likely expired. Try the same channel from another source, or press Retry.",
++    });
++  }
++
++  // Raw MPEG-TS behind a playlist extension: the branches below would serve binary to a
++  // playlist parser. Falling through to the byte stream serves it as MPEG-TS, which is the
++  // engine the probe then names and the player then opens.
++  const serveAsTs = headSniff === "ts";
+ 
+-  if (isDash) {
++  if (isDash && !serveAsTs) {
+     // An MPD is small; buffer it and hand it back whole so the player can read it.
+     const chunks: Uint8Array[] = [first.value];
+     let total = first.value.byteLength;
+@@ -4036,7 +4094,7 @@ async function proxyMediaStream(
+     });
+   }
+ 
+-  if (isHls) {
++  if (isHls && !serveAsTs) {
+     const chunks: Uint8Array[] = [first.value];
+     let total = first.value.byteLength;
+     while (total < 2 * 1024 * 1024) {
+@@ -5291,7 +5349,7 @@ export async function maybeHandleLiveRequest(request: Request, env: unknown): Pr
+       if (isJioCdnHost(ch.cmd)) {
+         return jsonResponse(502, {
+           ok: false,
+-          error: `This channel streams from the Jio CDN, which refuses the server's address (HTTP 450). It is being played directly from your browser instead.`,
++          error: `This channel streams from the Jio CDN, which refuses the server's address (HTTP 450), and the browser-direct fallback failed too. Try the same channel from another source, or press Retry.`,
+           directPlay: await recipeFor(),
+         });
+       }
+diff --git a/src/lib/playback-faults.ts b/src/lib/playback-faults.ts
+index dd7b75c..2d5f40e 100644
+--- a/src/lib/playback-faults.ts
++++ b/src/lib/playback-faults.ts
+@@ -81,8 +81,7 @@ export function describeHlsFatal(data: unknown, sourceName?: string): PlaybackFa
+     return {
+       kind,
+       ...(detail ? { detail } : {}),
+-      message:
+-        "The stream host answered with something that is not an HLS playlist. The link has most likely expired, or this is a raw MPEG-TS stream wearing an .m3u8 name.",
++      message: `The stream host answered with something that is not an HLS playlist. The link has most likely expired, or this is a raw MPEG-TS stream wearing an .m3u8 name. ${retryAdvice(source)}`,
+     };
+   }
+ 
+diff --git a/src/test/playback-faults.test.ts b/src/test/playback-faults.test.ts
+index eaf9516..561438b 100644
+--- a/src/test/playback-faults.test.ts
++++ b/src/test/playback-faults.test.ts
+@@ -24,6 +24,15 @@ describe("describeHlsFatal", () => {
+     expect(f.kind).toBe("manifest");
+     expect(f.message).toContain("not an HLS playlist");
+     expect(f.message).toContain("MPEG-TS");
++    // Every other branch ends in the source's remedy; this one used to leave the viewer
++    // with a diagnosis and nothing to do.
++    expect(f.message).toContain("Press Retry");
++  });
++
++  it("gives the AK TV variant of the not-a-playlist fault its reconnect remedy", () => {
++    const f = describeHlsFatal({ fatal: true, details: "manifestParsingError" }, "tgtv");
++    expect(f.kind).toBe("manifest");
++    expect(f.message).toContain("Press Retry to reconnect");
+   });
+ 
+   it("calls an unfetchable AES key a key fault, not the network", () => {
+diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
+index 1f76194..e17e4b1 100644
+--- a/src/test/playback-fixes.test.ts
++++ b/src/test/playback-fixes.test.ts
+@@ -676,3 +676,127 @@ describe("App-faithful direct token policy (StreamRequestPolicy port)", () => {
+   });
+ });
+ 
++describe("Reseller-suffixed names still match the JioTV rescue catalogue", () => {
++  it("strips a trailing reseller tag before matching, without touching honest names", async () => {
++    const { normalizeChannelMatchTokens } = await import("@/lib/live-gateway");
++    expect(normalizeChannelMatchTokens("CNBC Awaaz By Premium PlugX").base).toBe("cnbc awaaz");
++    expect(normalizeChannelMatchTokens("DISCOVERY By Premium PlugX").base).toBe("discovery");
++    expect(normalizeChannelMatchTokens("Star Sports 1 Hindi By Nova IPTV").numbers).toEqual(["1"]);
++    // Not tags: no space before "by", or nothing after it.
++    expect(normalizeChannelMatchTokens("Baby TV").base).toBe("baby tv");
++    expect(normalizeChannelMatchTokens("Stand By").base).toBe("stand by");
++  });
++
++  it("matches a reseller entry to its JioTV namesake for the browser-direct rescue", async () => {
++    const { findBestGioTvMatch } = await import("@/lib/live-gateway");
++    const records = [
++      { id: "377", name: "CNBC Awaaz", category: "News", logo: "", urls: [], keys: [] },
++      { id: "114", name: "Discovery HD", category: "Infotainment", logo: "", urls: [], keys: [] },
++    ];
++    const cnbc = findBestGioTvMatch(records, "tg:2752", "CNBC Awaaz By Premium PlugX");
++    expect(cnbc?.id).toBe("377");
++    // "DISCOVERY" has no bare Jio namesake, but it is "Discovery HD" minus the quality word.
++    const discovery = findBestGioTvMatch(records, "tg:2423", "DISCOVERY By Premium PlugX");
++    expect(discovery?.id).toBe("114");
++  });
++});
++
++describe("AK TV reseller failures refuse honestly instead of serving garbage as HLS", () => {
++  const RESELLER_M3U = `#EXTM3U
++#EXTINF:-1 tvg-id="2752" group-title="News",CNBC Awaaz By Premium PlugX
++https://reseller.example/tee/playlist.php/CNBC.m3u8
++#EXTINF:-1 tvg-id="2423" group-title="Infotainment",DISCOVERY By Premium PlugX
++https://reseller.example/tee/playlist.php/DISCOVERY.m3u8
++`;
++
++  it("refuses an HTML error page with an expiry sentence and the browser recipe, not HLS", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(RESELLER_M3U, { status: 200 });
++      if (u.includes("reseller.example")) {
++        return new Response("<html><head><title>Link expired</title></head><body>expired</body></html>", {
++          status: 200,
++          headers: { "content-type": "text/html" },
++        });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2752.ts?probe=1"),
++      {},
++    );
++    expect(res!.status).toBe(502);
++    const body = (await res!.json()) as { error: string; directPlay?: { url: string; container: string } };
++    expect(body.error).toContain("error page instead of a playlist");
++    expect(body.error).toContain("most likely expired");
++    expect(body.directPlay?.url).toContain("reseller.example");
++    expect(body.directPlay?.container).toBe("hls");
++  });
++
++  it("serves raw MPEG-TS behind a .m3u8 address as MPEG-TS so the probe names the TS engine", async () => {
++    const ts = new Uint8Array(376);
++    ts[0] = 0x47;
++    ts[188] = 0x47;
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(RESELLER_M3U, { status: 200 });
++      if (u.includes("reseller.example")) {
++        return new Response(ts, { status: 200, headers: { "content-type": "video/mp2t" } });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const probe = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2752.ts?probe=1"),
++      {},
++    );
++    expect(probe!.status).toBe(200);
++    expect(probe!.headers.get("x-stream-container")).toBe("mpegts");
++    // And the player's follow-up request streams the bytes the probe put aside.
++    const play = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2752.ts"),
++      {},
++    );
++    expect(play!.status).toBe(200);
++    expect(play!.headers.get("x-stream-container")).toBe("mpegts");
++    expect(play!.headers.get("content-type")).toContain("video/mp2t");
++  });
++
++  it("tells the viewer the browser fallback failed too when a reseller gate refuses the relay", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("livetgtv.lovable.app")) return new Response(RESELLER_M3U, { status: 200 });
++      // The gate refuses the relay everywhere: the manifest fetch and the recipe's resolve.
++      if (u.includes("reseller.example")) return new Response("blocked", { status: 530 });
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/stream/tg:2423.ts?probe=1"),
++      {},
++    );
++    expect(res!.status).toBe(502);
++    const body = (await res!.json()) as { error: string; directPlay?: { url: string } };
++    expect(body.error).toContain("HTTP 530");
++    expect(body.error).toContain("browser-direct fallback failed too");
++    expect(body.error).not.toContain("Playing it directly from your browser instead");
++    expect(body.directPlay?.url).toContain("reseller.example");
++  });
++
++  it("pins the first-byte sniffing the stream route trusts over the URL extension", async () => {
++    const { sniffUpstreamHead } = await import("@/lib/live-gateway");
++    expect(sniffUpstreamHead("<!DOCTYPE HTML><html>", 0x3c)).toBe("html");
++    expect(sniffUpstreamHead("<html><body>expired</body></html>", 0x3c)).toBe("html");
++    expect(sniffUpstreamHead("G", 0x47)).toBe("ts");
++    // A playlist, an MPD and an inconclusive head all leave the extension verdict standing.
++    expect(sniffUpstreamHead("#EXTM3U", 0x23)).toBeNull();
++    expect(sniffUpstreamHead("<?xml version=\"1.0\"?>", 0x3c)).toBeNull();
++    expect(sniffUpstreamHead("<MPD", 0x3c)).toBeNull();
++    expect(sniffUpstreamHead("", undefined)).toBeNull();
++  });
++});
++

@@ -1,0 +1,5 @@
+<!-- LIVE chip (live.tsx: bg-live): electric cyan badge with dark obsidian type. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/live"/>
+    <corners android:radius="5dp"/>
+</shape>

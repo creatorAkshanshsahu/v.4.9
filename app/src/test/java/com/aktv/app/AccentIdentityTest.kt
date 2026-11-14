@@ -7,67 +7,79 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** The crimson identity must stay one family: no cyan regressions, no rainbow tile wall. */
+/** The STREAMR cyber-neon identity (screen-safari-studio) stays inside the cyan-to-magenta neon spectrum. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class AccentIdentityTest {
 
-    private fun hue(color: Int): Float = FloatArray(3).also { ColorUtils.colorToHSL(color, it) }[0]
-    private fun saturation(color: Int): Float = FloatArray(3).also { ColorUtils.colorToHSL(color, it) }[1]
+    private fun hsl(color: Int): FloatArray = FloatArray(3).also { ColorUtils.colorToHSL(color, it) }
+    private fun hue(color: Int): Float = hsl(color)[0]
+    private fun saturation(color: Int): Float = hsl(color)[1]
+    private fun lightness(color: Int): Float = hsl(color)[2]
 
-    /** Red band: -25..35 degrees, i.e. crimson through warm rose, never green/blue. */
-    private fun isCrimsonFamily(color: Int): Boolean {
+    private val arcStart = 180f
+    private val arcEnd = 350f
+
+    /** Cyber neon band: 180..350 degrees (electric cyan -> indigo/violet -> neon magenta). */
+    private fun isBrandFamily(color: Int): Boolean {
         val h = hue(color)
-        return h <= 35f || h >= 335f
+        return h in arcStart..arcEnd
     }
 
-    @Test fun `the brand primary is a saturated crimson`() {
-        assertTrue(isCrimsonFamily(Accent.CRIMSON))
-        assertTrue(isCrimsonFamily(Accent.CRIMSON_BRIGHT))
-        assertTrue(isCrimsonFamily(Accent.CRIMSON_DEEP))
-        assertTrue(saturation(Accent.CRIMSON) > 0.6f)
+    @Test fun `the brand primary is saturated cyber magenta and the accent is electric cyan`() {
+        assertTrue(isBrandFamily(Accent.BRAND))
+        assertTrue(isBrandFamily(Accent.BRAND_LIGHT))
+        assertTrue(isBrandFamily(Accent.BRAND_DEEP))
+        assertTrue(saturation(Accent.BRAND) > 0.8f)
+        assertTrue(saturation(Accent.BRAND_LIGHT) > 0.8f)
     }
 
-    @Test fun `channel tints sampled from any hue stay in the crimson family`() {
-        // Judge red, green, blue, cyan and garlic against the harmoniser.
+    @Test fun `LIVE and SIGNAL use the electric cyan accent so badges pop on dark violet glass`() {
+        assertTrue(isBrandFamily(Accent.LIVE))
+        assertEquals(Accent.SIGNAL, Accent.LIVE)
+    }
+
+    @Test fun `channel tints sampled from any hue stay in the cyber cyan-to-magenta family`() {
         val samples = listOf(0xFFFF0000.toInt(), 0xFF00FF00.toInt(), 0xFF0000FF.toInt(),
             0xFF00FFFF.toInt(), 0xFFE7B969.toInt(), 0xFF8178F5.toInt())
         for (sample in samples) {
             val tint = Accent.normalize(sample)
             assertTrue("sample ${Integer.toHexString(sample)} produced ${Integer.toHexString(tint)}",
-                isCrimsonFamily(tint))
+                isBrandFamily(tint))
         }
     }
 
-    @Test fun `the hue projection covers the whole wheel without leaving the red arc`() {
-        // Exhaustive: every degree must fold into 335..25 degrees, never through magenta or green.
+    @Test fun `the hue projection covers the whole wheel without leaving the cyber arc`() {
         for (degree in 0 until 360) {
             val projected = Accent.projectHue(degree.toFloat())
             assertTrue("hue $degree projected to $projected",
-                projected <= 35f || projected >= 335f)
-            assertTrue("hue $degree produced an out-of-range angle", projected in 0f..360f)
+                projected in Accent.ARC_START..(Accent.ARC_START + Accent.ARC_SPAN))
         }
     }
 
-    @Test fun `greyscale logos and missing logos fall back to the brand crimson`() {
-        assertEquals(Accent.CRIMSON_BRIGHT, Accent.normalize(null))
-        assertTrue(isCrimsonFamily(Accent.normalize(0xFF808080.toInt())))
+    @Test fun `greyscale logos and missing logos fall back to the brand magenta`() {
+        assertEquals(Accent.BRAND, Accent.normalize(null))
+        assertTrue(isBrandFamily(Accent.normalize(0xFF808080.toInt())))
     }
 
-    @Test fun `nameless-channel tints are stable and inside the warm band`() {
+    @Test fun `nameless-channel tints are stable and inside the cyber band`() {
         val first = Accent.fromName("Sony YAY")
         assertEquals("the same name must always get the same tint", first, Accent.fromName("Sony YAY"))
         for (name in listOf("Sony YAY", "Star Sports", "Zee Cinema", "DD News", "MTV", "Cartoon Network")) {
-            assertTrue("$name tinted outside the crimson family", isCrimsonFamily(Accent.fromName(name)))
+            assertTrue("$name tinted outside the cyber family", isBrandFamily(Accent.fromName(name)))
         }
     }
 
     @Test fun `hero partners stay dark so the panel keeps depth`() {
-        for (color in listOf(Accent.CRIMSON, Accent.CRIMSON_BRIGHT, Accent.CRIMSON_DEEP)) {
-            val partner = Accent.partner(color)
-            assertTrue(isCrimsonFamily(partner))
-            val lightness = FloatArray(3).also { ColorUtils.colorToHSL(partner, it) }[2]
-            assertTrue("partner should stay dark for a gradient", lightness <= 0.36f)
+        for (color in listOf(Accent.BRAND, Accent.BRAND_LIGHT, Accent.BRAND_DEEP)) {
+            assertTrue("partner should stay dark for a gradient", lightness(Accent.partner(color)) <= 0.36f)
         }
+    }
+
+    @Test fun `the wordmark runs cyber magenta into electric cyan, matching screen-safari-studio`() {
+        assertArrayEquals(intArrayOf(0xFFFF00D0.toInt(), 0xFF00ECF7.toInt()), Accent.WORDMARK_STOPS)
+        assertEquals(0xFFFF00D0.toInt(), Accent.BRAND)
+        assertEquals(0xFF00ECF7.toInt(), Accent.LIVE)
+        assertEquals(0xFF060410.toInt(), Accent.ABYSS)
     }
 }

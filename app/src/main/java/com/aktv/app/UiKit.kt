@@ -37,89 +37,90 @@ internal object ImmersiveUi {
 }
 
 /**
- * AK TV glossy-crimson palette: ink-black surfaces, deep wine depth, lacquered red accents and
- * bright-crimson cues. Names are stable so layouts, players and tests keep one source of truth.
+ * STREAMR cyber-neon palette (from `screen-safari-studio/src/styles.css`):
+ * deep cyber violet-abyss ground (`#060410`), electric magenta primary (`#FF00D0`),
+ * and electric cyan accent/focus/live (`#00ECF7`), with a magenta-to-cyan wordmark gradient.
  */
 object Accent {
-    val ABYSS = 0xFF07040A.toInt()
-    val NIGHT = 0xFF0C0710.toInt()
-    val SURFACE = 0xFF17101B.toInt()
-    val SURFACE_HI = 0xFF241528.toInt()
-    /** Primary glossy crimson used for focus fills, live badges and active controls. */
-    val CRIMSON = 0xFFE11D2E.toInt()
-    val CRIMSON_BRIGHT = 0xFFFF3448.toInt()
-    val CRIMSON_DEEP = 0xFF8C0F1C.toInt()
-    val WINE = 0xFF4A0812.toInt()
-    /** Near-white with a warm cast; the specular highlight in gloss gradients. */
-    val GLOSS_HI = 0xFFFFEBEE.toInt()
-    val SIGNAL = CRIMSON_BRIGHT
-    val ION = 0xFFFF5C6B.toInt()
-    val INDIGO = 0xFFC2185B.toInt()
-    val DEEP = 0xFF2A1520.toInt()
-    val LIVE = CRIMSON_BRIGHT
-    val GOLD = 0xFFE7B969.toInt()
-    val TEXT = 0xFFFCF7F8.toInt()
-    val DIM = 0xFFC4B4BA.toInt()
-    val FAINT = 0xFF8E7781.toInt()
+    val ABYSS = 0xFF060410.toInt()
+    val NIGHT = 0xFF020107.toInt()
+    val SURFACE = 0xFF100A23.toInt()
+    val SURFACE_HI = 0xFF1B1630.toInt()
+    /** Primary cyber magenta (`--primary` / `--brand-from`): active pills, Play CTA, seek thumb. */
+    val BRAND = 0xFFFF00D0.toInt()
+    /** Electric cyber cyan (`--accent` / `--brand-to` / `--live` / `--focus`): eyebrows, focus rings, LIVE, profile. */
+    val BRAND_LIGHT = 0xFF00ECF7.toInt()
+    val BRAND_DEEP = 0xFFBB009B.toInt()
+    val CRIMSON = BRAND
+    val CRIMSON_BRIGHT = BRAND_LIGHT
+    val CRIMSON_DEEP = BRAND_DEEP
+    val WINE = 0xFF1B0928.toInt()
+    /** Specular highlight in gloss gradients. */
+    val GLOSS_HI = 0xFFFFFFFF.toInt()
+    val SIGNAL = BRAND_LIGHT
+    val ION = 0xFF5BF3FF.toInt()
+    val INDIGO = 0xFF5E6C92.toInt()
+    val DEEP = 0xFF120D28.toInt()
+    val LIVE = BRAND_LIGHT
+    val GOLD = 0xFFFFB84D.toInt()
+    val TEXT = 0xFFF5F5F5.toInt()
+    val DIM = 0xFF98AFD5.toInt()
+    val FAINT = 0xFF687AA0.toInt()
 
-    /** Gloss stops for a lacquered surface: highlight -> body -> deep edge. */
-    fun glossStops(): IntArray = intArrayOf(CRIMSON_BRIGHT, CRIMSON, CRIMSON_DEEP)
+    /** Gloss stops: cyan highlight -> magenta body -> deep violet-magenta edge. */
+    fun glossStops(): IntArray = intArrayOf(BRAND_LIGHT, BRAND, BRAND_DEEP)
+
+    /** The wordmark's two stops, left to right (`--gradient-brand`: magenta -> cyan). */
+    val WORDMARK_STOPS = intArrayOf(BRAND, BRAND_LIGHT)
+
+    /** Cyber neon arc: 190..345 degrees (electric cyan -> indigo/violet -> neon magenta). */
+    const val ARC_START = 190f
+    const val ARC_SPAN = 155f
 
     /**
-     * Makes any logo colour usable as a tint. The sampled hue is pulled most of the way to the brand
-     * crimson so channel artwork still varies, but every surface reads as one crimson identity.
+     * Makes any logo colour usable as a cyber card tint. Sampled hues are folded onto the
+     * cyan-to-magenta arc (`190..345`) so channel artwork varies without warm brown/olive clashes.
      */
     fun normalize(c: Int?): Int {
-        if (c == null) return CRIMSON_BRIGHT
+        if (c == null) return BRAND
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        if (hsl[1] < 0.18f) return CRIMSON_BRIGHT
+        if (hsl[1] < 0.18f) return BRAND
         val hue = projectHue(hsl[0])
-        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.62f), hsl[2].coerceIn(0.46f, 0.60f)))
+        return ColorUtils.HSLToColor(floatArrayOf(hue, max(hsl[1], 0.65f), hsl[2].coerceIn(0.36f, 0.52f)))
     }
 
-    /**
-     * Fold any hue onto the red arc (335..25 degrees) instead of blending toward it in RGB, which
-     * drags saturated blues through magenta. Greys are handled by the caller before this runs.
-     */
+    /** Fold any hue onto the cyber arc (`190..345` degrees). */
     fun projectHue(hue: Float): Float {
-        val normalized = ((hue % 360f) + 360f) % 360f
-        return when {
-            normalized <= 25f -> normalized
-            normalized >= 335f -> normalized
-            // Warm half: fold 25..180 down onto the 25..0 edge.
-            normalized < 180f -> 25f - (normalized - 25f) / 155f * 25f
-            // Cool half: fold 180..335 up onto the 335..360 edge.
-            else -> 335f + (normalized - 180f) / 155f * 25f
-        }
+        val h = ((hue % 360f) + 360f) % 360f
+        val within = ((h - ARC_START) % 360f + 360f) % 360f
+        if (within <= ARC_SPAN) return h
+        val t = (within - ARC_SPAN) / (360f - ARC_SPAN)
+        val folded = if (t <= 0.5f) t * 2f else (1f - t) * 2f
+        return ((ARC_START + folded * ARC_SPAN) % 360f + 360f) % 360f
     }
 
-    /** A darker neighbouring crimson so the hero panel has depth instead of one flat colour. */
+    /** Darker neighbouring cyber violet/blue so hero & card panels keep depth. */
     fun partner(c: Int): Int {
         val hsl = FloatArray(3); ColorUtils.colorToHSL(c, hsl)
-        hsl[0] = if (hsl[0] >= 180f) (hsl[0] - 14f + 360f) % 360f else (hsl[0] + 14f) % 360f
-        hsl[1] = hsl[1].coerceAtLeast(0.45f)
-        hsl[2] = 0.30f
+        hsl[0] = projectHue(hsl[0] - 24f)
+        hsl[1] = hsl[1].coerceAtLeast(0.50f)
+        hsl[2] = 0.24f
         return ColorUtils.HSLToColor(hsl)
     }
 
-    /**
-     * Stable tint for channels with no logo to sample (V2 / 24-7): same name, same colour.
-     * Hues stay inside a warm crimson band so a wall of tiles reads as one brand, not a rainbow.
-     */
+    /** Stable cyber tint for logo-less channels: same name -> same colour along the cyan-magenta arc. */
     fun fromName(name: String): Int {
         var h = 7
         for (ch in name.lowercase()) h = (h * 31 + ch.code) and 0x7fffffff
-        // 0..1 spread across crimson -> rose -> warm wine, all within the red family.
         val spread = (h % 100) / 99f
-        // Confine the palette to the red arc: 340..360 crimson-rose, 0..20 warm red.
-        val hue = if (spread < 0.55f) 340f + spread * 36f else (spread - 0.55f) * 44f
-        val lightness = 0.34f + ((h / 100) % 12) / 100f
-        return ColorUtils.HSLToColor(floatArrayOf((hue + 360f) % 360f, 0.62f, lightness))
+        val hue = ((ARC_START + spread * ARC_SPAN) % 360f + 360f) % 360f
+        val lightness = 0.28f + ((h / 100) % 12) / 100f
+        return ColorUtils.HSLToColor(floatArrayOf(hue, 0.72f, lightness))
     }
 
     fun from(d: Drawable, cb: (Int) -> Unit) {
         val bmp = (d as? BitmapDrawable)?.bitmap
-        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(CRIMSON_BRIGHT); return }
+        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) { cb(BRAND); return }
         Palette.from(bmp).maximumColorCount(16).generate { p ->
             val sw = p?.vibrantSwatch ?: p?.lightVibrantSwatch ?: p?.darkVibrantSwatch ?: p?.dominantSwatch
             cb(normalize(sw?.rgb))
@@ -127,21 +128,24 @@ object Accent {
     }
 }
 
-/** Flat, cheap surfaces: plain colour fills, no shaders, no animators, no shadows. */
+/** Cyber glass & neon-ringed surfaces. */
 object Ui {
     fun mix(a: Int, b: Int, f: Float) = ColorUtils.blendARGB(a, b, f)
 
-    /** Rounded flat fill. radiusDp = 100 (default) gives a pill. */
+    /** Rounded fill. radiusDp = 100 (default) gives a pill. */
     fun pill(dp: Float, color: Int, radiusDp: Float = 100f) =
         GradientDrawable().apply { cornerRadius = radiusDp * dp; setColor(color) }
 
     /**
-     * List-row background driven by the view's own state: white when focused, soft grey when activated
-     * (the row that is "playing" / "open"), [rest] otherwise. The framework switches it; no code runs per focus change.
+     * List-row background driven by view state: electric cyan ring + cyber glass when focused,
+     * magenta tint when activated, [rest] otherwise.
      */
-    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0xFF213542.toInt()) =
+    fun focusBg(dp: Float, radiusDp: Float, rest: Int = Color.TRANSPARENT, active: Int = 0x38FF00D0) =
         StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_focused), pill(dp, Accent.TEXT, radiusDp))
+            addState(
+                intArrayOf(android.R.attr.state_focused),
+                pill(dp, 0x331B1630, radiusDp).apply { setStroke((2 * dp).toInt().coerceAtLeast(2), Accent.SIGNAL) }
+            )
             addState(intArrayOf(android.R.attr.state_activated), pill(dp, active, radiusDp))
             addState(intArrayOf(), pill(dp, rest, radiusDp))
         }

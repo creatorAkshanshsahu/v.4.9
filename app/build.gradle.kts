@@ -1,11 +1,55 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+
+// A stable signing key is what lets an in-app update install over the previous build. The key itself is
+// a sideload key (this app is distributed as an APK), not a Play Store upload key; the password is a
+// build property so a fork can supply its own. Without the file the build falls back to the local debug
+// key, which still produces an installable APK but cannot update an existing installation in place.
+val updateKeystore = rootProject.file("keystore/aktv-update.p12")
+val updateStorePassword = providers.gradleProperty("aktvUpdateStorePassword").orNull
+    ?: System.getenv("AKTV_UPDATE_STORE_PASSWORD")
+    ?: "aktv-update-key"
+
+fun quoteBuildConfig(raw: String): String =
+    "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "") + "\""
+
+val starshareServer = (providers.gradleProperty("starshareServer").orNull
+    ?: System.getenv("STARSHARE_SERVER")
+    ?: "").trim()
+val starshareUser = (providers.gradleProperty("starshareUser").orNull
+    ?: System.getenv("STARSHARE_USER")
+    ?: "").trim()
+val starsharePass = (providers.gradleProperty("starsharePass").orNull
+    ?: System.getenv("STARSHARE_PASS")
+    ?: "").trim()
+
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 62; versionName = "4.9.45"
+    buildFeatures { buildConfig = true }
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 153; versionName = "5.4.34"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
+        buildConfigField("String", "STARSHARE_SERVER", quoteBuildConfig(starshareServer))
+        buildConfigField("String", "STARSHARE_USER", quoteBuildConfig(starshareUser))
+        buildConfigField("String", "STARSHARE_PASS", quoteBuildConfig(starsharePass))
     }
-    buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
+    signingConfigs {
+        create("update") {
+            if (updateKeystore.exists()) {
+                storeFile = updateKeystore
+                storePassword = updateStorePassword
+                keyAlias = "aktv"
+                keyPassword = updateStorePassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            // Same key for every CI build, so "Update" in the app replaces the installed copy.
+            signingConfig = if (updateKeystore.exists()) signingConfigs.getByName("update") else signingConfigs.getByName("debug")
+        }
+    }
     lint { abortOnError = false; checkReleaseBuilds = false }
     testOptions {
         unitTests.isIncludeAndroidResources = true
@@ -13,6 +57,7 @@ android {
             it.systemProperty("aktv.ui.previewDir", project.layout.buildDirectory.dir("reports/ui-preview").get().asFile.absolutePath)
             it.systemProperty("aktv.live.tg", project.findProperty("liveTg")?.toString() ?: "false")
             it.systemProperty("aktv.live.frost", project.findProperty("liveFrost")?.toString() ?: "false")
+            it.systemProperty("aktv.live.jio", project.findProperty("liveJio")?.toString() ?: "false")
         }
     }
     flavorDimensions += "abi"

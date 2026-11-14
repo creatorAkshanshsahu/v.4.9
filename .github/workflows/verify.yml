@@ -17,14 +17,31 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - uses: gradle/actions/setup-gradle@v3
-        with: { gradle-version: 8.9 }
+      - name: Download Gradle 8.9 directly (bypass cache infrastructure)
+        run: |
+          cd /tmp
+          curl -fsSL -o gradle.zip "https://services.gradle.org/distributions/gradle-8.9-bin.zip"
+          unzip -q gradle.zip
+          echo "GRADLE_HOME=/tmp/gradle-8.9" >> "$GITHUB_ENV"
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
       - name: Verify the preserved playback contracts
         run: python3 .github/scripts/check-playback-baseline.py
       - name: Compile every variant and run the offline unit tests
+        env:
+          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER || secrets.STARSHARE_URL }}
+          STARSHARE_USER: ${{ secrets.STARSHARE_USER || secrets.STARSHARE_USERNAME }}
+          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
-          gradle testArm32DebugUnitTest testArm64DebugUnitTest assembleArm32Release assembleArm64Release --console=plain 2>&1 | tail -80
+          # Keep the full log so a compiler error can be reported as an annotation, not only in this step.
+          env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
+            gradle testArm32DebugUnitTest testArm64DebugUnitTest --console=plain 2>&1 \
+            | tee "$RUNNER_TEMP/aktv-gradle.log" | tail -40
+          ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
+          ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
+          ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
+            gradle assembleArm32Release assembleArm64Release --no-daemon --console=plain 2>&1 \
+            | tee -a "$RUNNER_TEMP/aktv-gradle.log" | tail -40
       - name: Report deterministic tests
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
@@ -37,27 +54,73 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: |
-          gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' -PliveTg=true --console=plain 2>&1 | tail -20 || true
+          # One run, so both live reports land in the same result XML: the TG feed and the playlist the
+          # one Sony section is bound to.
+          gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' --tests 'com.aktv.app.JioM3uLiveTest' -PliveTg=true -PliveJio=true --console=plain 2>&1 | tail -20 || true
           python3 .github/scripts/report-live-player.py
       - name: Stage APKs
         if: success()
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/arm32/release/*.apk out/AK-TV-arm32.apk
-          cp app/build/outputs/apk/arm64/release/*.apk out/AK-TV-arm64.apk
+          cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
+          cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
       - name: Validate and checksum the APKs
         if: success()
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
           python3 .github/scripts/verify-apk-archives.py out
+      - name: Read the build number
+        if: success()
+        id: build
+        run: |
+          version=$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1) || version=""
+          echo "version=${version:-unknown}" >> "$GITHUB_OUTPUT"
       - name: Publish the APKs
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: AK-TV-4.9.45
+          name: STREAMR-${{ steps.build.outputs.version }}
           path: |
             out/*.apk
             out/SHA256SUMS
             out/apk-validation.json
           if-no-files-found: error
           retention-days: 30
+
+  # The in-app updater reads `update.json` from the rolling `latest` release, so every verified push
+  # republishes the release and the installed app can pull the new build over itself.
+  publish:
+    needs: unit
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: STREAMR-*
+          path: out
+          merge-multiple: true
+      - name: Build the in-app update manifest
+        run: |
+          test -s out/STREAMR-arm32.apk
+          test -s out/STREAMR-arm64.apk
+          python3 .github/scripts/publish-update.test.py
+          python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+      - name: Publish the rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NEW_CODE=$(python3 -c 'import json; print(json.load(open("out/update.json"))["versionCode"])')
+          EXISTING_CODE=$(gh release download latest -p update.json -O - 2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("versionCode", 0))' 2>/dev/null || echo 0)
+          if [ "${EXISTING_CODE:-0}" -ge "$NEW_CODE" ]; then
+            echo "Skipping Verify latest publish: existing versionCode ($EXISTING_CODE) >= current ($NEW_CODE)"
+            exit 0
+          fi
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest \
+            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \
+            --target "$GITHUB_SHA" \
+            --title "STREAMR latest build" --notes-file out/update-notes.md

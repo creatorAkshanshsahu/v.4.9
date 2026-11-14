@@ -1,6 +1,6 @@
+<!-- Channel guide panel (styles.css .player-panel): cyber violet glass with cyan top/edge border. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <gradient android:type="linear" android:angle="270"
-        android:startColor="#F70C0710" android:endColor="#F7100713"/>
-    <stroke android:width="1dp" android:color="#4DFF3448"/>
-    <corners android:radius="24dp"/>
+    <solid android:color="#DC090713"/>
+    <stroke android:width="1.5dp" android:color="#6600ECF7"/>
+    <corners android:radius="16dp"/>
 </shape>

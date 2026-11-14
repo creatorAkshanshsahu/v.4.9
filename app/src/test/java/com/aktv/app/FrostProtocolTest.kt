@@ -161,6 +161,9 @@ class FrostProtocolTest {
         assertFalse(sourceRecovery.refreshNotFound(FrostProvider.OUT, 404))
         assertEquals(FrostProvider.OUT, recovery.alternative())
         recovery.visit(FrostProvider.OUT)
+        // OG is the third native provider: offered once, then there is nothing left to fall back to.
+        assertEquals(FrostProvider.OG, recovery.alternative())
+        recovery.visit(FrostProvider.OG)
         assertNull(recovery.alternative())
         recovery.reset(); assertTrue(recovery.take(source))
     }

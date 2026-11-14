@@ -46,8 +46,18 @@ class AkIntroTest {
         var done = 0; view.onDone = { done++ }
         view.start()
         val beforeDetach = done // Reduced-motion environments may legitimately finish immediately.
-        view.javaClass.getDeclaredMethod("onDetachedFromWindow").apply { isAccessible = true }.invoke(view)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        AkIntroView::class.java.getDeclaredMethod("onDetachedFromWindow").apply { isAccessible = true }.invoke(view)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(8))
         assertEquals(beforeDetach, done)
+    }
+
+    @Test fun `cyber motion entrance video is bundled as a valid H264 MP4 asset`() {
+        val bytes = RuntimeEnvironment.getApplication().resources.openRawResource(R.raw.streamr_intro_video).use { it.readBytes() }
+        assertTrue("Expected credit motion MP4 (> 2 MB), got ${bytes.size}", bytes.size > 2_000_000)
+        val header = String(bytes, 4, 4, Charsets.US_ASCII)
+        assertEquals("ftyp", header)
+        val ascii = String(bytes, Charsets.ISO_8859_1)
+        assertTrue("Expected H.264 avc1 track inside streamr_intro_video.mp4", ascii.contains("avc1"))
+        assertTrue("Expected AAC mp4a audio track inside streamr_intro_video.mp4", ascii.contains("mp4a"))
     }
 }

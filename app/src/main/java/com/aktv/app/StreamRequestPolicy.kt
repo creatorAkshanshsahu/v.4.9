@@ -37,8 +37,17 @@ class StreamRequestPolicy(private val stream: TgStream) {
                 (authRoot != null && requestRoot == authRoot) -> withToken(url, token, replace = true)
             else -> withToken(url, token, replace = false)
         }
-        val headers = linkedMapOf("Origin" to stream.requestOrigin.trimEnd('/'))
-        if (!stream.omitReferrer) headers["Referer"] = stream.requestOrigin.trimEnd('/') + "/"
+        // A stream whose media host is not a website (the playlist's signed Jio CDN link) is never handed a
+        // browser origin: Jio's CDN answers a foreign Origin/Referer with a refusal, and the IPTV player
+        // that opens the same playlist sends neither. Its own user agent still goes along, on segments too.
+        val headers = linkedMapOf<String, String>()
+        if (stream.omitOrigin) {
+            stream.headers.entries.firstOrNull { it.key.equals("User-Agent", true) }
+                ?.let { headers[it.key] = it.value }
+        } else {
+            headers["Origin"] = stream.requestOrigin.trimEnd('/')
+            if (!stream.omitReferrer) headers["Referer"] = stream.requestOrigin.trimEnd('/') + "/"
+        }
         // Headers supplied for one relay must not become the credentials of its redirect/segment host.
         if (target == origin) stream.headers.forEach { (key, value) ->
             if (stream.omitReferrer && key.equals("Referer", true)) return@forEach

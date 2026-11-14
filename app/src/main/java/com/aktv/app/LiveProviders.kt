@@ -4,7 +4,8 @@ import java.security.MessageDigest
 
 internal enum class LiveProvider(val website: String) {
     TG(TgResolver.SITE),
-    JJTV(JjtvResolver.SITE)
+    JJTV(JjtvResolver.SITE),
+    JIOM3U(JioM3uResolver.SITE)
 }
 
 /** Provider order is metadata only. There is still exactly one native playback engine. */
@@ -13,17 +14,20 @@ internal object LiveProviders {
     fun displayName(provider: LiveProvider) = when (provider) {
         LiveProvider.TG -> "TG TV"
         LiveProvider.JJTV -> "GioTV"
+        LiveProvider.JIOM3U -> "JioTV Play"
     }
 
     fun order(v2: Boolean, rememberedWebsite: String?, requested: LiveProvider? = null): List<LiveProvider> {
         if (v2) return listOf(LiveProvider.TG) // V2's numeric IDs are not Jio channel IDs.
-        // A working TG channel says nothing about a different, encrypted JJTV channel. Do not let
-        // the old global last-provider hint starve JJTV on a fresh TV installation.
         val preferred = requested ?: LiveProvider.values().firstOrNull { it.website == rememberedWebsite } ?: LiveProvider.JJTV
         return listOf(preferred) + LiveProvider.values().filter { it != preferred }
     }
 
-    fun provider(source: TgStream) = if (source.requestOrigin == JjtvResolver.SITE) LiveProvider.JJTV else LiveProvider.TG
+    fun provider(source: TgStream) = when (source.requestOrigin) {
+        JioM3uResolver.SITE -> LiveProvider.JIOM3U
+        JjtvResolver.SITE -> LiveProvider.JJTV
+        else -> LiveProvider.TG
+    }
 
     fun sourceKey(source: TgStream): String = MessageDigest.getInstance("SHA-256")
         .digest("${source.requestOrigin}\n${source.label}\n${source.url.substringBefore('?')}".toByteArray(Charsets.UTF_8))

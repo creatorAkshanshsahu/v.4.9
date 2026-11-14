@@ -50,73 +50,65 @@ class HomePreviewTest {
             root.findViewById<TextView>(R.id.homeClock).text = "8:45 PM"
             root.findViewById<TextView>(R.id.heroTitle).text = if (movies) "The Last Horizon" else "AK News"
             root.findViewById<TextView>(R.id.heroBadge).apply {
-                text = if (movies) "MOVIE  /  ON DEMAND" else "NEWS  /  LIVE"
-                setPadding(9, 3, 9, 3)
-                background = Ui.pill(1f, 0x33E11D2E, 16f).apply { setStroke(1, Accent.SIGNAL) }
+                text = if (movies) "2026 · Sci-Fi · ★ 6.6" else "News · English"
+                setPadding(0, 0, 0, 0)
+                background = null
+                setTextColor(Accent.DIM)
             }
-            root.findViewById<TextView>(R.id.heroSubheading).text = if (movies) "Your next movie night starts here." else "A clearer view of what’s next."
+            root.findViewById<View>(R.id.heroSubheading).visibility = View.GONE
             root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "A story for the long way home." else "Live. Global. Independent. Breaking news, bigger perspectives."
             root.findViewById<View>(R.id.status).visibility = View.GONE
             root.findViewById<View>(R.id.heroDesc).visibility = View.VISIBLE
             root.findViewById<TextView>(R.id.heroDot).apply {
                 visibility = View.VISIBLE
-                text = if (movies) "FEATURED MOVIE" else "●  LIVE NOW"
+                text = if (movies) "ORIGINAL FILM" else "LIVE"
                 setTextColor(Accent.SIGNAL)
             }
             root.findViewById<ImageView>(R.id.heroLogo).apply {
-                setImageResource(R.drawable.aktv_mark_cinematic)
+                setImageResource(R.drawable.streamr_mark)
                 visibility = if (movies) View.GONE else View.VISIBLE
             }
-            root.findViewById<TextView>(R.id.heroLogoCaption).visibility = if (movies) View.GONE else View.VISIBLE
+            root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF1A070D.toInt(), 0xFF2A0A14.toInt(), 0xFF07040A.toInt()))
+                intArrayOf(0xFF0A061A.toInt(), 0xFF14092C.toInt(), 0xFF060410.toInt()))
             root.findViewById<ImageView>(R.id.heroBackdrop).apply {
                 setImageResource(R.drawable.home_hero_cinematic); visibility = View.VISIBLE; alpha = 1f
             }
             root.findViewById<View>(R.id.heroPreview).visibility = View.GONE
-            root.findViewById<View>(R.id.heroGlow).visibility = View.VISIBLE
+            root.findViewById<View>(R.id.heroGlow).visibility = View.GONE
             val chips = root.findViewById<LinearLayout>(R.id.heroChips)
-            val heroActions = if (movies) listOf("▶   More info") else listOf("▶   Play Live", "ⓘ   Details")
+            val heroActions = if (movies) listOf("▶   Play", "More Info") else listOf("▶   Play Live", "Details")
             heroActions.forEachIndexed { index, label ->
                 chips.addView(TextView(activity).apply {
-                    text = label; textSize = if (compact) 11f else 13f; setTextColor(if (index == 0) Accent.ABYSS else Accent.TEXT)
-                    setPadding(16, if (compact) 7 else 10, 18, if (compact) 7 else 10)
-                    background = Ui.pill(1f, if (index == 0) Color.WHITE else 0xB30A111B.toInt(), 12f).apply {
-                        setStroke(if (index == 0) 0 else 1, if (index == 0) Color.TRANSPARENT else Accent.SIGNAL)
+                    text = label; textSize = if (compact) 11f else 13f; setTextColor(Accent.TEXT)
+                    setPadding(22, if (compact) 7 else 11, 22, if (compact) 7 else 11)
+                    background = Ui.pill(1f, if (index == 0) Accent.BRAND else 0xB3100A23.toInt(), 12f).apply {
+                        if (index != 0) setStroke(1, 0x4000ECF7)
                     }
-                }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 8 })
+                }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 12 })
             }
-            for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
+            for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0x33E11D2E else Color.TRANSPARENT, 12f).apply {
-                    if (selected) setStroke(2, Accent.SIGNAL)
-                }
+                view.background = Ui.pill(1f, if (selected) Accent.BRAND else Color.TRANSPARENT, 18f)
                 view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
-                view.compoundDrawableTintList = android.content.res.ColorStateList.valueOf(if (selected) Accent.SIGNAL else Accent.DIM)
             }
-            for (id in listOf(R.id.phoneLive, R.id.phoneV2, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneSearch)) {
+            for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) 0x33E11D2E else Color.TRANSPARENT, 20f).apply {
-                    if (selected) setStroke(2, Accent.SIGNAL)
+                view.background = Ui.pill(1f, if (selected) Accent.BRAND else 0xA8100A23.toInt(), 22f).apply {
+                    setStroke(if (selected) 2 else 1, if (selected) Accent.SIGNAL else 0x4000ECF7)
                 }
                 view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
             }
-            // The Live tab's real shape: generic channels, then the Sony shelf built by the shipped
-            // selector, then trending. The names below are the ones the live feed actually serves.
-            val sonyCatalogue = listOf(
-                "SET HD", "Sony SAB HD", "Sony SAB SD", "Sony Marathi SD", "Sony Pal", "Sony aath",
-                "Sony Yay Hindi", "Sony Max HD", "Sony MAX1", "Sony Wah", "Sony MAX2", "Sony Pix HD",
-                "Sony Ten 1 HD", "Sony Ten 2 HD", "Sony Ten 3 Hindi HD", "Sony BBC Earth HD"
-            ).mapIndexed { index, name -> MainActivity.Channel((3400 + index).toString(), name, "Sony", "") }
-            val sonyShelf = LiveCollections.channels(LiveCollections.SONY, sonyCatalogue)
+            // The Live tab's real shape: the live row, the trending strip, then the recent row. The Sony
+            // section that used to sit between them is gone; nothing here uses the browser or the site page.
             // Mirrors the app's own monogram rule, so the preview shows what a logo-less tile really shows.
             fun initials(n: String): String {
                 val w = n.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
                 return (if (w.size >= 2) "${w[0].first()}${w[1].first()}" else n.trim().take(2)).uppercase()
             }
-            val liveTitles = listOf("Live Channels", "Sony Live", "Trending on AK")
+            val liveTitles = listOf("Live Channels", "Trending Now", "Recently watched")
             val movieTitles = listOf("Trending movies", "Top rated movies", "Keep watching")
             val rows = root.findViewById<RecyclerView>(R.id.rows)
             rows.layoutManager = LinearLayoutManager(activity)
@@ -127,20 +119,18 @@ class HomePreviewTest {
                     HomeChrome.styleRow(holder.itemView, compact, 1f)
                     holder.itemView.findViewById<TextView>(R.id.rowTitle).text =
                         if (movies) movieTitles[position] else liveTitles[position]
-                    val isSony = !movies && position == 1
-                    val landscape = !movies && position == 2
+                    val landscape = !movies && position == 1
                     val list = holder.itemView.findViewById<RecyclerView>(R.id.rowList)
                     list.layoutManager = LinearLayoutManager(activity, RecyclerView.HORIZONTAL, false)
                     list.adapter = object : RecyclerView.Adapter<VH>() {
-                        override fun getItemCount() = if (isSony) sonyShelf.size else 8
+                        override fun getItemCount() = 8
                         override fun onCreateViewHolder(parent: ViewGroup, type: Int) = VH(LayoutInflater.from(activity)
                             .inflate(if (movies) R.layout.item_poster else if (landscape) R.layout.item_trending else R.layout.item_tile, parent, false))
                         override fun onBindViewHolder(item: VH, index: Int) {
                             val tile = item.itemView
                             HomeChrome.styleTile(tile, poster = movies, compact = compact, dp = 1f, landscape = landscape)
-                            // Sample tile tints sampled through the real harmoniser, so the preview shows the
-                            // crimson identity instead of the retired teal/violet palette.
-                            val colors = listOf("#3F0A14", "#2B0710", "#55202A", "#4A0812", "#8C0F1C")
+                            // Sample tile tints harmonised onto the cyber cyan-to-magenta arc.
+                            val colors = listOf("#0F2852", "#260B48", "#4A0A52", "#0B3A4D", "#3D0A40")
                                 .map { Accent.normalize(android.graphics.Color.parseColor(it)) }
                             if (landscape) {
                                 tile.findViewById<ImageView>(R.id.trendingImage).setImageResource(listOf(
@@ -162,9 +152,8 @@ class HomePreviewTest {
                                     R.drawable.home_hero_cinematic, R.drawable.home_nature_art,
                                     R.drawable.home_sports_art, R.drawable.home_family_art)[index % 4])
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
-                                tile.findViewById<TextView>(R.id.posterMeta).text = "Sample artwork"
+                                tile.findViewById<TextView>(R.id.posterMeta).text = if (movies) "MOVIE" else "SERIES"
                             } else {
-                                val channel = if (isSony) sonyShelf.getOrNull(index) else null
                                 val cardColor = colors[index % 5]
                                 tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
                                     intArrayOf(cardColor, Ui.mix(cardColor, Accent.ABYSS, 0.48f))).apply {
@@ -175,17 +164,15 @@ class HomePreviewTest {
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE
-                                    // The Sony row shows the real channel names the shelf selected, so the
-                                    // preview proves the shelf renders - not just that a row exists.
-                                    text = if (channel != null) initials(channel.name) else "AK"
+                                    text = "SR"
                                     setTextColor(Accent.GLOSS_HI)
                                     textSize = if (compact) 18f else 23f
                                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
                                 }
-                                val names = listOf("AK News", "AK Sport", "AK Reality", "AK Kids", "AK Hits")
-                                tile.findViewById<TextView>(R.id.name).text = channel?.name ?: names[index % 5]
-                                tile.findViewById<TextView>(R.id.nowCaption).text = if (channel != null) "SONY  ·  LIVE"
-                                    else listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
+                                val names = listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")
+                                tile.findViewById<TextView>(R.id.name).text = names[index % 5]
+                                tile.findViewById<TextView>(R.id.nowCaption).text =
+                                    listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
                             }
                         }
                     }

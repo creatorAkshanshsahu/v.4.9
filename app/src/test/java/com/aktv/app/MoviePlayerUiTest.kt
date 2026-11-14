@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.media3.ui.PlayerView
 import org.junit.Assert.*
@@ -30,7 +31,16 @@ class MoviePlayerUiTest {
             val views = views(activity.findViewById(android.R.id.content))
             assertEquals(1, views.count { it is PlayerView })
             assertFalse(views.any { it.javaClass.name.contains("gecko", true) })
-            for (label in listOf("Exit", "Change source", "Audio & subtitles", "Retry", "Playback details")) {
+            // Back is the site's glass circle in the header, not a text button on the control row.
+            assertTrue("Back affordance", views.any {
+                it.contentDescription?.toString() == "Back" && it.isFocusable && it.isClickable
+            })
+            // The arrow belongs in the middle of the circle: a compound drawable on an empty TextView is
+            // pinned to the start edge, which is what pushed it out to the rim of the glass circle.
+            val back = views.first { it.contentDescription?.toString() == "Back" }
+            assertTrue("the back arrow is centred in its circle: ${back.javaClass.simpleName}",
+                back is ImageView && back.scaleType == ImageView.ScaleType.CENTER)
+            for (label in listOf("Change source", "OG Server", "TG Server", "Audio & Subtitles", "Retry", "Playback details")) {
                 assertTrue(label, views.filterIsInstance<TextView>().any { it.text.toString() == label && it.isFocusable && it.isClickable })
             }
             assertTrue(views.filterIsInstance<TextView>().any { it.text.toString() == "Sample film" })

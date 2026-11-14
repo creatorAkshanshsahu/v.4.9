@@ -1,36 +1,24 @@
-<!-- Glossy crimson focus: lacquered gradient fill, bright sheen rim, warm outer glow. -->
+<!-- STREAMR cyber focus (styles.css shadow-focus): 2.5dp electric cyan ring over cyber glass. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
-        <layer-list>
-            <item>
-                <shape>
-                    <gradient android:type="linear" android:angle="270"
-                        android:startColor="#33FF3448" android:endColor="#00E11D2E"/>
-                    <corners android:radius="18dp"/>
-                </shape>
-            </item>
-            <item>
-                <shape>
-                    <gradient android:type="linear" android:angle="270"
-                        android:startColor="#4DFF3448" android:centerColor="#1AE11D2E" android:endColor="#008C0F1C"/>
-                    <corners android:radius="16dp"/>
-                    <stroke android:width="2dp" android:color="#FFFF3448"/>
-                </shape>
-            </item>
-        </layer-list>
+        <shape android:shape="rectangle">
+            <solid android:color="#1A00ECF7"/>
+            <corners android:radius="12dp"/>
+            <stroke android:width="2.5dp" android:color="@color/signal"/>
+        </shape>
     </item>
     <item android:state_activated="true">
-        <shape>
-            <solid android:color="#33E11D2E"/>
-            <corners android:radius="16dp"/>
-            <stroke android:width="1dp" android:color="#99FF3448"/>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000"/>
+            <corners android:radius="12dp"/>
+            <stroke android:width="2dp" android:color="@color/brand"/>
         </shape>
     </item>
     <item>
-        <shape>
+        <shape android:shape="rectangle">
             <solid android:color="#00000000"/>
-            <corners android:radius="16dp"/>
-            <stroke android:width="1dp" android:color="#332A1520"/>
+            <corners android:radius="12dp"/>
+            <stroke android:width="1dp" android:color="#2800ECF7"/>
         </shape>
     </item>
 </selector>
