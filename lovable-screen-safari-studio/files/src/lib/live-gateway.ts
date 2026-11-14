@@ -2213,16 +2213,18 @@ async function resolveDirectPlayCandidates(
 
   const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
 
-  for (const tc of tgCandidates) {
-    pushCandidate({
-      ...tc,
-      clearKeys: Object.keys(tc.clearKeys).length > 0 ? tc.clearKeys : gioKeys,
-    });
-  }
+  // TG RPC servers (`Server 1` + `Server 2`), Gio keys backfilling bare backups.
+  const tgList: DirectPlayCandidate[] = tgCandidates.map((tc) => ({
+    ...tc,
+    clearKeys: Object.keys(tc.clearKeys).length > 0 ? tc.clearKeys : gioKeys,
+  }));
 
-  // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
+  // 2. Jio CDN URLs (`jstr4web.json` catalogue) + fresh Star/Regular/playlist `__hdnea__` tokens.
   // URLs stay verbatim (query intact) exactly like the app's `JjtvProtocol.streams`: the browser
   // applies the cookie with replace semantics and keeps every sibling parameter.
+  // Labelled JioTV, not GioTV: the catalogue JSON is the only GioTV part — the bytes the
+  // browser plays come from Jio's own `*.cdn.jio.com` edges.
+  const jioList: DirectPlayCandidate[] = [];
   if (matchedGio) {
     for (const rawUrl of matchedGio.urls) {
       const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
@@ -2232,8 +2234,8 @@ async function resolveDirectPlayCandidates(
       // an expired playlist cookie loses automatically, so no extra candidate is needed.
       const freshCookie = playlistCookie ? pickFreshestHdnea([playlistCookie, coarseCookie]) : coarseCookie;
       if (freshCookie) {
-        pushCandidate({
-          label: "GioTV Direct · Fresh Token",
+        jioList.push({
+          label: "JioTV Direct · Fresh Token",
           url: rawUrl,
           cookie: freshCookie,
           clearKeys: gioKeys,
@@ -2241,8 +2243,8 @@ async function resolveDirectPlayCandidates(
         });
       }
       if (embeddedToken) {
-        pushCandidate({
-          label: "GioTV Direct · Embedded Token",
+        jioList.push({
+          label: "JioTV Direct · Embedded Token",
           url: rawUrl,
           cookie: embeddedToken,
           clearKeys: gioKeys,
@@ -2250,8 +2252,8 @@ async function resolveDirectPlayCandidates(
         });
       }
       if (!freshCookie && !embeddedToken) {
-        pushCandidate({
-          label: "GioTV Direct",
+        jioList.push({
+          label: "JioTV Direct",
           url: rawUrl,
           cookie: "",
           clearKeys: gioKeys,
@@ -2260,6 +2262,14 @@ async function resolveDirectPlayCandidates(
       }
     }
   }
+
+  // The app's JioTV tab connects to JioTV, not TG: a `jio:` channel tries its Jio CDN
+  // candidates before TG's servers, and only falls back to TG when Jio fails. TG TV tab
+  // (`tg:`) and maxTV rescue (`st:`) keep TG first. The freshest-first sort below is stable,
+  // so this preference holds among equally-fresh tokens while a working token always beats
+  // an expired one.
+  const ordered = rawId.toLowerCase().startsWith("jio:") ? [...jioList, ...tgList] : [...tgList, ...jioList];
+  for (const c of ordered) pushCandidate(c);
 
   // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
   if (candidates.length === 0) {

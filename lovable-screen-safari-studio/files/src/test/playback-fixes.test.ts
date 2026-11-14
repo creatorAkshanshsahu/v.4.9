@@ -305,11 +305,47 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
     expect(body.ok).toBe(true);
     expect(body.matchedId).toBe("892");
     expect(body.candidates.length).toBeGreaterThanOrEqual(3);
+    // JioTV tab connects to JioTV first: the Jio CDN candidate precedes TG servers for `jio:` ids.
+    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
+    expect(body.candidates[0]!.cookie).toContain("regular_token_abc");
+    // TG _serverFn x-tss-framed RPC decoded: Server 1 present as fallback with normalized URL + keys.
+    const tgS1 = body.candidates.find((c) => c.cookie.includes("tg_srv1_hmac"))!;
+    expect(tgS1).toBeDefined();
     // Double slash normalized to single slash so Jio CDN never returns 404
-    expect(body.candidates[0]!.url).toBe("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd");
-    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
+    expect(tgS1.url).toBe("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd");
     // Hyphenated UUID KID normalized to 32-char hex
-    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe("2d56ef4bfcfb9fb0ae172f29b9cd6bfe");
+    expect(tgS1.clearKeys["400131994b445d8c8817202248760fda"]).toBe("2d56ef4bfcfb9fb0ae172f29b9cd6bfe");
+  });
+
+  it("tries TG servers first for `tg:` channels and keeps JioTV as fallback", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
+      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
+      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
+        return makeFramedTgRpcResponse({
+          result: {
+            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
+            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
+            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
+          },
+        });
+      }
+      return new Response("", { status: 404 });
+    });
+
+    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
+    const res = await maybeHandleLiveRequest(
+      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
+      {},
+    );
+    expect(res!.status).toBe(200);
+    const body = (await res!.json()) as {
+      candidates: Array<{ label: string; url: string; cookie: string }>;
+    };
+    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
+    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
+    expect(body.candidates.some((c) => c.label === "JioTV Direct · Fresh Token")).toBe(true);
   });
 
   it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
@@ -443,7 +479,7 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
       candidates: Array<{ label: string; url: string; cookie: string }>;
     };
     // Same channel-minted cookie the Android app plays with wins over cookies.json.
-    expect(body.candidates[0]!.label).toBe("GioTV Direct · Fresh Token");
+    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
     expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
   });
 });

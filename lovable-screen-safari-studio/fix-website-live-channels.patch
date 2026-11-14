@@ -1,16 +1,16 @@
-From d48e94b6b6d228668e147621650c6ac11dd27af9 Mon Sep 17 00:00:00 2001
+From b9d0ea86f8cba89065a8f7f459fc59450d559e87 Mon Sep 17 00:00:00 2001
 From: STREAMR Bot <noreply@github.com>
-Date: Sat, 14 Nov 2026 03:18:48 +0000
-Subject: [PATCH] fix(live): apply app-identical hdnea token policy + playlist
- per-channel cookies
+Date: Sat, 14 Nov 2026 03:56:46 +0000
+Subject: [PATCH] fix(live): JioTV tab connects to JioTV first, TG kept as
+ fallback
 
 ---
  package.json                           |   1 +
  src/components/tv/LiveVideoSurface.tsx | 505 +++++++++++++++++++------
  src/lib/direct-token.ts                |  70 ++++
- src/lib/live-gateway.ts                | 180 +++++++--
- src/test/playback-fixes.test.ts        | 120 ++++++
- 5 files changed, 726 insertions(+), 150 deletions(-)
+ src/lib/live-gateway.ts                | 216 +++++++++--
+ src/test/playback-fixes.test.ts        | 162 +++++++-
+ 5 files changed, 788 insertions(+), 166 deletions(-)
  create mode 100644 src/lib/direct-token.ts
 
 diff --git a/package.json b/package.json
@@ -713,7 +713,7 @@ index 0000000..41320bd
 +  return /\.m3u8(?:[?#]|$)/i.test(url);
 +}
 diff --git a/src/lib/live-gateway.ts b/src/lib/live-gateway.ts
-index d01ec64..049b50b 100644
+index d01ec64..2cac1c7 100644
 --- a/src/lib/live-gateway.ts
 +++ b/src/lib/live-gateway.ts
 @@ -2070,7 +2070,10 @@ async function resolveTgRpcCandidates(numericId: string, force = false): Promise
@@ -728,7 +728,7 @@ index d01ec64..049b50b 100644
      for (const fnId of discovered) {
        if (fnId === tgVerifiedFnId && !force) continue;
        result = await callFn(fnId);
-@@ -2169,12 +2172,43 @@ async function resolveDirectPlayCandidates(
+@@ -2169,51 +2172,88 @@ async function resolveDirectPlayCandidates(
    };
  
    // 1. Live TG RPC (`Server 1` + `Server 2`) and GioTV cookies fetched in parallel for minimum latency.
@@ -774,12 +774,26 @@ index d01ec64..049b50b 100644
    ]);
  
    const gioKeys = matchedGio ? pairsToHexRecord(matchedGio.keys) : {};
-@@ -2187,16 +2221,20 @@ async function resolveDirectPlayCandidates(
-   }
  
-   // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
+-  for (const tc of tgCandidates) {
+-    pushCandidate({
+-      ...tc,
+-      clearKeys: Object.keys(tc.clearKeys).length > 0 ? tc.clearKeys : gioKeys,
+-    });
+-  }
++  // TG RPC servers (`Server 1` + `Server 2`), Gio keys backfilling bare backups.
++  const tgList: DirectPlayCandidate[] = tgCandidates.map((tc) => ({
++    ...tc,
++    clearKeys: Object.keys(tc.clearKeys).length > 0 ? tc.clearKeys : gioKeys,
++  }));
+ 
+-  // 2. GioTV (`jstr4web.json`) direct CDN URLs + fresh Star/Regular `__hdnea__` tokens.
++  // 2. Jio CDN URLs (`jstr4web.json` catalogue) + fresh Star/Regular/playlist `__hdnea__` tokens.
 +  // URLs stay verbatim (query intact) exactly like the app's `JjtvProtocol.streams`: the browser
 +  // applies the cookie with replace semantics and keeps every sibling parameter.
++  // Labelled JioTV, not GioTV: the catalogue JSON is the only GioTV part — the bytes the
++  // browser plays come from Jio's own `*.cdn.jio.com` edges.
++  const jioList: DirectPlayCandidate[] = [];
    if (matchedGio) {
      for (const rawUrl of matchedGio.urls) {
        const container: "dash" | "hls" = /\.m3u8(?:$|\?)/i.test(rawUrl) ? "hls" : "dash";
@@ -791,23 +805,53 @@ index d01ec64..049b50b 100644
 +      // an expired playlist cookie loses automatically, so no extra candidate is needed.
 +      const freshCookie = playlistCookie ? pickFreshestHdnea([playlistCookie, coarseCookie]) : coarseCookie;
        if (freshCookie) {
-         pushCandidate({
-           label: "GioTV Direct · Fresh Token",
+-        pushCandidate({
+-          label: "GioTV Direct · Fresh Token",
 -          url: baseCleanUrl,
++        jioList.push({
++          label: "JioTV Direct · Fresh Token",
 +          url: rawUrl,
            cookie: freshCookie,
            clearKeys: gioKeys,
            container,
-@@ -2205,7 +2243,7 @@ async function resolveDirectPlayCandidates(
+         });
+       }
        if (embeddedToken) {
-         pushCandidate({
-           label: "GioTV Direct · Embedded Token",
+-        pushCandidate({
+-          label: "GioTV Direct · Embedded Token",
 -          url: baseCleanUrl,
++        jioList.push({
++          label: "JioTV Direct · Embedded Token",
 +          url: rawUrl,
            cookie: embeddedToken,
            clearKeys: gioKeys,
            container,
-@@ -2242,10 +2280,31 @@ async function resolveDirectPlayCandidates(
+         });
+       }
+       if (!freshCookie && !embeddedToken) {
+-        pushCandidate({
+-          label: "GioTV Direct",
++        jioList.push({
++          label: "JioTV Direct",
+           url: rawUrl,
+           cookie: "",
+           clearKeys: gioKeys,
+@@ -2223,6 +2263,14 @@ async function resolveDirectPlayCandidates(
+     }
+   }
+ 
++  // The app's JioTV tab connects to JioTV, not TG: a `jio:` channel tries its Jio CDN
++  // candidates before TG's servers, and only falls back to TG when Jio fails. TG TV tab
++  // (`tg:`) and maxTV rescue (`st:`) keep TG first. The freshest-first sort below is stable,
++  // so this preference holds among equally-fresh tokens while a working token always beats
++  // an expired one.
++  const ordered = rawId.toLowerCase().startsWith("jio:") ? [...jioList, ...tgList] : [...tgList, ...jioList];
++  for (const c of ordered) pushCandidate(c);
++
+   // 3. Also include direct HTTPS M3U entry if `tg:` or `jio:` came from a custom M3U playlist.
+   if (candidates.length === 0) {
+     const pool = rawId.startsWith("tg:")
+@@ -2242,10 +2290,31 @@ async function resolveDirectPlayCandidates(
      }
    }
  
@@ -840,7 +884,7 @@ index d01ec64..049b50b 100644
    };
  }
  
-@@ -3273,10 +3332,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3273,10 +3342,42 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        au.style.display = "none"; au.innerHTML = "";
      }
      function sUrl(ext, probe) { return "/api/live/stream/" + encodeURIComponent(ch.id) + ext + "?_t=" + Date.now() + (probe ? "&probe=1" : ""); }
@@ -885,7 +929,7 @@ index d01ec64..049b50b 100644
          hp.loadSource(url); hp.attachMedia(v);
          hp.on(Hls.Events.MANIFEST_PARSED, () => {
            const tr = hp.audioTracks || [];
-@@ -3361,44 +3452,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3361,44 +3462,73 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
        Promise.resolve(mp.play()).catch(() => { v.muted = true; mu.textContent = "Unmute"; v.play().catch(() => {}); });
        mp.on(mpegts.Events.ERROR, () => { if (fallback) startHls(sUrl(".m3u8")); else { st.textContent = "Stream interrupted."; rt.style.display = "inline-block"; ov.classList.remove("hide"); } });
      }
@@ -975,7 +1019,7 @@ index d01ec64..049b50b 100644
                  try {
                    let xml = new TextDecoder().decode(resp.data);
                    if (!/<MPD[\s>]/i.test(xml)) return;
-@@ -3417,9 +3537,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3417,9 +3547,11 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
              }
              try {
                await sp.attach(v);
@@ -989,7 +1033,7 @@ index d01ec64..049b50b 100644
              } catch {}
            }
          }
-@@ -3470,7 +3592,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
+@@ -3470,7 +3602,7 @@ function renderStandaloneEmbedHtml(ch: LiveChannelDto): string {
          if (v.videoWidth > 0 && v.videoHeight > 0) return;
          st.textContent = "The stream started but no video arrived. Segments were refused or the format is unsupported.";
          rt.style.display = "inline-block"; ov.classList.remove("hide");
@@ -999,7 +1043,7 @@ index d01ec64..049b50b 100644
      v.onpause = () => { pl.textContent = "Play"; };
      pl.onclick = () => v.paused ? v.play() : v.pause();
 diff --git a/src/test/playback-fixes.test.ts b/src/test/playback-fixes.test.ts
-index aecc8a2..9ee38c0 100644
+index aecc8a2..bf82be6 100644
 --- a/src/test/playback-fixes.test.ts
 +++ b/src/test/playback-fixes.test.ts
 @@ -1,4 +1,10 @@
@@ -1013,7 +1057,58 @@ index aecc8a2..9ee38c0 100644
  
  afterEach(() => {
    delete (globalThis as { __env__?: unknown }).__env__;
-@@ -359,5 +365,119 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+@@ -299,11 +305,47 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
+     expect(body.ok).toBe(true);
+     expect(body.matchedId).toBe("892");
+     expect(body.candidates.length).toBeGreaterThanOrEqual(3);
++    // JioTV tab connects to JioTV first: the Jio CDN candidate precedes TG servers for `jio:` ids.
++    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
++    expect(body.candidates[0]!.cookie).toContain("regular_token_abc");
++    // TG _serverFn x-tss-framed RPC decoded: Server 1 present as fallback with normalized URL + keys.
++    const tgS1 = body.candidates.find((c) => c.cookie.includes("tg_srv1_hmac"))!;
++    expect(tgS1).toBeDefined();
+     // Double slash normalized to single slash so Jio CDN never returns 404
+-    expect(body.candidates[0]!.url).toBe("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd");
+-    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
++    expect(tgS1.url).toBe("https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd");
+     // Hyphenated UUID KID normalized to 32-char hex
+-    expect(body.candidates[0]!.clearKeys["400131994b445d8c8817202248760fda"]).toBe("2d56ef4bfcfb9fb0ae172f29b9cd6bfe");
++    expect(tgS1.clearKeys["400131994b445d8c8817202248760fda"]).toBe("2d56ef4bfcfb9fb0ae172f29b9cd6bfe");
++  });
++
++  it("tries TG servers first for `tg:` channels and keeps JioTV as fallback", async () => {
++    vi.stubGlobal("fetch", async (url: string) => {
++      const u = String(url);
++      if (u.includes("giotv-6op.pages.dev/jstr4web.json")) return new Response(GIO_CATALOGUE, { status: 200 });
++      if (u.includes("allinonereborn2.online/jstrweb2/cookies.json")) return new Response(REGULAR_COOKIES, { status: 200 });
++      if (u.includes("livetgtv.lovable.app/_serverFn/")) {
++        return makeFramedTgRpcResponse({
++          result: {
++            urls: ["https://jiotvmblive.cdn.jio.com/bpk-tv/Sony_SAB_HD_MOB/WDVLive/index.mpd"],
++            cookie: "__hdnea__=st=1794000000~exp=1999999999~acl=/*~hmac=tg_srv1_hmac",
++            clearKeys: { "400131994b445d8c8817202248760fda": "2d56ef4bfcfb9fb0ae172f29b9cd6bfe" },
++          },
++        });
++      }
++      return new Response("", { status: 404 });
++    });
++
++    const { maybeHandleLiveRequest } = await import("@/lib/live-gateway");
++    const res = await maybeHandleLiveRequest(
++      new Request("https://screen-safari-studio.lovable.app/api/live/direct-config?id=tg%3A892&refresh=1"),
++      {},
++    );
++    expect(res!.status).toBe(200);
++    const body = (await res!.json()) as {
++      candidates: Array<{ label: string; url: string; cookie: string }>;
++    };
++    expect(body.candidates[0]!.label).toBe("TG Live · Server 1");
++    expect(body.candidates[0]!.cookie).toContain("tg_srv1_hmac");
++    expect(body.candidates.some((c) => c.label === "JioTV Direct · Fresh Token")).toBe(true);
+   });
+ 
+   it("rescues a maxTV channel (st:1001, Star Sports 1 Hindi HD) via Star per-channel cookie without matching Star Sports 2", async () => {
+@@ -359,5 +401,119 @@ describe("Browser-Direct CDN playback (/api/live/direct-config) for Cloudflare W
      expect(body.channels.map((c) => c.id)).toContain("jio:165");
      expect(body.channels[0]!.container).toBe("dash");
    });
@@ -1095,7 +1190,7 @@ index aecc8a2..9ee38c0 100644
 +      candidates: Array<{ label: string; url: string; cookie: string }>;
 +    };
 +    // Same channel-minted cookie the Android app plays with wins over cookies.json.
-+    expect(body.candidates[0]!.label).toBe("GioTV Direct · Fresh Token");
++    expect(body.candidates[0]!.label).toBe("JioTV Direct · Fresh Token");
 +    expect(body.candidates[0]!.cookie).toContain("playlist_channel_892");
 +  });
 +});

@@ -1,6 +1,6 @@
 # Website Live TV Playback Fix (`creatorAkshanshsahu/screen-safari-studio`)
 
-Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 87 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
+Production-verified fix for **`https://screen-safari-studio.lovable.app`** (`creatorAkshanshsahu/screen-safari-studio`, built cleanly against `main` @ `63a50a2` with **18/18 Vitest suites / 88 tests passing**, **`tsc --noEmit` = 0 errors**, and a clean **`vite build` (`cloudflare-module`)**).
 
 > `main` already contains the Browser-Direct CDN release (PR #12). This update fixes JioTV channels not playing in the browser on top of it.
 
@@ -35,6 +35,7 @@ The Android app and the website resolve the **same** TG/JJTV URLs + `__hdnea__` 
 3. **`src/lib/live-gateway.ts`**
    - `/api/live/direct-config` hands the browser **verbatim** catalogue URLs (query intact) + cookie separately, like the app's `JjtvProtocol.streams`; TG leg budget-raced at 5s; expired tokens pruned; freshest-first ordering.
    - **Playlist per-channel cookies**: when the worker can read `jtv39.m3u8`, the entry's own `#EXTHTTP` cookie (BTS entries carry a token minted for exactly their channel path, e.g. `acl=/bpk-tv/History_HD_BTS/WDVLive/*`) is preferred over the coarse `cookies.json` token via freshness comparison — the same cookie the Android app plays with. Budget-raced at 3s so a blocked playlist fetch never delays direct-config.
+   - **Source-aware ordering + JioTV labels**: like the app, the JioTV tab (`jio:`) now tries its Jio CDN candidates first (`Trying JioTV Direct · Fresh Token…`) and only falls back to `TG Live · Server 1/2` when Jio fails; the TG TV tab and maxTV rescue keep TG first. Freshness still wins overall (a working token always beats an expired one).
    - `/embed/:id` standalone player gets the same session-token + redirect-learning policy for both Shaka and hls.js.
 
 4. **`package.json`** — restores `@testing-library/dom@^10.4.2`, accidentally removed by `683ea35`, which broke all 18 Vitest suites.
@@ -50,7 +51,7 @@ The Android app and the website resolve the **same** TG/JJTV URLs + `__hdnea__` 
 ./lovable-screen-safari-studio/sync-to-lovable.sh
 cd screen-safari-studio
 git add -A
-git commit -m "fix(live): apply app-identical hdnea token policy + playlist per-channel cookies"
+git commit -m "fix(live): JioTV tab connects to JioTV first, TG kept as fallback"
 git push origin main
 ```
 
