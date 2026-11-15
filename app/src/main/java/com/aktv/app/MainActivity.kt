@@ -278,6 +278,7 @@ class MainActivity : AppCompatActivity() {
     }
     private var updateNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var updateDownloading = false
+    private var pendingUpdate: UpdateRelease? = null
     // HD smoothness: picture size is capped to what this box can decode, and lowered by itself if frames start dropping
     private var trackSel: androidx.media3.exoplayer.trackselection.DefaultTrackSelector? = null
     private var silenceHintedFor: ExoPlayer? = null
@@ -4657,6 +4658,11 @@ class MainActivity : AppCompatActivity() {
             if (lastRowsFocus?.takeIf { it.isAttachedToWindow }?.requestFocus() != true) rowsView.requestFocus()
         } }
         if (channelsTab) { val sel = heroTile; refreshRowsKeepFocus(); setHero(sel, immediate = true); scheduleHeroRotation() }
+        // A release found mid-playback waited for the shelf; offer it now that the video is gone.
+        pendingUpdate?.let { release ->
+            pendingUpdate = null
+            ui.post { if (!isFinishing && !isDestroyed && !playbackActive) promptUpdate(release) }
+        }
     }
 
     private fun shortOk() {
@@ -5072,7 +5078,12 @@ class MainActivity : AppCompatActivity() {
                     prefs.edit().putLong("update_checked_at", System.currentTimeMillis())
                         .putLong("update_checked_code", code).apply()
                 }
-                if (release != null) promptUpdate(release)
+                if (release != null) {
+                    // A modal over playing video is how an update gets installed mid-match: silent
+                    // checks hold their release for the shelf, while an asked-for check answers now.
+                    if (UpdateManifest.defersToShelf(interactive, playbackActive)) pendingUpdate = release
+                    else { pendingUpdate = null; promptUpdate(release) }
+                }
                 else if (interactive) {
                     Toast.makeText(this, if (reachable) "STREAMR $appVersion is the latest published build." else
                         "Couldn't reach the update service. Check the connection and try again.", Toast.LENGTH_LONG).show()

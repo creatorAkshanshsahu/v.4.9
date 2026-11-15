@@ -97,6 +97,12 @@ internal object UpdateManifest {
     }
 
     /**
+     * Silent checks never interrupt playback: a release found while video is playing is held for the
+     * shelf instead of shown as a modal. A check the viewer asked for always answers at once.
+     */
+    fun defersToShelf(interactive: Boolean, playbackActive: Boolean): Boolean = !interactive && playbackActive
+
+    /**
      * Reads the same [UpdateRelease] from GitHub's release JSON. The version is published in the release
      * notes ("Version code **119**", written by `.github/scripts/publish-update.py`) and each asset carries
      * a `sha256:` digest, so nothing has to be trusted that the installer would not check anyway.

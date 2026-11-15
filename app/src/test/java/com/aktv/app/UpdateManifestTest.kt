@@ -106,4 +106,11 @@ class UpdateManifestTest {
         assertNull(UpdateManifest.fromReleaseApi("", "arm32"))
         assertNull(UpdateManifest.fromReleaseApi("{\"assets\":[]}", "arm32"))
     }
+
+    @Test fun `silent checks hold releases for the shelf, asked checks answer at once`() {
+        assertTrue(UpdateManifest.defersToShelf(interactive = false, playbackActive = true))
+        assertFalse(UpdateManifest.defersToShelf(interactive = false, playbackActive = false))
+        assertFalse(UpdateManifest.defersToShelf(interactive = true, playbackActive = true))
+        assertFalse(UpdateManifest.defersToShelf(interactive = true, playbackActive = false))
+    }
 }
