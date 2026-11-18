@@ -3671,7 +3671,8 @@ class MainActivity : AppCompatActivity() {
             profile.allowReportedCapabilityExceedance, profile.height, stable,
             remember = { selected -> channel?.let { prefs.edit().putInt("q_${it.key}", selected.height)
                 .putBoolean("stable_picture_${it.key}", true).apply() } },
-            notice = { text -> if (player === p) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); showInfo() } })
+            notice = { text -> if (player === p) { Toast.makeText(this, text, Toast.LENGTH_LONG).show(); showInfo() } },
+            onExhausted = { if (player === p) advanceNative("The picture kept stalling at the lowest rendition") })
         picture = controller
         p.addAnalyticsListener(controller); p.addListener(controller)
         p.addAnalyticsListener(NativePlaybackDiagnostics(trace))
@@ -3745,7 +3746,11 @@ class MainActivity : AppCompatActivity() {
                         playMsg(null)
                     }
                 }
-                Player.STATE_BUFFERING -> spinner.visibility = View.GONE
+                // A mid-playback stall is honest feedback, not a silent frozen frame: the spinner
+                // and status only appear after the first frame, so initial tuning still shows the
+                // CONNECTING banner alone.
+                Player.STATE_BUFFERING -> if (renderedFrame) { spinner.visibility = View.VISIBLE; playMsg("Buffering…") }
+                else spinner.visibility = View.GONE
                 Player.STATE_ENDED -> { trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded")); advanceNative("The live stream ended") }
             }
         }

@@ -74,6 +74,29 @@ internal class FrameDropWindow(private val settleMs: Long = 6000, private val co
     }
 }
 
+/**
+ * Decides when an exhausted step-down (no lower rendition exists) should hand the stall to source
+ * recovery instead of holding a starving server forever. Pure, so the rule itself is unit-tested.
+ *
+ * A first exhausted event only warns. A second consecutive one escalates, and only with evidence of
+ * upstream starvation (this stall is buffering, or buffering happened recently). Pure decode overload
+ * on a healthy feed never burns through servers: switching cannot lighten the decoder.
+ */
+internal class ExhaustionEscalator(
+    private val requiredStreak: Int = 2,
+    private val bufferEvidenceMs: Long = 60_000
+) {
+    private var streak = 0
+    fun relieved() { streak = 0 }
+    fun exhausted(now: Long, bufferingNow: Boolean, lastBufferAt: Long): Boolean {
+        streak++
+        if (streak < requiredStreak) return false
+        if (!bufferingNow && (lastBufferAt <= 0 || now - lastBufferAt > bufferEvidenceMs)) return false
+        streak = 0
+        return true
+    }
+}
+
 /** One controller per player instance: old codec callbacks cannot lower a newly selected channel. */
 internal class NativePictureController(
     private val owner: ExoPlayer,
@@ -83,7 +106,8 @@ internal class NativePictureController(
     initialCeiling: Int,
     stable: Boolean,
     private val remember: (VideoRendition) -> Unit,
-    private val notice: (String) -> Unit
+    private val notice: (String) -> Unit,
+    private val onExhausted: () -> Unit = {}
 ) : Player.Listener, AnalyticsListener {
     private data class Track(val group: Tracks.Group, val index: Int, val rendition: VideoRendition)
     private val drops = FrameDropWindow().apply { reset(SystemClock.elapsedRealtime()) }
@@ -91,6 +115,8 @@ internal class NativePictureController(
     private var fixed = stable
     private var lock: VideoRendition? = null
     private var exhaustedNotice = false
+    private var lastBufferAt = 0L
+    private val escalator = ExhaustionEscalator()
     private var bufferedAt = 0L
     private var hadFrame = false
     private var nextBufferStep = 0L
@@ -120,18 +146,18 @@ internal class NativePictureController(
 
     fun automatic(newCeiling: Int = ceiling) {
         if (!isCurrent()) return
-        fixed = false; lock = null; exhaustedNotice = false; ceiling = newCeiling
+        fixed = false; lock = null; exhaustedNotice = false; escalator.relieved(); ceiling = newCeiling
         selector.setParameters(selector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO))
         drops.reset(SystemClock.elapsedRealtime())
     }
     fun stable() {
         if (!isCurrent()) return
-        fixed = true; lock = owner.videoFormat?.let(::rendition)
+        fixed = true; lock = owner.videoFormat?.let(::rendition); escalator.relieved()
         applyLock()
     }
     fun select(choice: VideoRendition) {
         if (!isCurrent()) return
-        fixed = true; lock = choice; ceiling = choice.height; exhaustedNotice = false
+        fixed = true; lock = choice; ceiling = choice.height; exhaustedNotice = false; escalator.relieved()
         applyLock(); remember(choice); drops.settledChange(SystemClock.elapsedRealtime())
     }
     private fun applyLock() {
@@ -160,7 +186,7 @@ internal class NativePictureController(
     }
     override fun onPlaybackStateChanged(state: Int) {
         if (!isCurrent()) return
-        if (state == Player.STATE_BUFFERING) { if (bufferedAt == 0L) { bufferingCount++; bufferedAt = SystemClock.elapsedRealtime() } }
+        if (state == Player.STATE_BUFFERING) { if (bufferedAt == 0L) { bufferingCount++; bufferedAt = SystemClock.elapsedRealtime(); lastBufferAt = bufferedAt } }
         else bufferedAt = 0L
     }
     override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
@@ -177,7 +203,7 @@ internal class NativePictureController(
         val lower = StableRenditions.lower(current, available)
         fixed = true
         if (lower != null) {
-            lock = lower; ceiling = lower.height; exhaustedNotice = false
+            lock = lower; ceiling = lower.height; exhaustedNotice = false; escalator.relieved()
             applyLock(); remember(lower)
             nextBufferStep = SystemClock.elapsedRealtime() + 15_000
             notice("Stable picture · ${lower.label} after $reason. Quality will stay here instead of climbing back up.")
@@ -188,6 +214,10 @@ internal class NativePictureController(
                 exhaustedNotice = true
                 notice("Holding the lowest available rendition (${lock!!.height}p). If stutter continues, try another source; no lower track is supplied here.")
             }
+            // A single-rendition server that keeps starving is retried no further here: recovery
+            // moves to the next server (for example StarShare HLS after MPEG-TS) instead of
+            // holding a dying stream until it goes black.
+            if (escalator.exhausted(SystemClock.elapsedRealtime(), reason == "buffering", lastBufferAt)) onExhausted()
         }
     }
 }
