@@ -5,6 +5,8 @@ import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -214,5 +216,14 @@ class MainActivityLaunchTest {
     private fun collect(view: View, out: MutableList<String>) {
         if (view is TextView) out.add(view.text.toString())
         if (view is ViewGroup) for (i in 0 until view.childCount) collect(view.getChildAt(i), out)
+    }
+
+    @Test
+    fun `two portals never share a channel key even with the same channel id`() {
+        val maxTv = MainActivity.Channel(id = "101", name = "One", category = "C", logo = "", portal = true, cmd = "c1")
+        val portal2 = MainActivity.Channel(id = "101", name = "One", category = "C", logo = "", portal = true, cmd = "c1", portalId = 1)
+        assertEquals("st:101", maxTv.key)
+        assertEquals("st2:101", portal2.key)
+        assertNotEquals(maxTv.key, portal2.key)
     }
 }

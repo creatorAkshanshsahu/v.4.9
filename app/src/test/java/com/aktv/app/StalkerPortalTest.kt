@@ -210,4 +210,12 @@ class StalkerPortalTest {
         assertEquals("http://portal.example/stalker_portal/server/load.php", portal.workingEndpoint)
         assertTrue(http.headers.last()["Cookie"].orEmpty().contains("timezone=Europe/London"))
     }
+
+    @Test
+    fun `two portals never share a disk cache even with the same MAC`() {
+        val first = StalkerAccount("http://one.example/stalker_portal/c/", "00:1A:79:00:00:01", "", "")
+        val second = StalkerAccount("http://two.example/stalker_portal/c/", "00:1A:79:00:00:01", "", "")
+        assertTrue(first.cacheKey != second.cacheKey)
+        assertEquals(first.cacheKey, first.copy().cacheKey)
+    }
 }

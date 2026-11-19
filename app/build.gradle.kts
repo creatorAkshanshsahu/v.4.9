@@ -26,7 +26,7 @@ android {
     namespace = "com.aktv.app"
     compileSdk = 35
     buildFeatures { buildConfig = true }
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 159; versionName = "5.4.40"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 160; versionName = "5.4.41"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
         buildConfigField("String", "STARSHARE_SERVER", quoteBuildConfig(starshareServer))
         buildConfigField("String", "STARSHARE_USER", quoteBuildConfig(starshareUser))
