@@ -202,6 +202,17 @@ internal object FrostProtocol {
     }
 }
 
+/** The family's current documented player: `tgvidx.lovable.app/docs` publishes this embed contract. */
+internal object TgVidx {
+    const val SITE = "https://tgvidx.lovable.app"
+
+    /** Same addressing as the tgvid embed it succeeds; `lang=hi` lists Hindi-dub servers first. */
+    fun embed(title: FrostTitle, hindiFirst: Boolean = true): String {
+        val path = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
+        return "$SITE/embed/$path" + if (hindiFirst) "?lang=hi" else ""
+    }
+}
+
 internal class FrostResolver(
     private val base: HttpUrl = FrostProtocol.SITE.toHttpUrl(),
     private val client: OkHttpClient = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
@@ -227,7 +238,8 @@ internal class FrostResolver(
     /**
      * Every address where this family of sites plays a title, best first:
      *
-     * - `tgvid.lovable.app/embed/movie/{id}` - the documented embed player, no profile screen in front of it;
+     * - `tgvidx.lovable.app/embed/movie/{id}` - the family's current documented player (TG HUB servers);
+     * - `tgvid.lovable.app/embed/movie/{id}` - the previous documented embed player;
      * - `tgflix.lovable.app/play/{id}` - the route the viewer uses, behind "Who's Watching?";
      * - `tgfrost.lovable.app/watch/movie/{id}` - the host the app's own API has always used.
      *
@@ -238,6 +250,11 @@ internal class FrostResolver(
         val tv = if (title.isSeries) "tv/${title.id}/${title.season}/${title.episode}" else "movie/${title.id}"
         val server = if (provider == FrostProvider.FROST) "" else "?server=${provider.id}"
         return buildList<Pair<String, String?>> {
+            // TGVidx first: the family's current player, TG HUB servers preferred automatically. No
+            // `server` value is sent: its names (cinemaos, …) are not this app's provider ids, and an
+            // unknown one would only burn its silent auto-switch before landing where it lands anyway.
+            add(TgVidx.embed(title) to "${TgVidx.SITE}/")
+            add(TgVidx.embed(title, hindiFirst = false) to "${TgVidx.SITE}/")
             // The embed's own documentation (`tgvid.lovable.app/docs`) publishes these exact addresses,
             // and says a Hindi-dub server is listed first when `lang` asks for one.
             add("https://tgvid.lovable.app/embed/$tv${if (server.isEmpty()) "?lang=hi" else "$server&lang=hi"}" to "https://tgvid.lovable.app/")

@@ -209,13 +209,20 @@
       "from": "880302f75086bbfbaa1f1d17df5eea7a68a6e444556ca392c35ec43836f0ee2f",
       "to": "ea5d4a9e66fa7f30ae1193879ff88e3f3486916b0ec0562ee9771acdcfd1b4bb",
       "unchanged": "Track selection, profiles, buffers, decoder fallback, MediaCodec selector policy and secure-decoder requirements are byte-identical."
+    },
+    {
+      "change": "sitePages() tries the family's current documented player (tgvidx.lovable.app/embed/…) first, built by the pure TgVidx.embed() helper; the tgvid/tgflix/tgfrost fallbacks keep their order.",
+      "file": "app/src/main/java/com/aktv/app/FrostMovies.kt",
+      "from": "4cee502febffdda8010beee00dfd67c91c87456fc7d5df6342892444b42fcaa4",
+      "to": "06de8a873cb5f83005bd141969b686d111b2d10322d054a81d6d8485f32a8b9d",
+      "unchanged": "Endpoint construction, /api/sources parsing, mediaUrl() validation, header allow-listing and scoping, DRM refusal, mirrors, subtitle mapping, memo/limits, preflight and every provider id are unchanged."
     }
   ],
   "purpose": "Preserve user-confirmed working request/source/DRM and VOD contracts during the UI and picture-stability rebuild.",
   "sha256": {
     "app/src/main/java/com/aktv/app/ClearKeyDashManifestParser.kt": "3b6ce8a9adeed73195bd55898d00806efa87cf58471736d56e8e76e08ed2bc78",
     "app/src/main/java/com/aktv/app/FrostMedia.kt": "0f62c6dc20fe6bfd8e8db03fe70e91857e6a3e100fb66c280a6ae4919e0afcb1",
-    "app/src/main/java/com/aktv/app/FrostMovies.kt": "4cee502febffdda8010beee00dfd67c91c87456fc7d5df6342892444b42fcaa4",
+    "app/src/main/java/com/aktv/app/FrostMovies.kt": "06de8a873cb5f83005bd141969b686d111b2d10322d054a81d6d8485f32a8b9d",
     "app/src/main/java/com/aktv/app/HttpReferenceClock.kt": "b8dc8e872957ed6bc9f10726050dfcb0bdd464ebef0db3bc42769fe911ba7479",
     "app/src/main/java/com/aktv/app/JjtvProtocol.kt": "399495f6588165cb12ab1f2afaeab09cb8d54743dc2865f84704b42dc2e651ef",
     "app/src/main/java/com/aktv/app/JjtvRequestProfiles.kt": "e95e0103df5052e5d3271ee55125f8b633b7e21c6e3c868e4c559aeeb0f4f497",
