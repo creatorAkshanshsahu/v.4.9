@@ -58,7 +58,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
-class VH(v: View) : RecyclerView.ViewHolder(v)
+open class VH(v: View) : RecyclerView.ViewHolder(v)
 
 /** The TG TV API answered with a non-2xx status. */
 class ApiException(val code: Int) : IOException("HTTP $code")
