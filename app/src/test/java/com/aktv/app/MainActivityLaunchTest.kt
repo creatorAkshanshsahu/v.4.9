@@ -219,6 +219,18 @@ class MainActivityLaunchTest {
     }
 
     @Test
+    fun `the Fusion tab opens the second portal section`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).create()
+        try {
+            val activity = controller.get()
+            activity.findViewById<View>(R.id.segFusion).performClick()
+            assertEquals("Fusion", activity.findViewById<TextView>(R.id.sectionTitle).text.toString())
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
     fun `two portals never share a channel key even with the same channel id`() {
         val maxTv = MainActivity.Channel(id = "101", name = "One", category = "C", logo = "", portal = true, cmd = "c1")
         val portal2 = MainActivity.Channel(id = "101", name = "One", category = "C", logo = "", portal = true, cmd = "c1", portalId = 1)

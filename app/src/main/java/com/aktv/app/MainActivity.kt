@@ -77,7 +77,7 @@ class MainActivity : AppCompatActivity() {
         // tune. It has no site provider, no playlist entry and no guide.
         val portal: Boolean = false,
         val cmd: String = "",
-        // Which Stalker portal issued this channel: 0 = maxTV (the default), 1 = Portal 2 (the
+        // Which Stalker portal issued this channel: 0 = maxTV (the default), 1 = Fusion (the
         // viewer's own subscription, entered in Portal Settings and never shipped in the APK).
         val portalId: Int = 0,
         // A plain M3U playlist channel: [stream] is the address the playlist itself lists, so a tune needs
@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
     private var portalFeaturedCached = listOf<Channel>()
     private var portalCategoryRowsCached = listOf<Row>()
     private var portalMsg = "Loading maxTV playlist…"; private var portalGenres = mapOf<String, String>()
-    // Portal 2: the viewer's own Stalker portal. Same shape as maxTV, separate lists, so a tune,
+    // Fusion: the viewer's own Stalker portal. Same shape as maxTV, separate lists, so a tune,
     // favourite or recent can never mix the two subscriptions up.
     private var allPortal2 = listOf<Channel>(); private var portal2Loaded = false; private var portal2InFlight = false; private var portal2Retried = false
     private var portal2GenreRetried = false; private var portal2GenreToken = 0
@@ -235,6 +235,7 @@ class MainActivity : AppCompatActivity() {
     private val authRecovery = PlaybackAuthRecovery()
     private val freshCredentialProviders = HashSet<LiveProvider>()
     private val recovery = PlaybackRecovery()
+    private var crossPortalUsed = false
     // A transient refusal gets two paced, fresh-metadata retries inside the existing 60 s budget.
     private var refusalRetryCount = 0
     private var okLong = false
@@ -310,12 +311,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var layer: View; private lateinit var pv: PlayerView; private lateinit var spinner: ProgressBar
     private lateinit var segLive: TextView; private lateinit var segJio: TextView; private lateinit var segPortal: TextView
     private lateinit var segSites: TextView; private lateinit var segSeries: TextView; private lateinit var segOg: TextView
-    private lateinit var segStar: TextView
-    // TV top bar: Live TV, JioTV, maxTV, Movies, Series, OG, StarShare
+    private lateinit var segStar: TextView; private lateinit var segFusion: TextView
+    // TV top bar: Live TV, JioTV, maxTV, Fusion, Movies, Series, OG, StarShare
     /** Visible sections in top-bar order. Internal tab ids are unchanged, so the screen code below is untouched. */
-    private val tabIds = intArrayOf(0, 2, 6, 3, 4, 8, 9)
+    private val tabIds = intArrayOf(0, 2, 6, 10, 3, 4, 8, 9)
     private fun posOf(tabId: Int) = tabIds.indexOf(tabId).takeIf { it >= 0 } ?: 0
-    private val segs by lazy { listOf(segLive, segJio, segPortal, segSites, segSeries, segOg, segStar) }
+    private val segs by lazy { listOf(segLive, segJio, segPortal, segFusion, segSites, segSeries, segOg, segStar) }
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
     private val segBgs by lazy { List(segs.size) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
     private val phoneSegBgs by lazy { List(phoneSegs.size + 1) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
@@ -406,6 +407,7 @@ class MainActivity : AppCompatActivity() {
         rowsView = findViewById(R.id.rows); status = findViewById(R.id.status)
         layer = findViewById(R.id.playerLayer); pv = findViewById(R.id.playerView); spinner = findViewById(R.id.spinner)
         segLive = findViewById(R.id.segLive); segJio = findViewById(R.id.segJio); segPortal = findViewById(R.id.segPortal)
+        segFusion = findViewById(R.id.segFusion)
         segSites = findViewById(R.id.segSites); segSeries = findViewById(R.id.segSeries); segOg = findViewById(R.id.segOg)
         segStar = findViewById(R.id.segStar)
         searchBtn = findViewById(R.id.searchBtn)
@@ -416,7 +418,7 @@ class MainActivity : AppCompatActivity() {
             isClickable = true
             setOnClickListener { showStarShareDialog() }
         }
-        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar).map { findViewById(it) }
+        phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneFusion, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
         heroText = findViewById(R.id.heroText); heroDot = findViewById(R.id.heroDot); heroBadge = findViewById(R.id.heroBadge)
         heroTitle = findViewById(R.id.heroTitle); heroSubheading = findViewById(R.id.heroSubheading)
@@ -659,7 +661,7 @@ class MainActivity : AppCompatActivity() {
                                     portal2VisibleCached = slice2.first
                                     portal2FeaturedCached = slice2.second
                                     portal2RowsCached = slice2.third
-                                    if (tab == 0 || tab == 6) refreshRowsKeepFocus(requestFocus = false)
+                                    if (tab == 0 || tab == 6 || tab == 10) refreshRowsKeepFocus(requestFocus = false)
                                 }
                             }
                         }
@@ -882,7 +884,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Tabs that show a channel list; 3, 4 and 8 (and StarShare VOD modes) are poster shelves. */
-    private val channelsTab get() = tab <= 2 || tab == 5 || tab == 6 || tab == 7 || (tab == 9 && xtreamMode == 0)
+    private val channelsTab get() = tab <= 2 || tab == 5 || tab == 6 || tab == 7 || tab == 10 || (tab == 9 && xtreamMode == 0)
     private val vodTab get() = tab == 3 || tab == 4 || tab == 8 || (tab == 9 && xtreamMode != 0)
     private fun vodRowsFor(t: Int) = when (t) {
         3, 4 -> vodRows[t - 3]
@@ -958,13 +960,14 @@ class MainActivity : AppCompatActivity() {
         navStyle(phoneSearchBtn, phoneSegBgs[phoneSegs.size], phoneSearchBtn.isFocused, false)
         findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
             0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; 5 -> "TATA"; 6 -> "maxTV"
-            7 -> "TG TV"; 8 -> "OG & Platforms"; 9 -> "StarShare"; else -> "Live TV"
+            7 -> "TG TV"; 8 -> "OG & Platforms"; 9 -> "StarShare"; 10 -> "Fusion"; else -> "Live TV"
         }
         findViewById<TextView>(R.id.sectionKicker).apply {
             text = when (tab) {
                 0 -> "LIVE, RIGHT NOW"
                 1 -> "PLAY ANYTIME · 24/7"; 2 -> "JIOTV PLAYLIST · NATIVE CLEARKEY"
                 3 -> "YOUR NEXT MOVIE NIGHT"; 4 -> "STORIES THAT KEEP GOING"; 6 -> "MAXTV PORTAL · NATIVE PLAYBACK"
+                10 -> "FUSION PORTAL · NATIVE PLAYBACK"
                 7 -> "TG TV PLAYLIST · NATIVE PLAYBACK"
                 8 -> "THEOGPIRATEBOT · NETFLIX · PRIME · HOTSTAR · ANIME"
                 9 -> "STARSHARE · XTREAM CODES · NATIVE PLAYBACK"
@@ -974,6 +977,7 @@ class MainActivity : AppCompatActivity() {
         }
         val count = when (tab) {
             0 -> all.size; 1 -> allV2.size; 2 -> allJio.size; 5 -> tataJio.size; 6 -> visiblePortalChannels().size; 7 -> allPlaylist.size
+            10 -> visiblePortal2Channels().size
             9 -> if (xtreamMode == 0) visibleXtreamChannels().size else vodRowsFor(9).sumOf { it.tiles.size }
             else -> vodRowsFor(tab).sumOf { it.tiles.size }
         }
@@ -1128,6 +1132,7 @@ class MainActivity : AppCompatActivity() {
             tab == 5 && tataJio.isEmpty() -> tataMsg
             tab == 6 && allPortal.isEmpty() -> portalMsg
             tab == 6 && allPortal2.isEmpty() && stalkerAccount2() != null && portal2Msg.isNotEmpty() -> portal2Msg
+            tab == 10 && allPortal2.isEmpty() -> portal2Msg
             tab == 7 && allPlaylist.isEmpty() -> playlistMsg
             tab == 9 && xtreamNeedsStatus() -> xtreamMsg
             tab == 8 && ogRows.isEmpty() -> {
@@ -1203,7 +1208,7 @@ class MainActivity : AppCompatActivity() {
         // stutter on open and die when the JioTV tab was finally opened. It now loads when that tab is opened.
     }
 
-    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; 6 -> visiblePortalChannels(); 7 -> allPlaylist; 9 -> visibleXtreamChannels(); else -> all }
+    private fun pool() = when (tab) { 1 -> allV2; 2 -> allJio; 5 -> tataJio; 6 -> visiblePortalChannels(); 7 -> allPlaylist; 9 -> visibleXtreamChannels(); 10 -> visiblePortal2Channels(); else -> all }
 
     /** Loads the JioTV m3u8 playlist and builds a channel catalogue from it. */
     /**
@@ -1286,6 +1291,7 @@ class MainActivity : AppCompatActivity() {
         tiles = listOf(
             Tile.Action("Allinone Live\nMain live shelf", active = tab == 0) { switchTab(0) },
             Tile.Action("maxTV Playlist\nStalker live TV", active = tab == 6) { switchTab(6) },
+            Tile.Action("Fusion Playlist\nYour own portal", active = tab == 10) { switchTab(10) },
             Tile.Action("StarShare\nXtream Live + VOD", active = tab == 9) { switchTab(9) },
             Tile.Action("JioTV Playlist\nNative ClearKey", active = tab == 2) { switchTab(2) },
             Tile.Action("TATA Playlist\nTATA Play channels", active = tab == 5) { switchTab(5) },
@@ -1409,7 +1415,7 @@ class MainActivity : AppCompatActivity() {
                 portal2VisibleCached = slice2.first
                 portal2FeaturedCached = slice2.second
                 portal2RowsCached = slice2.third
-                if (tab == 6) { refreshRows(); rowsView.scrollToPosition(0) }
+                if (tab == 6 || tab == 10) { refreshRows(); rowsView.scrollToPosition(0) }
                 else if (tab == 0) refreshRowsKeepFocus(requestFocus = false)
             }
         }
@@ -1534,7 +1540,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Portal 2, the viewer's own Stalker subscription: the same catalogue flow as maxTV, with its own
+     * Fusion, the viewer's own Stalker subscription: the same catalogue flow as maxTV, with its own
      * disk cache (the cache key covers portal + MAC), its own remembered endpoint and its own genre
      * retry state. A missing account means "never set up", which is a status line, not an error.
      */
@@ -1542,18 +1548,18 @@ class MainActivity : AppCompatActivity() {
         if (force) { portal2Retried = false; portal2GenreRetried = false }
         if (stalkerAccount2() == null) {
             portal2InFlight = false; portal2Loaded = false
-            portal2Msg = "Portal 2 is not set up. Open Portal Settings on the maxTV tab to add it."
-            if (tab == 6) updateStatus()
+            portal2Msg = "Fusion is not set up. Open Portal Settings to add it."
+            if (tab == 6 || tab == 10) updateStatus()
             return
         }
         if ((portal2Loaded && !force) || portal2InFlight) return
         portal2GenreToken++
         portal2InFlight = true
-        portal2Msg = "Loading Portal 2 channels…"
-        if (tab == 6) updateStatus()
+        portal2Msg = "Loading Fusion channels…"
+        if (tab == 6 || tab == 10) updateStatus()
         submit(portalIo) {
             val account = stalkerAccount2() ?: return@submit
-            // Paint disk-cached Portal 2 playlist first if memory is empty.
+            // Paint disk-cached Fusion playlist first if memory is empty.
             if (allPortal2.isEmpty() && !force) {
                 val (cachedList, cachedGenres) = StalkerProtocol.loadCache(portalCacheDir(), account.cacheKey)
                 if (cachedList.isNotEmpty()) {
@@ -1567,7 +1573,7 @@ class MainActivity : AppCompatActivity() {
                             portal2VisibleCached = slice.first
                             portal2FeaturedCached = slice.second
                             portal2RowsCached = slice.third
-                            if (tab == 6) refreshRows() else if (tab == 0) refreshRowsKeepFocus(requestFocus = false)
+                            if (tab == 6 || tab == 10) refreshRows() else if (tab == 0) refreshRowsKeepFocus(requestFocus = false)
                         }
                     }
                 }
@@ -1591,7 +1597,7 @@ class MainActivity : AppCompatActivity() {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     portal2InFlight = false; portal2Loaded = channels.isNotEmpty()
                     portal2Genres = genres
-                    portal2Msg = if (channels.isEmpty()) "Portal 2 returned no channels. Tap Portal Settings to check URL/MAC." else ""
+                    portal2Msg = if (channels.isEmpty()) "Fusion returned no channels. Tap Portal Settings to check URL/MAC." else ""
                     applyPortal2(channels, slice)
                 }
             } catch (e: Exception) {
@@ -1601,21 +1607,21 @@ class MainActivity : AppCompatActivity() {
                     portal2InFlight = false; portal2Loaded = false
                     if (allPortal2.isEmpty() && !portal2Retried) {
                         portal2Retried = true
-                        portal2Msg = "Loading Portal 2 channels…"
-                        if (tab == 6) updateStatus()
+                        portal2Msg = "Loading Fusion channels…"
+                        if (tab == 6 || tab == 10) updateStatus()
                         ui.postDelayed({
                             if (!isFinishing && !isDestroyed && !portal2Loaded && !portal2InFlight) loadPortal2Channels()
                         }, 4_000)
                     } else if (allPortal2.isEmpty()) {
-                        portal2Msg = "Portal 2 didn't load (${portalReason(e)}). Select this tab again or tap Refresh to retry."
-                        if (tab == 6) { refreshRows(); updateStatus() }
+                        portal2Msg = "Fusion didn't load (${portalReason(e)}). Select this tab again or tap Refresh to retry."
+                        if (tab == 6 || tab == 10) { refreshRows(); updateStatus() }
                     }
                 }
             }
         }
     }
 
-    /** Portal 2's cheap genre-table rescue: same single re-fetch as maxTV, invalidated the same way. */
+    /** Fusion's cheap genre-table rescue: same single re-fetch as maxTV, invalidated the same way. */
     private fun schedulePortal2GenreRefetch(account: StalkerAccount, listed: List<StalkerChannel>, token: Int) {
         ui.postDelayed({
             if (isFinishing || isDestroyed) return@postDelayed
@@ -1642,13 +1648,47 @@ class MainActivity : AppCompatActivity() {
         portal2FeaturedCached = precomputed.second
         portal2RowsCached = precomputed.third
         updateStatus()
-        if (tab == 6) {
+        if (tab == 6 || tab == 10) {
             refreshRows()
             if (intro.visibility != View.VISIBLE && currentFocus == null) rowsView.requestFocus()
         } else if (tab == 0) {
             refreshRowsKeepFocus(requestFocus = false)
         }
         if (searchShown) updateResults()
+    }
+
+    /** The Fusion tab: the viewer's own portal, with the same controls + shelves shape as maxTV. */
+    private fun fusionRows(channels: List<Channel>): List<Row> = buildList {
+        val acc = stalkerAccount2()
+        val hostLabel = acc?.origin?.removePrefix("http://")?.removePrefix("https://") ?: "Not set up"
+        add(
+            Row(
+                title = "Fusion · Playlist Controls",
+                tiles = listOf(
+                    Tile.Action(
+                        label = "Filter: ${XtreamClient.filterLabel(portalFilterMode)}\n" +
+                            if (channels.isNotEmpty()) "${portal2VisibleCached.size} of ${channels.size} channels · ${portal2Genres.size} genres" else "Tap to switch filter",
+                        active = portalFilterMode != XtreamClient.FILTER_ALL
+                    ) { togglePortalFilter() },
+                    Tile.Action(
+                        label = "Refresh Fusion\n" + if (portal2InFlight) "Refreshing…" else "Reload portal playlist"
+                    ) {
+                        portal2Loaded = false
+                        loadPortal2Channels(force = true)
+                    },
+                    Tile.Action(
+                        label = "Portal Settings\n$hostLabel" + (acc?.let { " · ${it.mac}" } ?: "")
+                    ) { showMaxTvDialog() }
+                )
+            )
+        )
+        add(playlistSwitcherRow())
+        if (portal2FeaturedCached.isNotEmpty()) {
+            add(Row("Fusion · Featured Playlist", portal2FeaturedCached.take(30).map { Tile.Ch(it) }))
+        }
+        add(Row(FAV, favTiles()))
+        addAll(recentRow())
+        addAll(portal2RowsCached)
     }
 
     /** The maxTV playlist section: controls + playlist switcher + prebuilt genre shelves (0ms UI thread). */
@@ -1675,8 +1715,8 @@ class MainActivity : AppCompatActivity() {
                         label = "Portal Settings\n$hostLabel · ${acc.mac}"
                     ) { showMaxTvDialog() },
                     Tile.Action(
-                        label = if (stalkerAccount2() != null) "Portal 2\n${portal2VisibleCached.size} channels · tap to refresh"
-                        else "Portal 2\nNot set up · tap to add"
+                        label = if (stalkerAccount2() != null) "Fusion\n${portal2VisibleCached.size} channels · tap to refresh"
+                        else "Fusion\nNot set up · tap to add"
                     ) {
                         if (stalkerAccount2() != null) { portal2Loaded = false; loadPortal2Channels(force = true) }
                         else showMaxTvDialog()
@@ -1692,9 +1732,9 @@ class MainActivity : AppCompatActivity() {
         addAll(recentRow())
         addAll(portalCategoryRowsCached)
         if (portal2FeaturedCached.isNotEmpty()) {
-            add(Row("Portal 2 · Featured Playlist", portal2FeaturedCached.take(30).map { Tile.Ch(it) }))
+            add(Row("Fusion · Featured Playlist", portal2FeaturedCached.take(30).map { Tile.Ch(it) }))
         }
-        addAll(portal2RowsCached.map { Row("P2 · ${it.title}", it.tiles) })
+        addAll(portal2RowsCached.map { Row("Fusion · ${it.title}", it.tiles) })
     }
 
     /**
@@ -2519,7 +2559,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Portal 2: the viewer's own Stalker subscription, or null when it was never entered. There are no
+     * Fusion: the viewer's own Stalker subscription, or null when it was never entered. There are no
      * shipped defaults here: a second subscription belongs to the viewer, never to the APK.
      */
     private fun stalkerAccount2(): StalkerAccount? {
@@ -2530,7 +2570,7 @@ class MainActivity : AppCompatActivity() {
         return StalkerAccount(portal = portal, mac = mac, serial = stored("portal2_serial"), deviceId = stored("portal2_device"))
     }
 
-    private fun portalName(id: Int) = if (id == 1) "Portal 2" else "maxTV"
+    private fun portalName(id: Int) = if (id == 1) "Fusion" else "maxTV"
 
     private fun showMaxTvDialog() {
         if (isFinishing || isDestroyed) return
@@ -2567,17 +2607,17 @@ class MainActivity : AppCompatActivity() {
         container.addView(urlInput, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) })
         container.addView(macInput, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(12) })
         container.addView(TextView(this).apply {
-            text = "PORTAL 2 (OPTIONAL) · YOUR OWN SUBSCRIPTION"
+            text = "FUSION (OPTIONAL) · YOUR OWN SUBSCRIPTION"
             textSize = 10.5f; letterSpacing = 0.14f; typeface = fBold; setTextColor(Accent.SIGNAL)
         })
         container.addView(TextView(this).apply {
-            text = "Its channels join the Live TV tab and play on the same native player."
+            text = "Its channels join the Live TV and Fusion tabs and play on the same native player."
             textSize = 12f; typeface = fRegular; setTextColor(Accent.FAINT)
             setPadding(0, px(2), 0, px(8))
         })
         val current2 = stalkerAccount2()
-        val url2Input = field("Portal 2 URL (e.g. http://host/stalker_portal/c/)", current2?.portal.orEmpty())
-        val mac2Input = field("Portal 2 MAC (e.g. 00:1A:79:00:00:00)", current2?.mac.orEmpty())
+        val url2Input = field("Fusion URL (e.g. http://host/stalker_portal/c/)", current2?.portal.orEmpty())
+        val mac2Input = field("Fusion MAC (e.g. 00:1A:79:00:00:00)", current2?.mac.orEmpty())
         val serial2Input = field("Serial / SN (optional, from the subscription slip)", current2?.serial.orEmpty())
         val device2Input = field("Device ID (optional, from the subscription slip)", current2?.deviceId.orEmpty())
         container.addView(url2Input, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) })
@@ -2620,7 +2660,7 @@ class MainActivity : AppCompatActivity() {
                 .putString("portal_url", newUrl)
                 .putString("portal_mac", newMac)
                 .remove("portal_endpoint")
-            // Portal 2 lives or dies on URL + MAC: blanking either clears the whole subscription.
+            // Fusion lives or dies on URL + MAC: blanking either clears the whole subscription.
             val newUrl2 = url2Input.text?.toString()?.trim().orEmpty()
             val newMac2 = mac2Input.text?.toString()?.trim().orEmpty().uppercase(Locale.ROOT)
             if (newUrl2.isBlank() || newMac2.isBlank()) {
@@ -2640,7 +2680,7 @@ class MainActivity : AppCompatActivity() {
             dlg.dismiss()
             loadPortalChannels(force = true)
             loadPortal2Channels(force = true)
-            if (tab == 6) refreshRows()
+            if (tab == 6 || tab == 10) refreshRows()
         })
         container.addView(btnRow)
         dlg.show()
@@ -2719,7 +2759,7 @@ class MainActivity : AppCompatActivity() {
                 add(Row("maxTV · Playlist", portalFeaturedCached.take(24).map { Tile.Ch(it) }))
             }
             if (!alwaysOn && portal2FeaturedCached.isNotEmpty()) {
-                add(Row("Portal 2 · Playlist", portal2FeaturedCached.take(24).map { Tile.Ch(it) }))
+                add(Row("Fusion · Playlist", portal2FeaturedCached.take(24).map { Tile.Ch(it) }))
             }
             if (!alwaysOn && xtreamFeaturedCached.isNotEmpty()) {
                 add(Row("StarShare · Playlist", xtreamFeaturedCached.take(24).map { Tile.Ch(it) }))
@@ -2728,6 +2768,12 @@ class MainActivity : AppCompatActivity() {
             add(Row(FAV, favTiles()))
             addAll(recentRow())
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
+            // Every portal shelf, not just the featured rows: a Hindi channel from either portal is one
+            // scroll away, and a tap still plays it through its own portal immediately.
+            if (!alwaysOn) {
+                addAll(portalCategoryRowsCached.map { Row("maxTV · ${it.title}", it.tiles) })
+                addAll(portal2RowsCached.map { Row("Fusion · ${it.title}", it.tiles) })
+            }
         }
     }
 
@@ -2950,6 +2996,7 @@ class MainActivity : AppCompatActivity() {
             6 -> portalRows(allPortal)
             7 -> playlistRows(allPlaylist)
             9 -> xtreamRows()
+            10 -> fusionRows(allPortal2)
             else -> { loadVod(tab); continueRow() + vodRowsFor(tab) }
         }
         setHeroCollapsed(false)
@@ -2988,6 +3035,7 @@ class MainActivity : AppCompatActivity() {
                 if (t == 5 && tataJio.isEmpty() && !tataLoaded) loadTataChannels()
                 if (t == 6 && !portalLoaded) loadPortalChannels(force = true)
                 if (t == 6 && stalkerAccount2() != null && !portal2Loaded) loadPortal2Channels(force = true)
+                if (t == 10) { if (stalkerAccount2() != null) loadPortal2Channels(force = true) else showMaxTvDialog() }
                 if (t == 7 && !playlistLoaded && !playlistInFlight) loadPlaylistChannels()
                 return
             }
@@ -2996,6 +3044,7 @@ class MainActivity : AppCompatActivity() {
             if (t == 5 && tataJio.isEmpty()) loadTataChannels()
             if (t == 6 && !portalLoaded) loadPortalChannels()
             if (t == 6 && stalkerAccount2() != null && !portal2Loaded) loadPortal2Channels()
+            if (t == 10) loadPortal2Channels()
             if (t == 7 && !playlistLoaded) loadPlaylistChannels()
             if (t == 9) {
                 if (xtreamAccount().isConfigured) loadXtreamCurrentMode(force = false)
@@ -3077,6 +3126,7 @@ class MainActivity : AppCompatActivity() {
         0 -> trendingTitles.firstOrNull()?.let { Tile.Mv(it) }
         1, 2, 5, 7 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
         6 -> portalFeaturedCached.firstOrNull()?.let { Tile.Ch(it) }
+        10 -> portal2FeaturedCached.firstOrNull()?.let { Tile.Ch(it) }
         9 -> when {
             !xtreamAccount().isConfigured -> null
             xtreamMode == 0 -> xtreamFeaturedCached.firstOrNull()?.let { Tile.Ch(it) }
@@ -3646,10 +3696,10 @@ class MainActivity : AppCompatActivity() {
      * every other channel uses. The link is never cached - portals expire them within minutes.
      */
     private fun resolvePortalChannel(ch: Channel) {
-        // A Portal 2 tile carries the viewer's own subscription; without it there is nothing to ask.
+        // A Fusion tile carries the viewer's own subscription; without it there is nothing to ask.
         val account = if (ch.portalId == 1) stalkerAccount2() else stalkerAccount()
         if (account == null) {
-            fail("Portal 2 is not set up yet. Open Portal Settings on the maxTV tab to add it.")
+            fail("Fusion is not set up yet. Open Portal Settings to add it.")
             return
         }
         val endpointKey = if (ch.portalId == 1) "portal2_endpoint" else "portal_endpoint"
@@ -4079,7 +4129,7 @@ class MainActivity : AppCompatActivity() {
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
         diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); freshCredentialProviders.clear(); providerWindow.clear()
-        refusalRetryCount = 0
+        refusalRetryCount = 0; crossPortalUsed = false
         compatiblePlayback = providerOrder(ch).firstOrNull()?.let { savedCompatibility(ch, it) } ?: false
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -4287,6 +4337,44 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    /**
+     * Same channel, another working portal: a Live TV tune that exhausted its own sources is not over
+     * while a portal carries the same channel. Single-shot per tune — the twin's own failure ends here
+     * instead of ping-ponging between subscriptions.
+     */
+    private fun tryCrossPortal(ch: Channel, reason: String): Boolean {
+        if (crossPortalUsed) return false
+        // The viewer's own subscription first for site channels; the other portal for portal channels.
+        val pools = when {
+            ch.portal && ch.portalId == 1 -> listOf(allPortal)
+            ch.portal -> listOf(allPortal2)
+            else -> listOf(allPortal2, allPortal)
+        }
+        for (pool in pools) {
+            val index = PortalFallback.matchIndex(ch.name, pool.map { it.name })
+            if (index < 0) continue
+            val found = pool[index]
+            crossPortalUsed = true
+            // The zap list stays; this slot becomes the working twin.
+            val mutable = shown.toMutableList()
+            if (current in mutable.indices) mutable[current] = found else {
+                mutable.add(found)
+                current = mutable.lastIndex
+            }
+            shown = mutable
+            recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); decoderRetries.clear()
+            refusalRetryCount = 0
+            compatiblePlayback = providerOrder(found).firstOrNull()?.let { savedCompatibility(found, it) } ?: false
+            // A new subscription means a new tuning budget; the provider window stays clear the way a
+            // portal tune leaves it, since portals are not site providers.
+            startupBudget.start(SystemClock.elapsedRealtime())
+            providerWindow.clear()
+            resolveAndStart(found)
+            return true
+        }
+        return false
+    }
+
     /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
     private fun advanceNative(reason: String) {
         val ch = shown.getOrNull(current) ?: return
@@ -4315,7 +4403,9 @@ class MainActivity : AppCompatActivity() {
                     resolveAndStart(ch, fresh = true)
                 }
             }
-            PlaybackRecovery.Action.Unavailable -> fail("$reason. Hold OK to reload or choose another channel.")
+            PlaybackRecovery.Action.Unavailable -> {
+                if (!tryCrossPortal(ch, reason)) fail("$reason. Hold OK to reload or choose another channel.")
+            }
         }
     }
 
@@ -5889,6 +5979,7 @@ class MainActivity : AppCompatActivity() {
             6 -> portalRows(allPortal)
             7 -> playlistRows(allPlaylist)
             9 -> xtreamRows()
+            10 -> fusionRows(allPortal2)
             else -> continueRow() + vodRowsFor(tab)
         }
         inner.clear(); rowAdapter.notifyDataSetChanged()
