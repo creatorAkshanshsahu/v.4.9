@@ -1092,12 +1092,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun parseV1(json: String): List<Channel> {
         val arr = JSONObject(json).getJSONArray("channels")
-        return (0 until arr.length()).mapNotNull { i ->
+        val raw = (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null
             val id = str(o, "id"); val name = str(o, "name").trim()
             if (id.isEmpty() || name.isEmpty()) null
             else Channel(id, name, str(o, "category").ifBlank { "Other" }, str(o, "logo"))
         }
+        // The feed prepends ephemeral event streams that bury the stable channels, match no portal
+        // and vanish overnight. They stay out — unless they are all there is, in which case filtering
+        // would nuke the section on a heuristic.
+        return raw.filterNot { PortalFallback.isEventStream(it.id) }.ifEmpty { raw }
     }
     private fun parseV2(json: String): List<Channel> {
         val arr = JSONObject(json).getJSONArray("channels")
@@ -2570,15 +2574,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Fusion: the viewer's own Stalker subscription, or null when it was never entered. There are no
-     * shipped defaults here: a second subscription belongs to the viewer, never to the APK.
+     * Fusion: the viewer's own Stalker subscription, shipped as the default at their explicit request —
+     * the same pattern as the bundled maxTV subscription — and overridable in Portal Settings. Stored
+     * values win; blanks fall back to the shipped set, never to nothing.
      */
     private fun stalkerAccount2(): StalkerAccount? {
-        val portal = prefs.getString("portal2_url", null)?.trim().orEmpty()
-        val mac = prefs.getString("portal2_mac", null)?.trim().orEmpty()
-        if (portal.isEmpty() || mac.isEmpty()) return null
-        fun stored(key: String) = prefs.getString(key, null)?.trim().orEmpty()
-        return StalkerAccount(portal = portal, mac = mac, serial = stored("portal2_serial"), deviceId = stored("portal2_device"))
+        fun stored(key: String, fallback: String) = prefs.getString(key, null)?.trim()?.takeIf { it.isNotEmpty() } ?: fallback
+        return StalkerAccount(
+            portal = stored("portal2_url", StalkerAccount.FUSION_DEFAULT_PORTAL),
+            mac = stored("portal2_mac", StalkerAccount.FUSION_DEFAULT_MAC),
+            serial = stored("portal2_serial", StalkerAccount.FUSION_DEFAULT_SERIAL),
+            deviceId = stored("portal2_device", "")
+        )
     }
 
     private fun portalName(id: Int) = if (id == 1) "Fusion" else "maxTV"
@@ -2618,7 +2625,7 @@ class MainActivity : AppCompatActivity() {
         container.addView(urlInput, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(8) })
         container.addView(macInput, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = px(12) })
         container.addView(TextView(this).apply {
-            text = "FUSION (OPTIONAL) · YOUR OWN SUBSCRIPTION"
+            text = "FUSION · INCLUDED SUBSCRIPTION"
             textSize = 10.5f; letterSpacing = 0.14f; typeface = fBold; setTextColor(Accent.SIGNAL)
         })
         container.addView(TextView(this).apply {
@@ -2627,7 +2634,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, px(2), 0, px(8))
         })
         val current2 = stalkerAccount2()
-        val url2Input = field("Fusion URL (e.g. http://host/stalker_portal/c/)", current2?.portal?.takeIf { it.isNotEmpty() } ?: StalkerAccount.FUSION_PORTAL_HINT)
+        val url2Input = field("Fusion URL (e.g. http://host/stalker_portal/c/)", current2?.portal.orEmpty())
         val mac2Input = field("Fusion MAC (e.g. 00:1A:79:00:00:00)", current2?.mac.orEmpty())
         val serial2Input = field("Serial / SN (optional, from the subscription slip)", current2?.serial.orEmpty())
         val device2Input = field("Device ID (optional, from the subscription slip)", current2?.deviceId.orEmpty())
@@ -2655,12 +2662,16 @@ class MainActivity : AppCompatActivity() {
         portalDialog = dlg
 
         btnRow.addView(pillBtn("Reset Default", primary = false) {
-            prefs.edit().remove("portal_url").remove("portal_mac").remove("portal_endpoint").apply()
+            prefs.edit().remove("portal_url").remove("portal_mac").remove("portal_endpoint")
+                .remove("portal2_url").remove("portal2_mac").remove("portal2_serial").remove("portal2_device").remove("portal2_endpoint").apply()
             allPortal = emptyList(); portalVisibleCached = emptyList(); portalFeaturedCached = emptyList(); portalCategoryRowsCached = emptyList()
             portalLoaded = false
+            allPortal2 = emptyList(); portal2VisibleCached = emptyList(); portal2FeaturedCached = emptyList(); portal2RowsCached = emptyList()
+            portal2Loaded = false
             dlg.dismiss()
             loadPortalChannels(force = true)
-            if (tab == 6) refreshRows()
+            loadPortal2Channels(force = true)
+            if (tab == 6 || tab == 10) refreshRows()
         }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
         btnRow.addView(pillBtn("Cancel", primary = false) { dlg.dismiss() },
             LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(8) })
@@ -2671,18 +2682,15 @@ class MainActivity : AppCompatActivity() {
                 .putString("portal_url", newUrl)
                 .putString("portal_mac", newMac)
                 .remove("portal_endpoint")
-            // Fusion lives or dies on URL + MAC: blanking either clears the whole subscription.
-            val newUrl2 = url2Input.text?.toString()?.trim().orEmpty()
-            val newMac2 = mac2Input.text?.toString()?.trim().orEmpty().uppercase(Locale.ROOT)
-            if (newUrl2.isBlank() || newMac2.isBlank()) {
-                edit.remove("portal2_url").remove("portal2_mac").remove("portal2_serial").remove("portal2_device").remove("portal2_endpoint")
-            } else {
-                edit.putString("portal2_url", newUrl2)
-                    .putString("portal2_mac", newMac2)
-                    .putString("portal2_serial", serial2Input.text?.toString()?.trim().orEmpty())
-                    .putString("portal2_device", device2Input.text?.toString()?.trim().orEmpty())
-                    .remove("portal2_endpoint")
-            }
+            // Blanks fall back to the shipped Fusion set, the way maxTV blanks fall back to its own.
+            val newUrl2 = url2Input.text?.toString()?.trim().orEmpty().ifBlank { StalkerAccount.FUSION_DEFAULT_PORTAL }
+            val newMac2 = mac2Input.text?.toString()?.trim().orEmpty().uppercase(Locale.ROOT).ifBlank { StalkerAccount.FUSION_DEFAULT_MAC }
+            val newSerial2 = serial2Input.text?.toString()?.trim().orEmpty().ifBlank { StalkerAccount.FUSION_DEFAULT_SERIAL }
+            edit.putString("portal2_url", newUrl2)
+                .putString("portal2_mac", newMac2)
+                .putString("portal2_serial", newSerial2)
+                .putString("portal2_device", device2Input.text?.toString()?.trim().orEmpty())
+                .remove("portal2_endpoint")
             edit.apply()
             allPortal = emptyList(); portalVisibleCached = emptyList(); portalFeaturedCached = emptyList(); portalCategoryRowsCached = emptyList()
             portalLoaded = false
@@ -2783,8 +2791,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * The JioTV tab is the playlist section: the same M3U8 catalogue that supplies these tiles supplies
-     * their native stream, ClearKey document and cookie, so a tile here never borrows another provider.
+     * The JioTV tab is the playlist section. Its own native lookup answers 451 for everything now, so a
+     * tap traces the same channel across the working portals first and only then tries Jio's own lookup.
      */
     private fun jioRows(channels: List<Channel>): List<Row> {
         val jioFavs = favs.mapNotNull { channelFor(it) }
@@ -3010,7 +3018,8 @@ class MainActivity : AppCompatActivity() {
         setHero(openingHeroTile(), immediate = true)
         scheduleHeroRotation(reset = true)
         updateStatus(); styleSegs()
-        prefetchGuideForRows()
+        // Captions paint over finished shelves: a throw here must never reach the rows' own catch.
+        runCatching { prefetchGuideForRows() }
     }
 
     private fun toggleFav(c: Channel) {
@@ -3043,6 +3052,7 @@ class MainActivity : AppCompatActivity() {
                 if (t == 6 && stalkerAccount2() != null && !portal2Loaded) loadPortal2Channels(force = true)
                 if (t == 10) { if (stalkerAccount2() != null) loadPortal2Channels(force = true) else showMaxTvDialog() }
                 if (t == 7 && !playlistLoaded && !playlistInFlight) loadPlaylistChannels()
+                if (t == 0 && trendingTitles.isEmpty()) loadHomeTrending()
                 return
             }
             // A list is fetched the first time its section is opened, never blocking the UI thread.
@@ -3052,6 +3062,7 @@ class MainActivity : AppCompatActivity() {
             if (t == 6 && stalkerAccount2() != null && !portal2Loaded) loadPortal2Channels()
             if (t == 10) loadPortal2Channels()
             if (t == 7 && !playlistLoaded) loadPlaylistChannels()
+            if (t == 0 && trendingTitles.isEmpty()) loadHomeTrending()
             if (t == 9) {
                 if (xtreamAccount().isConfigured) loadXtreamCurrentMode(force = false)
                 else if (!xtreamPromptedThisRun) {
@@ -3682,7 +3693,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- native live playback ----------
-    /** User picked a channel (or zapped): Live TV traces the portals first, every other tab plays direct. */
+    /** User picked a channel (or zapped): Live TV and JioTV trace the portals first, the rest play direct. */
     private fun play(index: Int) {
         if (shown.isEmpty()) return
         if (drmProbeRunning) { playMsg("The local DRM check is still running. Please wait, or restart the app if the system service is stuck."); return }
@@ -3690,9 +3701,10 @@ class MainActivity : AppCompatActivity() {
         healthScanAudioStartedAt = 0L; healthScanAudioStartPosition = 0L
         requestedNativeProvider = null
         val ch = shown[current]
-        // A Live TV tap plays the same channel from a working portal first: the site sources behind
-        // these tiles are dying everywhere, and waiting on them before trying a portal wastes the tune.
-        if ((tab == 0 || tab == 1) && !ch.portal && !ch.xtream && !ch.m3u && ch.page == null) {
+        // A Live TV or JioTV tap plays the same channel from a working portal first: the site sources
+        // behind these tiles are dying everywhere, and waiting on them before trying a portal wastes
+        // the tune.
+        if ((tab == 0 || tab == 1 || tab == 2) && !ch.portal && !ch.xtream && !ch.m3u && ch.page == null) {
             portalFirst(ch)
             return
         }
@@ -6141,7 +6153,7 @@ class MainActivity : AppCompatActivity() {
         val shift = rows.size - old.size
         if (pos >= 0) lm.scrollToPositionWithOffset((pos + if (pos > 0) shift else 0).coerceAtLeast(0), top)
         if (requestFocus) rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
-        prefetchGuideForRows()
+        runCatching { prefetchGuideForRows() }
     }
 
     // ---------- adapters ----------

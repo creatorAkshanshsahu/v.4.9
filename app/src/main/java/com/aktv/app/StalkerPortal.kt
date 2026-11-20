@@ -34,10 +34,12 @@ internal data class StalkerAccount(
         const val DEFAULT_DEVICE = "3610DEAFB556781F84CBC8A6AF876A8F20637668862B28DEECFACE00D67A6070"
         val DEFAULT = StalkerAccount(DEFAULT_PORTAL, DEFAULT_MAC, DEFAULT_SERIAL, DEFAULT_DEVICE)
         /**
-         * Address hint for the viewer's own subscription field: a portal address without its MAC opens
-         * nothing, so prefilling it saves typing while the MAC — the actual credential — is never shipped.
+         * The viewer's own Fusion subscription, shipped as the default at their explicit request. Stored
+         * settings override these; a fork should replace them with its own subscription.
          */
-        const val FUSION_PORTAL_HINT = "http://tv.fusion4k.cc/stalker_portal/c/"
+        const val FUSION_DEFAULT_PORTAL = "http://tv.fusion4k.cc/stalker_portal/c/"
+        const val FUSION_DEFAULT_MAC = "00:1A:79:F5:8F:95"
+        const val FUSION_DEFAULT_SERIAL = "99EB2A8128098"
     }
 }
 

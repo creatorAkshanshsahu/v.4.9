@@ -39,6 +39,13 @@ class PortalFallbackTest {
         assertEquals(emptyList<Pair<Int, Int>>(), PortalFallback.twinIndices("Nick", pools.take(2)))
     }
 
+    @Test fun `event streams are the ls- ids only`() {
+        assertEquals(true, PortalFallback.isEventStream("ls-1vs4tgq"))
+        assertEquals(false, PortalFallback.isEventStream("sd-IndiaTV.in"))
+        assertEquals(false, PortalFallback.isEventStream("3273"))
+        assertEquals(false, PortalFallback.isEventStream(""))
+    }
+
     @Test fun `a portal still loading its first playlist is the only unsettled case`() {
         assertEquals(true, PortalFallback.portalSettled(configured = false, hasChannels = false, inFlight = false, loaded = false, retried = false))
         assertEquals(true, PortalFallback.portalSettled(configured = true, hasChannels = true, inFlight = true, loaded = false, retried = false))

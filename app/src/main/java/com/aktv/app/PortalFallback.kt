@@ -36,6 +36,9 @@ internal object PortalFallback {
         return -1
     }
 
+    /** Ephemeral "X Vs Y" event streams the feed prepends: gone tomorrow, matching no subscription. */
+    fun isEventStream(id: String): Boolean = id.startsWith("ls-")
+
     /**
      * Ordered twin hunt across portal name-lists: one hit per pool, pools keeps their order, so the
      * caller plays the viewer's own subscription before the shared ones. Each hit is a pool index
