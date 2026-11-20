@@ -62,6 +62,8 @@ object Accent {
     val INDIGO = 0xFF5E6C92.toInt()
     val DEEP = 0xFF120D28.toInt()
     val LIVE = BRAND_LIGHT
+    /** True live red: channel-tile dots and the channel hero's pulse. The theme's LIVE stays cyan. */
+    val LIVE_DOT = 0xFFFF3B30.toInt()
     val GOLD = 0xFFFFB84D.toInt()
     val TEXT = 0xFFF5F5F5.toInt()
     val DIM = 0xFF98AFD5.toInt()

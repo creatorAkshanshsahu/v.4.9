@@ -1,5 +1,6 @@
 package com.aktv.app
 
+import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -40,6 +41,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
 import androidx.recyclerview.widget.*
+import java.lang.ref.WeakReference
 import java.util.Locale
 import coil.load
 import coil.imageLoader
@@ -208,6 +210,10 @@ class MainActivity : AppCompatActivity() {
     /** The second list has its own loader and its own retry. */
     private var tataLoaded = false
     private var rows = listOf<Row>(); private val inner = HashMap<Int, TileAdapter>()
+    /** Bound channel captions by channel key; weak so a recycled tile never leaks through the guide. */
+    private val captionLive = HashMap<String, MutableList<WeakReference<TextView>>>()
+    private var captionLoopStarted = false
+    private var heroPulse: ObjectAnimator? = null
     private var trendingTitles = emptyList<Movies.Title>(); private var trendingLoading = false; private var trendingFailed = false
     private var favs = setOf<String>(); private var heroTile: Tile? = null
     private val accents = ConcurrentHashMap<String, Int>()
@@ -3004,6 +3010,7 @@ class MainActivity : AppCompatActivity() {
         setHero(openingHeroTile(), immediate = true)
         scheduleHeroRotation(reset = true)
         updateStatus(); styleSegs()
+        prefetchGuideForRows()
     }
 
     private fun toggleFav(c: Channel) {
@@ -3217,6 +3224,7 @@ class MainActivity : AppCompatActivity() {
         heroOrb.animate().alpha(0.30f).setDuration(420).setInterpolator(DecelerateInterpolator()).start()
     }
     private fun fillHero(t: Tile?) {
+        heroPulse?.cancel(); heroPulse = null; heroDot.alpha = 1f
         heroChips.removeAllViews()
         heroBadge.setPadding(0, 0, 0, 0)
         heroBadge.setTextColor(Accent.DIM)
@@ -3230,6 +3238,7 @@ class MainActivity : AppCompatActivity() {
                 heroLogo.alpha = 1f
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.text = if (t.c.v2) "24/7" else "LIVE NOW"
+                heroPulse = startDotPulse(heroDot)
                 heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.BRAND_LIGHT else Accent.BRAND)
                 (heroDot as? TextView)?.setTextColor(Accent.BRAND_LIGHT)   // over artwork: brighter stop
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
@@ -3380,6 +3389,59 @@ class MainActivity : AppCompatActivity() {
             Epg.put(c.id, guide)
             val callbacks = synchronized(guideWaiters) { guideWaiters.remove(c.id).orEmpty() }
             runOnUiThread { callbacks.forEach { it(guide) } }
+        }
+    }
+
+    /**
+     * Now-playing titles under every tile: walk the rows in screen order and resolve each site
+     * channel's guide entry. The community feed is an in-memory index, so this is cheap; misses fall
+     * back to one cached HTTP lookup each, coalesced by fetchGuide when focus beats the prefetch.
+     */
+    private fun prefetchGuideForRows() {
+        val seen = HashSet<String>()
+        for (row in rows) for (tile in row.tiles) {
+            val ch = (tile as? Tile.Ch)?.c ?: continue
+            if (!seen.add(ch.id)) continue
+            fetchGuide(ch) { guide ->
+                val title = Epg.captionFor(guide?.now) ?: return@fetchGuide
+                updateLiveCaption(ch.key, title)
+            }
+        }
+        if (!captionLoopStarted) {
+            captionLoopStarted = true
+            ui.postDelayed(captionRefresh, 300_000L)
+        }
+    }
+
+    /** Programme boundaries roll over while browsing: re-resolve the rows every five minutes. */
+    private val captionRefresh = Runnable {
+        if (!isFinishing && !isDestroyed) {
+            // Playback owns the screen and the network: nothing to repaint, nothing to fetch.
+            if (layer.visibility != View.VISIBLE) prefetchGuideForRows()
+            ui.postDelayed(captionRefresh, 300_000L)
+        }
+    }
+
+    /** Repaint every bound caption still showing this channel (recycled views carry a new tag). */
+    private fun updateLiveCaption(key: String, title: String) {
+        val watchers = captionLive[key] ?: return
+        val it = watchers.iterator()
+        while (it.hasNext()) {
+            val tv = it.next().get()
+            if (tv == null) { it.remove(); continue }
+            if (tv.tag == key) tv.text = title
+        }
+        if (watchers.isEmpty()) captionLive.remove(key)
+    }
+
+    /** One shared pulse: an alpha animator runs on the render thread, with no per-frame UI work. */
+    private fun startDotPulse(dot: View): ObjectAnimator {
+        dot.alpha = 1f
+        return ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.2f).apply {
+            duration = 850
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            start()
         }
     }
     private fun span(sb: SpannableStringBuilder, from: Int, color: Int) {
@@ -6077,6 +6139,7 @@ class MainActivity : AppCompatActivity() {
         val shift = rows.size - old.size
         if (pos >= 0) lm.scrollToPositionWithOffset((pos + if (pos > 0) shift else 0).coerceAtLeast(0), top)
         if (requestFocus) rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
+        prefetchGuideForRows()
     }
 
     // ---------- adapters ----------
@@ -6095,6 +6158,9 @@ class MainActivity : AppCompatActivity() {
         val monoBg = GradientDrawable().apply { shape = GradientDrawable.OVAL; mono.background = this }
         val fav: View = v.findViewById(R.id.fav)
         val bg = v.background as GradientDrawable
+        var pulse: ObjectAnimator? = null
+        fun startPulse() { pulse?.cancel(); pulse = startDotPulse(dot) }
+        fun stopPulse() { pulse?.cancel(); pulse = null; dot.alpha = 1f }
     }
     private inner class TileAdapter(val row: Row) : RecyclerView.Adapter<VH>() {
         override fun getItemCount() = row.tiles.size
@@ -6112,6 +6178,7 @@ class MainActivity : AppCompatActivity() {
             if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 20f); v.clipToOutline = true }
             return if (t == 0) ChVH(v) else VH(v)
         }
+        override fun onViewRecycled(h: VH) { (h as? ChVH)?.stopPulse(); super.onViewRecycled(h) }
         override fun onBindViewHolder(h: VH, i: Int, payloads: MutableList<Any>) {
             val t = row.tiles[i]
             val chh0 = h as? ChVH
@@ -6136,15 +6203,20 @@ class MainActivity : AppCompatActivity() {
                         else -> "NOT CHECKED" to 0xFF8E7781.toInt()
                     }
                     chh.badge.text = badgeText; chh.badgeBg.setColor(badgeColor)
-                    chh.dot.backgroundTintList = ColorStateList.valueOf(badgeColor)
+                    // The badge text keeps the scan verdict; the dot is the live indicator: red, pulsing.
+                    chh.dot.backgroundTintList = ColorStateList.valueOf(Accent.LIVE_DOT)
+                    chh.startPulse()
                     val nowCaption = chh.caption
                     nowCaption.tag = t.c.key
                     nowCaption.text = when {
                         t.c.xtream -> "StarShare · ${t.c.category}"
                         t.c.portal -> "${portalName(t.c.portalId)} · ${t.c.category}"
                         t.c.v2 -> "Always-on · no schedule feed"
-                        else -> Epg.cached(t.c.id)?.now?.title ?: "Programme guide on focus"
+                        else -> Epg.captionFor(Epg.cached(t.c.id)?.now) ?: "Programme guide on focus"
                     }
+                    val watchers = captionLive.getOrPut(t.c.key) { mutableListOf() }
+                    watchers.removeAll { it.get() == null || it.get() == nowCaption }
+                    watchers.add(WeakReference(nowCaption))
                     val logo = chh.logo; val mono = chh.mono
                     if (t.c.logo.isBlank()) {
                         logo.setImageDrawable(null); logo.visibility = View.GONE
@@ -6176,7 +6248,7 @@ class MainActivity : AppCompatActivity() {
                                     t.c.xtream -> "StarShare · ${t.c.category}"
                                     t.c.portal -> "${portalName(t.c.portalId)} · ${t.c.category}"
                                     t.c.v2 -> "Always-on · no schedule feed"
-                                    else -> guide?.now?.title ?: "Programme information unavailable"
+                                    else -> Epg.captionFor(guide?.now) ?: "Programme information unavailable"
                                 }
                             }
                         }
