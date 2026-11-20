@@ -235,7 +235,12 @@ class MainActivity : AppCompatActivity() {
     private val authRecovery = PlaybackAuthRecovery()
     private val freshCredentialProviders = HashSet<LiveProvider>()
     private val recovery = PlaybackRecovery()
-    private var crossPortalUsed = false
+    /** A tune walks its candidates in order and never replays one: the tried-set only grows. */
+    private val chainTried = mutableSetOf<String>()
+    /** The channel the viewer tapped, kept while its portal twins play so it can go last. */
+    private var tuneOrigin: Channel? = null
+    private var portalFirstGen = 0
+    private val portalFirstWaitMs = 10_000L
     // A transient refusal gets two paced, fresh-metadata retries inside the existing 60 s budget.
     private var refusalRetryCount = 0
     private var okLong = false
@@ -2174,7 +2179,7 @@ class MainActivity : AppCompatActivity() {
     private fun playXtreamChannel(ch: Channel) {
         val base = xtreamAccount()
         if (!base.isConfigured) {
-            fail("StarShare account is not signed in.")
+            if (!advancePlayChain(ch)) fail("StarShare account is not signed in.")
             return
         }
         val account = xtreamEffectiveAccount(base)
@@ -2611,12 +2616,12 @@ class MainActivity : AppCompatActivity() {
             textSize = 10.5f; letterSpacing = 0.14f; typeface = fBold; setTextColor(Accent.SIGNAL)
         })
         container.addView(TextView(this).apply {
-            text = "Its channels join the Live TV and Fusion tabs and play on the same native player."
+            text = "Its channels fill the Fusion tab, and any Live TV tap plays from here when it carries the same channel."
             textSize = 12f; typeface = fRegular; setTextColor(Accent.FAINT)
             setPadding(0, px(2), 0, px(8))
         })
         val current2 = stalkerAccount2()
-        val url2Input = field("Fusion URL (e.g. http://host/stalker_portal/c/)", current2?.portal.orEmpty())
+        val url2Input = field("Fusion URL (e.g. http://host/stalker_portal/c/)", current2?.portal?.takeIf { it.isNotEmpty() } ?: StalkerAccount.FUSION_PORTAL_HINT)
         val mac2Input = field("Fusion MAC (e.g. 00:1A:79:00:00:00)", current2?.mac.orEmpty())
         val serial2Input = field("Serial / SN (optional, from the subscription slip)", current2?.serial.orEmpty())
         val device2Input = field("Device ID (optional, from the subscription slip)", current2?.deviceId.orEmpty())
@@ -2768,12 +2773,6 @@ class MainActivity : AppCompatActivity() {
             add(Row(FAV, favTiles()))
             addAll(recentRow())
             addAll(channels.groupBy { it.category }.toSortedMap().map { (name, items) -> Row(name, items.map { Tile.Ch(it) }) })
-            // Every portal shelf, not just the featured rows: a Hindi channel from either portal is one
-            // scroll away, and a tap still plays it through its own portal immediately.
-            if (!alwaysOn) {
-                addAll(portalCategoryRowsCached.map { Row("maxTV · ${it.title}", it.tiles) })
-                addAll(portal2RowsCached.map { Row("Fusion · ${it.title}", it.tiles) })
-            }
         }
     }
 
@@ -3619,7 +3618,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ---------- native live playback ----------
-    /** User picked a channel (or zapped): start with the site's current sources, never a saved web engine. */
+    /** User picked a channel (or zapped): Live TV traces the portals first, every other tab plays direct. */
     private fun play(index: Int) {
         if (shown.isEmpty()) return
         if (drmProbeRunning) { playMsg("The local DRM check is still running. Please wait, or restart the app if the system service is stuck."); return }
@@ -3627,11 +3626,24 @@ class MainActivity : AppCompatActivity() {
         healthScanAudioStartedAt = 0L; healthScanAudioStartPosition = 0L
         requestedNativeProvider = null
         val ch = shown[current]
+        // A Live TV tap plays the same channel from a working portal first: the site sources behind
+        // these tiles are dying everywhere, and waiting on them before trying a portal wastes the tune.
+        if ((tab == 0 || tab == 1) && !ch.portal && !ch.xtream && !ch.m3u && ch.page == null) {
+            portalFirst(ch)
+            return
+        }
+        beginPlay(ch)
+    }
+
+    /** One tune on one channel: the player layer comes up and the channel resolves on it. */
+    private fun beginPlay(ch: Channel, deferResolve: Boolean = false, origin: Channel? = null) {
         pageFallbackFor = null
         // Nothing carries a site page any more: every channel plays on the native player.
         val page = ch.page
         if (page != null) { rememberChannel(ch); playOnSourcePage(ch, page); return }
         stopPreview(); rememberChannel(ch); recovery.reset(); beginNativeSession(ch)
+        tuneOrigin = origin
+        if (!deferResolve) chainTried.add(ch.key)
         playerSession = true
         home.visibility = View.INVISIBLE
         heroText.animate().cancel(); heroBackdrop.animate().cancel(); rowsView.animate().cancel()
@@ -3641,7 +3653,7 @@ class MainActivity : AppCompatActivity() {
         if (layer.visibility != View.VISIBLE) { layer.animate().cancel(); layer.alpha = 1f; layer.visibility = View.VISIBLE }
         ImmersiveUi.hide(window)
         playMsg(null); bindInfo(ch)
-        resolveAndStart(ch)
+        if (deferResolve) waitForPortalFirst(ch) else resolveAndStart(ch)
         if (healthScanActive) {
             ui.removeCallbacks(healthScanTimeout); ui.removeCallbacks(healthScanAdvance)
             ui.postDelayed(healthScanTimeout, ChannelPlaybackScan.CHANNEL_DEADLINE_MS)
@@ -3699,7 +3711,7 @@ class MainActivity : AppCompatActivity() {
         // A Fusion tile carries the viewer's own subscription; without it there is nothing to ask.
         val account = if (ch.portalId == 1) stalkerAccount2() else stalkerAccount()
         if (account == null) {
-            fail("Fusion is not set up yet. Open Portal Settings to add it.")
+            if (!advancePlayChain(ch)) fail("Fusion is not set up yet. Open Portal Settings to add it.")
             return
         }
         val endpointKey = if (ch.portalId == 1) "portal2_endpoint" else "portal_endpoint"
@@ -3729,7 +3741,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
                     nativeSources = emptyList()
-                    fail("${portalName(ch.portalId)}: ${portalReason(e)}")
+                    if (!advancePlayChain(ch)) fail("${portalName(ch.portalId)}: ${portalReason(e)}")
                 }
             }
         }
@@ -4129,7 +4141,7 @@ class MainActivity : AppCompatActivity() {
     private fun beginNativeSession(ch: Channel) {
         playbackActive = true
         diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); freshCredentialProviders.clear(); providerWindow.clear()
-        refusalRetryCount = 0; crossPortalUsed = false
+        refusalRetryCount = 0; chainTried.clear(); tuneOrigin = null
         compatiblePlayback = providerOrder(ch).firstOrNull()?.let { savedCompatibility(ch, it) } ?: false
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -4338,41 +4350,108 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Same channel, another working portal: a Live TV tune that exhausted its own sources is not over
-     * while a portal carries the same channel. Single-shot per tune — the twin's own failure ends here
-     * instead of ping-ponging between subscriptions.
+     * Live TV taps trace the same channel across the working portals and play the first twin found,
+     * before the channel's own dying site sources cost a second. Tap Nick, watch Nick.
      */
-    private fun tryCrossPortal(ch: Channel, reason: String): Boolean {
-        if (crossPortalUsed) return false
-        // The viewer's own subscription first for site channels; the other portal for portal channels.
-        val pools = when {
-            ch.portal && ch.portalId == 1 -> listOf(allPortal)
-            ch.portal -> listOf(allPortal2)
-            else -> listOf(allPortal2, allPortal)
+    private fun portalFirst(ch: Channel) {
+        val twin = orderedTwins(ch).firstOrNull()
+        if (twin != null) {
+            swapShownCurrent(twin)
+            beginPlay(twin, origin = ch)
+            return
         }
-        for (pool in pools) {
-            val index = PortalFallback.matchIndex(ch.name, pool.map { it.name })
-            if (index < 0) continue
-            val found = pool[index]
-            crossPortalUsed = true
-            // The zap list stays; this slot becomes the working twin.
-            val mutable = shown.toMutableList()
-            if (current in mutable.indices) mutable[current] = found else {
-                mutable.add(found)
-                current = mutable.lastIndex
+        if (portalsSettledForFirst()) {
+            // Every portal answered and none carries this channel: its own sources are the only hope.
+            beginPlay(ch)
+            return
+        }
+        // Rare first-tap case: a portal is still loading its first playlist. Bring the player up with
+        // a status line and decide the moment the portals answer — bounded, then the channel itself.
+        if (!portalLoaded && !portalInFlight) loadPortalChannels()
+        if (stalkerAccount2() != null && !portal2Loaded && !portal2InFlight) loadPortal2Channels()
+        beginPlay(ch, deferResolve = true, origin = ch)
+    }
+
+    /** Deferred twin decision: settle the portals first, then play the twin — or the channel itself. */
+    private fun waitForPortalFirst(ch: Channel) {
+        val gen = ++portalFirstGen
+        val deadline = SystemClock.elapsedRealtime() + portalFirstWaitMs
+        infoNext.text = "Finding ${ch.name.take(40)} on your portals…"
+        infoNext.visibility = View.VISIBLE
+        fun poll() {
+            if (gen != portalFirstGen || layer.visibility != View.VISIBLE) return
+            val twin = orderedTwins(ch).firstOrNull()
+            if (twin != null) {
+                chainTried.add(twin.key)
+                swapShownCurrent(twin)
+                rememberChannel(twin); bindInfo(twin)
+                resolveAndStart(twin)
+                return
             }
-            shown = mutable
-            recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); decoderRetries.clear()
-            refusalRetryCount = 0
-            compatiblePlayback = providerOrder(found).firstOrNull()?.let { savedCompatibility(found, it) } ?: false
-            // A new subscription means a new tuning budget; the provider window stays clear the way a
-            // portal tune leaves it, since portals are not site providers.
-            startupBudget.start(SystemClock.elapsedRealtime())
-            providerWindow.clear()
-            resolveAndStart(found)
-            return true
+            if (portalsSettledForFirst() || SystemClock.elapsedRealtime() >= deadline) {
+                chainTried.add(ch.key)
+                resolveAndStart(ch)
+                return
+            }
+            ui.postDelayed({ poll() }, 250)
         }
-        return false
+        poll()
+    }
+
+    /** Same channel, every working subscription: the viewer's own Fusion first, then maxTV, then StarShare. */
+    private fun orderedTwins(ch: Channel): List<Channel> {
+        val pools = when {
+            ch.portal && ch.portalId == 1 -> listOf(allPortal, allXtream)
+            ch.portal -> listOf(allPortal2, allXtream)
+            ch.xtream -> listOf(allPortal2, allPortal)
+            else -> listOf(allPortal2, allPortal, allXtream)
+        }
+        return PortalFallback.twinIndices(ch.name, pools.map { pool -> pool.map { it.name } })
+            .map { (pool, item) -> pools[pool][item] }
+            .filter { it.key != ch.key }
+    }
+
+    /** maxTV and Fusion decide the deferred tap; StarShare twins join opportunistically, never waited on. */
+    private fun portalsSettledForFirst(): Boolean {
+        val maxSettled = PortalFallback.portalSettled(true, allPortal.isNotEmpty(), portalInFlight, portalLoaded, portalRetried)
+        val fusionSettled = PortalFallback.portalSettled(
+            stalkerAccount2() != null, allPortal2.isNotEmpty(), portal2InFlight, portal2Loaded, portal2Retried
+        )
+        return maxSettled && fusionSettled
+    }
+
+    /** The zap list stays; this slot becomes the working twin. */
+    private fun swapShownCurrent(found: Channel) {
+        val mutable = shown.toMutableList()
+        if (current in mutable.indices) mutable[current] = found else {
+            mutable.add(found)
+            current = mutable.lastIndex
+        }
+        shown = mutable
+    }
+
+    /**
+     * Next working subscription for the same channel: a tune is not over while an untried twin — or
+     * the tune's original site channel — remains. Lists are matched fresh every time, so a portal that
+     * finished loading mid-tune still joins; the tried-set only grows, so the chain terminates.
+     */
+    private fun advancePlayChain(failed: Channel): Boolean {
+        chainTried.add(failed.key)
+        val next = orderedTwins(failed).firstOrNull { it.key !in chainTried }
+            ?: tuneOrigin?.takeIf { it.key !in chainTried }
+            ?: return false
+        chainTried.add(next.key)
+        swapShownCurrent(next)
+        bindInfo(next)
+        recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); decoderRetries.clear()
+        refusalRetryCount = 0
+        compatiblePlayback = providerOrder(next).firstOrNull()?.let { savedCompatibility(next, it) } ?: false
+        // A new subscription means a new tuning budget; the provider window stays clear the way a
+        // portal tune leaves it, since portals are not site providers.
+        startupBudget.start(SystemClock.elapsedRealtime())
+        providerWindow.clear()
+        resolveAndStart(next)
+        return true
     }
 
     /** Bounded recovery in ExoPlayer: current servers, another native source, one refresh, then an error. */
@@ -4381,7 +4460,10 @@ class MainActivity : AppCompatActivity() {
         startupBudget.recover(SystemClock.elapsedRealtime())
         providerWindow.recover(SystemClock.elapsedRealtime())
         releasePlayer()
-        if (startupBudget.expired(SystemClock.elapsedRealtime())) { fail("No playable picture within 60 seconds. Hold OK to retry."); return }
+        if (startupBudget.expired(SystemClock.elapsedRealtime())) {
+            if (!advancePlayChain(ch)) fail("No playable picture within 60 seconds. Hold OK to retry.")
+            return
+        }
         when (val action = recovery.failed(serverIdx, nativeSources.size, canLoadMore = nextNativeProvider < nativeProviders.size)) {
             is PlaybackRecovery.Action.Source -> {
                 serverIdx = action.index
@@ -4404,7 +4486,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             PlaybackRecovery.Action.Unavailable -> {
-                if (!tryCrossPortal(ch, reason)) fail("$reason. Hold OK to reload or choose another channel.")
+                if (!advancePlayChain(ch)) fail("$reason. Hold OK to reload or choose another channel.")
             }
         }
     }
@@ -4435,6 +4517,7 @@ class MainActivity : AppCompatActivity() {
         if (drmProbeRunning) { showPlaybackDetails(); return }
         val ch = shown.getOrNull(current) ?: return
         recovery.reset(); beginNativeSession(ch)
+        chainTried.add(ch.key)
         if (!ch.xtream && !ch.portal && !ch.m3u) TgServers.invalidate(ch.id, ch.v2)
         if (ch.m3u && ch.tvg.isNotBlank()) TgServers.invalidate(ch.tvg)
         resolveAndStart(ch, fresh = true)

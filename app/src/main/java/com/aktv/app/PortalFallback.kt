@@ -35,4 +35,26 @@ internal object PortalFallback {
         }
         return -1
     }
+
+    /**
+     * Ordered twin hunt across portal name-lists: one hit per pool, pools keeps their order, so the
+     * caller plays the viewer's own subscription before the shared ones. Each hit is a pool index
+     * together with the channel index inside that pool.
+     */
+    fun twinIndices(name: String, pools: List<List<String>>): List<Pair<Int, Int>> =
+        pools.mapIndexedNotNull { poolIndex, names ->
+            matchIndex(name, names).takeIf { it >= 0 }?.let { poolIndex to it }
+        }
+
+    /**
+     * A portal is settled for tune time when waiting longer cannot surface a channel we have not
+     * seen: unconfigured, already holding channels, or finished loading (successfully or after its
+     * retry). Anything else means a first playlist is still on its way and a tap should wait for it.
+     */
+    fun portalSettled(configured: Boolean, hasChannels: Boolean, inFlight: Boolean, loaded: Boolean, retried: Boolean): Boolean {
+        if (!configured) return true
+        if (hasChannels) return true
+        if (inFlight) return false
+        return loaded || retried
+    }
 }

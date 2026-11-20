@@ -27,4 +27,24 @@ class PortalFallbackTest {
         assertEquals(-1, PortalFallback.matchIndex("Colors", emptyList()))
         assertEquals(-1, PortalFallback.matchIndex("   ", listOf("Colors")))
     }
+
+    @Test fun `twin hunt hits one channel per pool in pool order`() {
+        val pools = listOf(listOf("Nick", "Pogo"), listOf("Nick HD", "Sony Sab"), listOf("Cartoon Network"))
+        assertEquals(listOf(0 to 0, 1 to 0), PortalFallback.twinIndices("Nick", pools))
+    }
+
+    @Test fun `twin hunt skips pools that do not carry the channel`() {
+        val pools = listOf(listOf("Pogo"), listOf("Zee Cinema"), listOf("Nick"))
+        assertEquals(listOf(2 to 0), PortalFallback.twinIndices("Nick", pools))
+        assertEquals(emptyList<Pair<Int, Int>>(), PortalFallback.twinIndices("Nick", pools.take(2)))
+    }
+
+    @Test fun `a portal still loading its first playlist is the only unsettled case`() {
+        assertEquals(true, PortalFallback.portalSettled(configured = false, hasChannels = false, inFlight = false, loaded = false, retried = false))
+        assertEquals(true, PortalFallback.portalSettled(configured = true, hasChannels = true, inFlight = true, loaded = false, retried = false))
+        assertEquals(true, PortalFallback.portalSettled(configured = true, hasChannels = false, inFlight = false, loaded = true, retried = false))
+        assertEquals(true, PortalFallback.portalSettled(configured = true, hasChannels = false, inFlight = false, loaded = false, retried = true))
+        assertEquals(false, PortalFallback.portalSettled(configured = true, hasChannels = false, inFlight = true, loaded = false, retried = false))
+        assertEquals(false, PortalFallback.portalSettled(configured = true, hasChannels = false, inFlight = false, loaded = false, retried = false))
+    }
 }
