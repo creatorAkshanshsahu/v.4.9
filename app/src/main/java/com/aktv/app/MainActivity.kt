@@ -3414,11 +3414,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Programme boundaries roll over while browsing: re-resolve the rows every five minutes. */
-    private val captionRefresh: Runnable = Runnable {
-        if (!isFinishing && !isDestroyed) {
-            // Playback owns the screen and the network: nothing to repaint, nothing to fetch.
-            if (layer.visibility != View.VISIBLE) prefetchGuideForRows()
-            ui.postDelayed(captionRefresh, 300_000L)
+    private val captionRefresh = object : Runnable {
+        override fun run() {
+            if (!isFinishing && !isDestroyed) {
+                // Playback owns the screen and the network: nothing to repaint, nothing to fetch.
+                if (layer.visibility != View.VISIBLE) prefetchGuideForRows()
+                ui.postDelayed(this, 300_000L)
+            }
         }
     }
 
