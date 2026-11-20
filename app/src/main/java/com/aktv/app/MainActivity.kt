@@ -5519,7 +5519,15 @@ class MainActivity : AppCompatActivity() {
         submit(io) {
             try {
                 val file = Updater.download(this, release, { percent ->
-                    runOnUiThread { if (dialogProgress.isShowing) dialogProgress.progress = percent }
+                    runOnUiThread {
+                        if (!dialogProgress.isShowing) return@runOnUiThread
+                        dialogProgress.progress = percent
+                        if (release.size > 0) {
+                            val doneMb = release.size * percent / 100.0 / (1024 * 1024)
+                            val totalMb = release.size / (1024.0 * 1024)
+                            dialogProgress.setMessage(String.format(Locale.US, "%.1f / %.1f MB", doneMb, totalMb))
+                        }
+                    }
                 }, { false })
                 runOnUiThread {
                     updateDownloading = false

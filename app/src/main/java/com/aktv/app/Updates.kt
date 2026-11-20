@@ -137,6 +137,25 @@ internal object UpdateManifest {
         return null
     }
 
+    /** Integer percent for the progress bar. Unknown totals stay at 0 instead of dividing by zero. */
+    fun progressPercent(written: Long, total: Long): Int =
+        if (total <= 0) 0 else ((written * 100) / total).toInt().coerceIn(0, 100)
+
+    /**
+     * Start byte of a `Content-Range` answer (`bytes 100-199/1000` -> 100). Null when the server sent
+     * no usable range, which is when a resume must be abandoned instead of appended to blindly.
+     */
+    fun rangeStart(contentRange: String?): Long? {
+        val match = Regex("^bytes\\s+(\\d+)-\\d+/").find(contentRange?.trim().orEmpty()) ?: return null
+        return match.groupValues[1].toLongOrNull()?.takeIf { it >= 0 }
+    }
+
+    /** Total file size of a `Content-Range` answer (`bytes 100-199/1000` -> 1000). */
+    fun rangeTotal(contentRange: String?): Long? {
+        val match = Regex("^bytes\\s+(?:\\d+-\\d+|\\*)/([0-9]+)").find(contentRange?.trim().orEmpty()) ?: return null
+        return match.groupValues[1].toLongOrNull()?.takeIf { it in 1..UpdateConfig.MAX_APK_BYTES }
+    }
+
     fun sha256(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
@@ -158,6 +177,19 @@ internal object Updater {
         .readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(60, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * Downloads get their own client: a 90MB APK on a slow link legitimately takes minutes, so there
+     * is no whole-call deadline — only the per-read stall guard, which fails fast when bytes stop
+     * flowing and lets the retry loop below resume instead of restarting.
+     */
+    private val downloadClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    /** A finished file that fails its checksum: the retry loop drops it and starts over. */
+    private class ChecksumMismatch : IOException("Downloaded update did not match its published checksum")
 
     fun installedCode(context: Context): Long = try {
         context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
@@ -216,34 +248,142 @@ internal object Updater {
 
     fun download(context: Context, release: UpdateRelease, onProgress: (Int) -> Unit, cancelled: () -> Boolean): File {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        dir.listFiles()?.forEach { old -> if (old.name != "STREAMR-${release.versionCode}.apk") old.delete() }
-        val target = File(dir, "STREAMR-${release.versionCode}.apk")
-        val request = Request.Builder().url(release.apkUrl).build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("Update download failed (HTTP ${response.code})")
-            val body = response.body ?: throw IOException("Update download was empty")
-            val total = if (body.contentLength() > 0) body.contentLength() else release.size
+        val name = "STREAMR-${release.versionCode}.apk"
+        // The `.part` file is resume state: bytes from an earlier attempt — possibly from a previous app
+        // launch — are kept and continued, never re-downloaded. On a link that cannot finish 90MB in one
+        // go, restarting from zero is what makes an update feel impossibly slow.
+        dir.listFiles()?.forEach { old -> if (old.name != name && old.name != "$name.part") old.delete() }
+        val target = File(dir, name)
+        val part = File(dir, "$name.part")
+        if (release.size > 0 && part.exists() && part.length() > release.size) part.delete()
+        if (release.size > 0 && part.exists() && part.length() == release.size &&
+            UpdateManifest.sha256(part).equals(release.sha256, true)
+        ) {
+            // The bytes already finished arriving (the app died before installing, say): no network at all.
+            finishPart(part, target)
+            onProgress(100)
+            return target
+        }
+        var attempt = 0
+        var lastError: IOException? = null
+        while (attempt < 3) {
+            if (cancelled()) throw IOException("Update download cancelled")
+            try {
+                if (!downloadAttempt(release, part, onProgress, cancelled).equals(release.sha256, true)) {
+                    // A poisoned prefix must not poison the retry: drop everything and start over.
+                    part.delete()
+                    throw ChecksumMismatch()
+                }
+                finishPart(part, target)
+                onProgress(100)
+                return target
+            } catch (error: IOException) {
+                lastError = error
+                if (cancelled()) throw IOException("Update download cancelled")
+                attempt++
+                if (attempt < 3) {
+                    try { Thread.sleep(1_000L * attempt) } catch (_: InterruptedException) {
+                        throw IOException("Update download cancelled")
+                    }
+                }
+            }
+        }
+        throw lastError ?: IOException("Update download failed")
+    }
+
+    /**
+     * One download pass, resuming [part] when the server honours ranges. Returns the hex SHA-256 of the
+     * complete file: the checksum is fed chunk by chunk as bytes arrive, so a 90MB file is never read
+     * back from disk a second time just to verify it.
+     */
+    private fun downloadAttempt(
+        release: UpdateRelease,
+        part: File,
+        onProgress: (Int) -> Unit,
+        cancelled: () -> Boolean
+    ): String {
+        var have = if (part.exists()) part.length() else 0L
+        val digest = MessageDigest.getInstance("SHA-256")
+        if (have > 0) {
+            // Seed the running checksum from the resumed prefix: one sequential disk read, no network.
+            part.inputStream().use { input ->
+                val seed = ByteArray(256 * 1024)
+                while (true) {
+                    val count = input.read(seed)
+                    if (count < 0) break
+                    digest.update(seed, 0, count)
+                }
+            }
+        }
+        fun rangedRequest(from: Long): Request {
+            val builder = Request.Builder().url(release.apkUrl)
+            if (from > 0) builder.header("Range", "bytes=$from-")
+            return builder.build()
+        }
+        var response = downloadClient.newCall(rangedRequest(have)).execute()
+        if (response.code == 416 && have > 0) {
+            // The server has fewer bytes than our prefix (the release was re-published smaller): the
+            // prefix belongs to nothing, so drop it and fetch from zero instead of failing the update.
+            response.close()
+            part.delete(); have = 0; digest.reset()
+            response = downloadClient.newCall(rangedRequest(0)).execute()
+        }
+        response.use {
+            if (it.code != 200 && it.code != 206) throw IOException("Update download failed (HTTP ${it.code})")
+            if (it.code == 200 && have > 0) {
+                // The range was ignored: the prefix on disk belongs to nothing, start over.
+                part.delete(); have = 0; digest.reset()
+            }
+            if (it.code == 206) {
+                val start = UpdateManifest.rangeStart(it.header("Content-Range"))
+                if (start != have) throw IOException("Update resume point was rejected")
+                val rangedTotal = UpdateManifest.rangeTotal(it.header("Content-Range"))
+                if (release.size > 0 && rangedTotal != null && rangedTotal != release.size) {
+                    // The release changed mid-download; the retry loop fetches the new file from zero.
+                    part.delete()
+                    throw IOException("Update changed while downloading")
+                }
+            }
+            val body = it.body ?: throw IOException("Update download was empty")
+            val total = (if (it.code == 206) UpdateManifest.rangeTotal(it.header("Content-Range")) else null)
+                ?: body.contentLength().takeIf { length -> length > 0 }
+                ?: release.size
             body.byteStream().use { input ->
-                target.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var written = 0L
+                java.io.FileOutputStream(part, /* append = */ have > 0).use { output ->
+                    val buffer = ByteArray(256 * 1024)
+                    var written = have
+                    var lastPercent = UpdateManifest.progressPercent(written, total)
+                    // The bar starts where the resume left off, then moves at most once per percent: a full
+                    // download used to post ~1,400 UI updates, one per 64KB chunk.
+                    onProgress(lastPercent)
                     while (true) {
                         if (cancelled()) throw IOException("Update download cancelled")
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
+                        digest.update(buffer, 0, count)
                         written += count
                         if (written > UpdateConfig.MAX_APK_BYTES) throw IOException("Update download was too large")
-                        if (total > 0) onProgress(((written * 100) / total).toInt().coerceIn(0, 100))
+                        val percent = UpdateManifest.progressPercent(written, total)
+                        if (percent != lastPercent) {
+                            lastPercent = percent
+                            onProgress(percent)
+                        }
                     }
+                    output.flush()
                 }
             }
         }
-        if (!UpdateManifest.sha256(target).equals(release.sha256, true)) {
-            target.delete()
-            throw IOException("Downloaded update did not match its published checksum")
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun finishPart(part: File, target: File) {
+        if (target.exists()) target.delete()
+        if (!part.renameTo(target)) {
+            // renameTo can fail across volumes; copy is the fallback, not a failure.
+            part.copyTo(target, overwrite = true)
+            part.delete()
         }
-        return target
     }
 
     /** Android only installs an APK whose package and version match what was advertised. */
