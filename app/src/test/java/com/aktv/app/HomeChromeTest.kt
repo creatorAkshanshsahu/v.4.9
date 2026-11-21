@@ -35,7 +35,7 @@ class HomeChromeTest {
         assertTrue("the container floats inside the screen", box.left in 10..30 && box.top in 4..20)
         val nav = root.findViewById<View>(R.id.navRail)
         assertEquals(View.VISIBLE, nav.visibility)
-        assertTrue("the bar sits at the top of the container", nav.top >= box.top && nav.top <= box.top + 24)
+        assertTrue("the bar sits at the top of the container", nav.top in 0..24)
         assertTrue("the bar is a 76dp strip", nav.height in 68..84)
         assertEquals("the wordmark is the only brand in the bar", "STREAMR",
             root.findViewById<TextView>(R.id.akText).text.toString())
@@ -97,9 +97,10 @@ class HomeChromeTest {
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
     fun `TV movie hero keeps the bar, the cards and the header clear of each other`() = screen(960, 540, movies = true) { root ->
         val nav = root.findViewById<View>(R.id.navRail)
+        val content = root.findViewById<View>(R.id.content)
         val hero = root.findViewById<View>(R.id.heroArea)
         val header = root.findViewById<View>(R.id.sectionHeader)
-        assertTrue("the cards clear the bar", hero.top >= nav.bottom)
+        assertTrue("the cards clear the bar", hero.top + content.top >= nav.bottom)
         assertTrue("the header clears the cards", header.top >= hero.bottom)
         assertTrue(root.findViewById<TextView>(R.id.heroTitle).maxLines in 1..2)
     }
