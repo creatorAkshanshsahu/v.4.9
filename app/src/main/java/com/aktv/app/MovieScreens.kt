@@ -371,7 +371,6 @@ class DetailActivity : Activity() {
             w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
             w.setGravity(Gravity.BOTTOM)
             w.attributes = w.attributes.apply { dimAmount = 0.55f; flags = flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND }
-            w.setWindowAnimations(android.R.style.Animation_InputMethodFancy)
         }
         dialog.show()
     }
