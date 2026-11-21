@@ -1,6 +1,7 @@
 package com.aktv.app
 
 import android.app.Activity
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -41,28 +42,29 @@ class HomePreviewTest {
             activity.setContentView(root)
             val compact = height < 420
             HomeChrome.apply(root, width, height, 1f, movies)
-            root.findViewById<TextView>(R.id.sectionTitle).text = if (movies) "Movies" else "Live TV"
-            root.findViewById<TextView>(R.id.sectionKicker).apply {
-                text = if (movies) "YOUR NEXT MOVIE NIGHT" else "LIVE, RIGHT NOW"
-                setTextColor(Accent.SIGNAL)
-            }
-            root.findViewById<TextView>(R.id.librarySummary).text = "SAMPLE CONTENT · UI PREVIEW"
-            root.findViewById<TextView>(R.id.homeClock).text = "8:45 PM"
+            root.findViewById<TextView>(R.id.sectionTitle).text = if (movies) "Trending in Animation" else "Live TV"
             root.findViewById<TextView>(R.id.heroTitle).text = if (movies) "The Last Horizon" else "AK News"
             root.findViewById<TextView>(R.id.heroBadge).apply {
-                text = if (movies) "2026 · Sci-Fi · ★ 6.6" else "News · English"
-                setPadding(0, 0, 0, 0)
-                background = null
-                setTextColor(Accent.DIM)
+                text = if (movies) "2026  ·  Sci-Fi  ·  ★ 6.6" else "News · English"
+                visibility = View.VISIBLE
             }
-            root.findViewById<View>(R.id.heroSubheading).visibility = View.GONE
-            root.findViewById<TextView>(R.id.heroDesc).text = if (movies) "A story for the long way home." else "Live. Global. Independent. Breaking news, bigger perspectives."
             root.findViewById<View>(R.id.status).visibility = View.GONE
-            root.findViewById<View>(R.id.heroDesc).visibility = View.VISIBLE
+            root.findViewById<TextView>(R.id.heroDesc).apply {
+                text = if (movies) "A story for the long way home." else "Live. Global. Independent."
+                visibility = View.VISIBLE
+            }
             root.findViewById<TextView>(R.id.heroDot).apply {
                 visibility = View.VISIBLE
                 text = if (movies) "ORIGINAL FILM" else "LIVE"
-                setTextColor(Accent.SIGNAL)
+            }
+            root.findViewById<TextView>(R.id.heroPlayLabel).text = if (movies) "▶   Play" else "▶   Play Live"
+            root.findViewById<TextView>(R.id.hero2Title).text = if (movies) "Night Signal" else "Match Centre"
+            root.findViewById<TextView>(R.id.hero2Badge).apply {
+                text = if (movies) "2026  ·  Thriller  ·  ★ 8.1" else "Sports · Hindi"
+            }
+            root.findViewById<TextView>(R.id.hero2Play).text = if (movies) "▶   Play" else "▶   Play Live"
+            root.findViewById<ImageView>(R.id.hero2Backdrop).apply {
+                setImageResource(if (movies) R.drawable.home_nature_art else R.drawable.home_sports_art)
             }
             root.findViewById<ImageView>(R.id.heroLogo).apply {
                 setImageResource(R.drawable.streamr_mark)
@@ -70,36 +72,33 @@ class HomePreviewTest {
             }
             root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE
             root.findViewById<View>(R.id.heroOrb).background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                intArrayOf(0xFF0A061A.toInt(), 0xFF14092C.toInt(), 0xFF060410.toInt()))
+                intArrayOf(0xFF2A3352.toInt(), 0xFF1A2340.toInt(), 0xFF141B31.toInt()))
             root.findViewById<ImageView>(R.id.heroBackdrop).apply {
                 setImageResource(R.drawable.home_hero_cinematic); visibility = View.VISIBLE; alpha = 1f
             }
             root.findViewById<View>(R.id.heroPreview).visibility = View.GONE
             root.findViewById<View>(R.id.heroGlow).visibility = View.GONE
-            val chips = root.findViewById<LinearLayout>(R.id.heroChips)
-            val heroActions = if (movies) listOf("▶   Play", "More Info") else listOf("▶   Play Live", "Details")
-            heroActions.forEachIndexed { index, label ->
-                chips.addView(TextView(activity).apply {
-                    text = label; textSize = if (compact) 11f else 13f; setTextColor(Accent.TEXT)
-                    setPadding(22, if (compact) 7 else 11, 22, if (compact) 7 else 11)
-                    background = Ui.pill(1f, if (index == 0) Accent.BRAND else 0xB3100A23.toInt(), 12f).apply {
-                        if (index != 0) setStroke(1, 0x4000ECF7)
-                    }
-                }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 12 })
-            }
-            for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
+            for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segFusion, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) Accent.BRAND else Color.TRANSPARENT, 18f)
-                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
+                view.background = Ui.pill(1f, Color.TRANSPARENT, 18f)
+                view.setTextColor(if (selected) Color.WHITE else FlixColors.TAB_IDLE)
             }
-            for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar, R.id.phoneSearch)) {
+            for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneFusion, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar, R.id.phoneSearch)) {
                 val selected = id == if (movies) R.id.phoneMovies else R.id.phoneLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, if (selected) Accent.BRAND else 0xA8100A23.toInt(), 22f).apply {
-                    setStroke(if (selected) 2 else 1, if (selected) Accent.SIGNAL else 0x4000ECF7)
-                }
-                view.setTextColor(if (selected) Accent.TEXT else Accent.DIM)
+                view.background = Ui.pill(1f, if (selected) FlixColors.PILL else Color.TRANSPARENT, 18f)
+                view.setTextColor(if (selected) Color.WHITE else FlixColors.INK)
+            }
+            val strip = root.findViewById<LinearLayout>(R.id.flixChips)
+            val sampleChips = if (movies) listOf("✦  Trending" to true, "◆  Action" to false, "♥  Romance" to false, "●  Animation" to false)
+                else listOf("✦  All" to true, "♥  Favorites" to false, "●  News" to false, "▲  Sports" to false)
+            sampleChips.forEach { (label, selected) ->
+                strip.addView(TextView(activity).apply {
+                    text = label; textSize = if (compact) 11f else 12.5f; setTextColor(if (selected) FlixColors.INK else Color.WHITE)
+                    setPadding(16, 9, 16, 9)
+                    background = Ui.pill(1f, if (selected) FlixColors.CHIP_SELECTED else FlixColors.CHIP, 14f)
+                }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 10 })
             }
             // The Live tab's real shape: the live row, the trending strip, then the recent row. The Sony
             // section that used to sit between them is gone; nothing here uses the browser or the site page.
@@ -141,9 +140,7 @@ class HomePreviewTest {
                                 tile.findViewById<TextView>(R.id.trendingRank).text = "${(index + 1).toString().padStart(2, '0')}  TRENDING"
                             } else if (movies) {
                                 val titles = listOf("The Last Horizon", "Night Signal", "Paper Skies", "Velocity")
-                                tile.background = Ui.pill(1f, Color.TRANSPARENT, 14f).apply {
-                                    if (position == 0 && index == 0) setStroke(3, Accent.SIGNAL)
-                                }
+                                val ratings = listOf("★ 8.1  |  2026", "★ 7.4  |  2026", "★ 6.9  |  2025", "★ 8.8  |  2026")
                                 tile.findViewById<TextView>(R.id.posterName).apply {
                                     text = titles[index % 4]; textSize = if (compact) 13f else 18f; setTextColor(Color.WHITE)
                                     background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(colors[index % 4], 0xFF12060E.toInt()))
@@ -152,27 +149,40 @@ class HomePreviewTest {
                                     R.drawable.home_hero_cinematic, R.drawable.home_nature_art,
                                     R.drawable.home_sports_art, R.drawable.home_family_art)[index % 4])
                                 tile.findViewById<TextView>(R.id.posterTitle).text = titles[index % 4]
-                                tile.findViewById<TextView>(R.id.posterMeta).text = if (movies) "MOVIE" else "SERIES"
+                                tile.findViewById<TextView>(R.id.posterMeta).text = ratings[index % 4]
+                                tile.findViewById<TextView>(R.id.posterRank).apply {
+                                    visibility = if (position == 0) View.VISIBLE else View.GONE
+                                    text = (index + 1).toString()
+                                }
                             } else {
                                 val cardColor = colors[index % 5]
                                 tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                                    intArrayOf(cardColor, Ui.mix(cardColor, Accent.ABYSS, 0.48f))).apply {
-                                    cornerRadius = 14f
-                                    if (position == 0 && index == 0) setStroke(3, Accent.SIGNAL)
+                                    intArrayOf(Ui.mix(FlixColors.CARD, cardColor, 0.22f), FlixColors.CARD)).apply {
+                                    cornerRadius = 20f
+                                    if (position == 0 && index == 0) setStroke(3, FlixColors.PILL)
                                 }
                                 tile.clipToOutline = true
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
                                     visibility = View.VISIBLE
-                                    text = "SR"
-                                    setTextColor(Accent.GLOSS_HI)
+                                    text = initials(listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")[index % 5])
+                                    setTextColor(Color.WHITE)
                                     textSize = if (compact) 18f else 23f
                                     background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
                                 }
-                                val names = listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")
-                                tile.findViewById<TextView>(R.id.name).text = names[index % 5]
-                                tile.findViewById<TextView>(R.id.nowCaption).text =
-                                    listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
+                                tile.findViewById<TextView>(R.id.name).apply {
+                                    text = listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")[index % 5]
+                                    setTextColor(FlixColors.INK)
+                                }
+                                tile.findViewById<TextView>(R.id.nowCaption).apply {
+                                    text = listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
+                                    setTextColor(FlixColors.MUTED)
+                                }
+                                tile.findViewById<TextView>(R.id.liveBadge).apply {
+                                    text = "WORKING"; setTextColor(Color.WHITE)
+                                    background = GradientDrawable().apply { cornerRadius = 7f; setColor(0xFF16885D.toInt()) }
+                                }
+                                tile.findViewById<View>(R.id.healthDot).backgroundTintList = ColorStateList.valueOf(FlixColors.RED)
                             }
                         }
                     }

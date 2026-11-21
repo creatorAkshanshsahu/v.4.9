@@ -336,6 +336,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
     private lateinit var heroText: View; private lateinit var heroDot: View; private lateinit var heroBadge: TextView
     private lateinit var heroTitle: TextView; private lateinit var heroSubheading: TextView; private lateinit var heroChips: LinearLayout; private lateinit var heroTagline: View
+    private lateinit var heroCard2: View; private lateinit var hero2Backdrop: ImageView
+    private lateinit var hero2Badge: TextView; private lateinit var hero2Title: TextView; private lateinit var hero2Play: TextView
+    private lateinit var heroPlayLabel: TextView
+    private lateinit var flixChips: LinearLayout
+    private lateinit var flixBellBadge: View
+    private lateinit var flixSortBtn: ImageView; private lateinit var flixFilterBtn: ImageView
+    private var hero2Tile: Tile? = null; private var hero2Key = ""
+    private var flixChip: FlixChip? = null; private var flixTabName = "Live TV"
+    private var flixSort = FlixView.SORT_DEFAULT
+    private var flixFilter = false
+    private var aboutDialog: AlertDialog? = null
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
@@ -426,8 +437,9 @@ class MainActivity : AppCompatActivity() {
         portalFilterMode = prefs.getInt("portal_filter_mode_v2", XtreamClient.FILTER_ENGLISH_HINDI)
         restoreWorkingMaxTvDefaultsIfNeeded()
         findViewById<View>(R.id.navProfile)?.apply {
-            isClickable = true
-            setOnClickListener { showStarShareDialog() }
+            isClickable = true; isFocusable = true
+            setOnClickListener { showAboutSheet() }
+            setOnFocusChangeListener { v, f -> focusAnim(v, f) }
         }
         phoneSegs = listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneFusion, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar).map { findViewById(it) }
         phoneSearchBtn = findViewById(R.id.phoneSearch)
@@ -437,6 +449,13 @@ class MainActivity : AppCompatActivity() {
         heroOrb = findViewById(R.id.heroOrb); heroLogo = findViewById(R.id.heroLogo); heroMono = findViewById(R.id.heroMono)
         heroProg = findViewById(R.id.heroProg); heroProgress = findViewById(R.id.heroProgress)
         heroDesc = findViewById(R.id.heroDesc); heroNext = findViewById(R.id.heroNext)
+        heroCard2 = findViewById(R.id.heroCard2); hero2Backdrop = findViewById(R.id.hero2Backdrop)
+        hero2Badge = findViewById(R.id.hero2Badge); hero2Title = findViewById(R.id.hero2Title); hero2Play = findViewById(R.id.hero2Play)
+        heroPlayLabel = findViewById(R.id.heroPlayLabel)
+        flixChips = findViewById(R.id.flixChips)
+        flixBellBadge = findViewById(R.id.flixBellBadge)
+        flixSortBtn = findViewById(R.id.flixSortBtn); flixFilterBtn = findViewById(R.id.flixFilterBtn)
+        findViewById<TextView>(R.id.flixUserSub).text = "v$appVersion"
         infoCard = findViewById(R.id.infoCard); infoLogo = findViewById(R.id.infoLogo); infoName = findViewById(R.id.infoName)
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
         playerTopBar = findViewById(R.id.playerTopBar); playerTopTitle = findViewById(R.id.playerTopTitle)
@@ -548,6 +567,33 @@ class MainActivity : AppCompatActivity() {
         searchBtn.background = searchBg
         searchBtn.setOnFocusChangeListener { _, _ -> styleSegs() }
         searchBtn.setOnClickListener { openSearch() }
+        // Flix home: the bell asks GitHub, the hero cards play, the pill reshapes the shelves.
+        findViewById<View>(R.id.flixBell)?.apply {
+            setOnClickListener { checkForUpdates(interactive = true, force = true) }
+            setOnFocusChangeListener { v, f -> focusAnim(v, f) }
+        }
+        findViewById<View>(R.id.heroMedia)?.apply {
+            setOnFocusChangeListener { v, f -> focusAnim(v, f) }
+            setOnClickListener { heroTile?.let { performHeroPrimary(it) } }
+        }
+        heroCard2.apply {
+            setOnFocusChangeListener { v, f -> focusAnim(v, f) }
+            setOnClickListener { hero2Tile?.let { performHeroPrimary(it) } }
+        }
+        flixSortBtn.apply {
+            setOnClickListener {
+                flixSort = when (flixSort) { FlixView.SORT_DEFAULT -> FlixView.SORT_AZ; FlixView.SORT_AZ -> FlixView.SORT_RATING; else -> FlixView.SORT_DEFAULT }
+                styleFlixView(); refreshRowsKeepFocus(requestFocus = false)
+            }
+            setOnFocusChangeListener { v, f -> focusAnim(v, f) }
+        }
+        flixFilterBtn.apply {
+            setOnClickListener {
+                flixFilter = !flixFilter
+                styleFlixView(); refreshRowsKeepFocus(requestFocus = false)
+            }
+            setOnFocusChangeListener { v, f -> focusAnim(v, f) }
+        }
         phoneSegs.forEachIndexed { i, tv ->
             tv.background = phoneSegBgs[i]
             tv.setOnClickListener { switchTab(tabIds[i]) }
@@ -907,47 +953,69 @@ class MainActivity : AppCompatActivity() {
     private fun sectionAccent() = if (tab == 1) Accent.BRAND_LIGHT else Accent.BRAND
 
     /**
-     * Cyber pill states (TopNav.tsx): active section is cyber magenta (`bg-primary text-primary-foreground`),
-     * focus adds a 2dp electric cyan ring (`--focus`), idle pills sit quietly on the glass bar.
+     * Flix tab states: on the dark pill the active section is plain white type and focus adds a white
+     * ring; on the light phone strip the active pill is navy and idle pills are navy ink on glass.
      */
-    private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
+    private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean, onLight: Boolean = false) {
         val ring = (2 * dp).toInt().coerceAtLeast(2)
-        when {
+        val white = 0xFFFFFFFF.toInt()
+        if (onLight) {
+            when {
+                focused && active -> {
+                    bg.setColor(FlixColors.PILL)
+                    bg.setStroke(ring, FlixColors.PILL)
+                    tv.setTextColor(white)
+                }
+                focused -> {
+                    bg.setColor(FlixColors.CHIP_SELECTED)
+                    bg.setStroke(ring, FlixColors.PILL)
+                    tv.setTextColor(FlixColors.INK)
+                }
+                active -> {
+                    bg.setColor(FlixColors.PILL)
+                    bg.setStroke(0, Color.TRANSPARENT)
+                    tv.setTextColor(white)
+                }
+                else -> {
+                    bg.setColor(Color.TRANSPARENT)
+                    bg.setStroke(0, Color.TRANSPARENT)
+                    tv.setTextColor(FlixColors.INK)
+                }
+            }
+        } else when {
             focused && active -> {
-                bg.setColor(Accent.BRAND)
-                bg.setStroke(ring, Accent.SIGNAL)
-                tv.setTextColor(Accent.TEXT)
+                bg.setColor(FlixColors.PILL_HI)
+                bg.setStroke(ring, white)
+                tv.setTextColor(white)
             }
             focused -> {
-                bg.setColor(0x551B1630)
-                bg.setStroke(ring, Accent.SIGNAL)
-                tv.setTextColor(Accent.TEXT)
+                bg.setColor(FlixColors.PILL_HI)
+                bg.setStroke(ring, white)
+                tv.setTextColor(white)
             }
             active -> {
-                bg.setColor(Accent.BRAND)
+                bg.setColor(Color.TRANSPARENT)
                 bg.setStroke(0, Color.TRANSPARENT)
-                tv.setTextColor(Accent.TEXT)
+                tv.setTextColor(white)
             }
             else -> {
                 bg.setColor(Color.TRANSPARENT)
                 bg.setStroke(0, Color.TRANSPARENT)
-                tv.setTextColor(Accent.DIM)
+                tv.setTextColor(FlixColors.TAB_IDLE)
             }
         }
         val scale = if (focused) 1.05f else 1f
         tv.scaleX = scale; tv.scaleY = scale
     }
 
-    private val searchBg by lazy { Ui.pill(dp, 0xA8100A23.toInt(), 19f) }
+    private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 19f) }
 
-    /** Round glyph buttons keep their cyber glass disc; electric cyan ring and lift answer focus. */
+    /** The search glyph sits in the dark pill: invisible at rest, ringed white on focus. */
     private fun roundStyle(tv: TextView, bg: GradientDrawable) {
         val ring = (2 * dp).toInt().coerceAtLeast(2)
-        val hairline = (1 * dp).toInt().coerceAtLeast(1)
         val on = tv.isFocused
-        bg.setColor(if (on) 0xCC1B1630.toInt() else 0xA8100A23.toInt())
-        bg.setStroke(if (on) ring else hairline, if (on) Accent.SIGNAL else 0x4000ECF7)
-        tv.setTextColor(Accent.TEXT)
+        bg.setColor(if (on) FlixColors.PILL_HI else Color.TRANSPARENT)
+        bg.setStroke(if (on) ring else 0, if (on) 0xFFFFFFFF.toInt() else Color.TRANSPARENT)
         tv.scaleX = if (on) 1.05f else 1f
         tv.scaleY = tv.scaleX
     }
@@ -964,15 +1032,16 @@ class MainActivity : AppCompatActivity() {
         }
         segs.forEachIndexed { i, tv -> navStyle(tv, segBgs[i], tv.isFocused, tabIds[i] == tab) }
         roundStyle(searchBtn, searchBg)
-        phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tabIds[i] == tab) }
+        phoneSegs.forEachIndexed { i, tv -> navStyle(tv, phoneSegBgs[i], tv.isFocused, tabIds[i] == tab, true) }
         phoneSearchBtn.contentDescription = when (tab) {
             3 -> "Search movies"; 4 -> "Search series"; 8 -> "Search OG catalogue"; 9 -> "Search StarShare"; else -> "Search channels"
         }
-        navStyle(phoneSearchBtn, phoneSegBgs[phoneSegs.size], phoneSearchBtn.isFocused, false)
-        findViewById<TextView>(R.id.sectionTitle).text = when (tab) {
+        navStyle(phoneSearchBtn, phoneSegBgs[phoneSegs.size], phoneSearchBtn.isFocused, false, true)
+        flixTabName = when (tab) {
             0 -> "Live TV"; 1 -> "Always on"; 2 -> "JioTV"; 3 -> "Movies"; 4 -> "Series"; 5 -> "TATA"; 6 -> "maxTV"
             7 -> "TG TV"; 8 -> "OG & Platforms"; 9 -> "StarShare"; 10 -> "Fusion"; else -> "Live TV"
         }
+        findViewById<TextView>(R.id.sectionTitle).text = FlixView.headerFor(flixTabName, flixChip, vodTab)
         findViewById<TextView>(R.id.sectionKicker).apply {
             text = when (tab) {
                 0 -> "LIVE, RIGHT NOW"
@@ -993,6 +1062,9 @@ class MainActivity : AppCompatActivity() {
             else -> vodRowsFor(tab).sumOf { it.tiles.size }
         }
         findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (channelsTab) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
+        styleFlixView()
+        findViewById<View>(R.id.heroMedia)?.nextFocusUpId = segs[posOf(tab)].id
+        heroCard2.nextFocusUpId = segs[posOf(tab)].id
     }
 
     /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
@@ -1163,6 +1235,7 @@ class MainActivity : AppCompatActivity() {
             }
             else -> "" }
         status.text = msg; status.visibility = if (msg.isEmpty()) View.GONE else View.VISIBLE
+        updateFlixBadge()
     }
 
     /** Populate the home-only trending strip from the existing TMDB catalogue without blocking the intro or live list. */
@@ -1184,6 +1257,7 @@ class MainActivity : AppCompatActivity() {
                         val focus = currentFocus
                         if (loaded.isNotEmpty() && !heroCollapsed && (focus == null || !isInside(focus, rowsView))) {
                             setHero(Tile.Mv(loaded.first()), immediate = true)
+                            if (loaded.size > 1) setHero2(Tile.Mv(loaded[1]))
                         }
                         scheduleHeroRotation(reset = true)
                     }
@@ -3012,14 +3086,17 @@ class MainActivity : AppCompatActivity() {
             10 -> fusionRows(allPortal2)
             else -> { loadVod(tab); continueRow() + vodRowsFor(tab) }
         }
+        rows = viewRows(rows)
         setHeroCollapsed(false)
         inner.clear()
         rowAdapter.notifyDataSetChanged()
         setHero(openingHeroTile(), immediate = true)
+        setHero2(secondHeroTile())
         scheduleHeroRotation(reset = true)
         updateStatus(); styleSegs()
         // Captions paint over finished shelves: a throw here must never reach the rows' own catch.
         runCatching { prefetchGuideForRows() }
+        renderFlixChips()
     }
 
     private fun toggleFav(c: Channel) {
@@ -3073,6 +3150,7 @@ class MainActivity : AppCompatActivity() {
             val dir = if (t > tab) 1 else -1
             ui.removeCallbacks(heroRotate)
             tab = t; layoutHero(); stopPreview()
+            flixChip = null; flixSort = FlixView.SORT_DEFAULT; flixFilter = false
             rowsView.animate().cancel()
             refreshRows()
             rowsView.scrollToPosition(0)
@@ -3132,6 +3210,7 @@ class MainActivity : AppCompatActivity() {
         }
         heroSpot = HeroRotation.next(heroSpot, trendingTitles.size)
         setHero(Tile.Mv(trendingTitles[heroSpot]))
+        setHero2(Tile.Mv(trendingTitles[HeroRotation.next(heroSpot, trendingTitles.size)]))
         ui.postDelayed(heroRotate, HeroRotation.PERIOD_MS)
     }
 
@@ -3151,6 +3230,209 @@ class MainActivity : AppCompatActivity() {
         }
         else -> rows.firstOrNull()?.tiles?.firstOrNull()
     }
+    // ---------- flix home ----------
+    /** The shelves as the sort/filter pill leaves them; the default view is the identity. */
+    private fun viewRows(base: List<Row>): List<Row> = FlixView.apply(base, flixSort, flixFilter, favs, vodTab)
+
+    private fun updateFlixHeader() {
+        findViewById<TextView>(R.id.sectionTitle).text = FlixView.headerFor(flixTabName, flixChip, vodTab)
+    }
+
+    /** The sort/filter pill: gold answers an active view, pale answers rest. */
+    private fun styleFlixView() {
+        val pale = 0xB3FFFFFF.toInt()
+        flixSortBtn.imageTintList = ColorStateList.valueOf(if (flixSort == FlixView.SORT_DEFAULT) pale else FlixColors.GOLD)
+        flixSortBtn.contentDescription = when (flixSort) {
+            FlixView.SORT_AZ -> "Sort: A to Z"; FlixView.SORT_RATING -> "Sort: top rated"; else -> "Sort shelves"
+        }
+        flixFilterBtn.imageTintList = ColorStateList.valueOf(if (flixFilter) FlixColors.GOLD else pale)
+        flixFilterBtn.contentDescription = if (flixFilter) "Filter on" else "Filter shelves"
+    }
+
+    /** The chip strip under the heroes: the tab's own destinations, kept across rebuilds. */
+    private fun renderFlixChips() {
+        val chips = FlixChips.chipsFor(tab, rows, vodTab)
+        val keepId = flixChip?.id?.takeIf { id -> chips.any { it.id == id } }
+        flixChip = chips.firstOrNull { it.id == keepId }
+        val focusedId = (currentFocus?.tag as? String)?.takeIf { it.startsWith("flix:") }?.drop(5)
+        flixChips.removeAllViews()
+        if (chips.isEmpty()) { findViewById<View>(R.id.flixChipScroll).visibility = View.GONE; return }
+        findViewById<View>(R.id.flixChipScroll).visibility = View.VISIBLE
+        val selected = flixChip
+        for (chip in chips) {
+            val sel = chip == selected
+            val tv = TextView(this).apply {
+                text = "${chip.glyph}  ${chip.label}"
+                textSize = if (compact) 11f else 12.5f
+                typeface = fSemi
+                isFocusable = true; isClickable = true
+                tag = "flix:${chip.id}"
+                setTextColor(if (sel) FlixColors.INK else 0xFFFFFFFF.toInt())
+                background = Ui.pill(dp, if (sel) FlixColors.CHIP_SELECTED else FlixColors.CHIP, 14f)
+                setPadding((16 * dp).toInt(), (9 * dp).toInt(), (16 * dp).toInt(), (9 * dp).toInt())
+                nextFocusUpId = R.id.heroMedia; nextFocusDownId = R.id.rows
+                setOnFocusChangeListener { v, f -> focusAnim(v, f) }
+                setOnClickListener {
+                    flixChip = chip
+                    renderFlixChips()
+                    updateFlixHeader()
+                    (rowsView.layoutManager as? LinearLayoutManager)
+                        ?.scrollToPositionWithOffset(chip.row.coerceAtMost(rows.size - 1).coerceAtLeast(0), 0)
+                    flixChips.findViewWithTag<View>("flix:${chip.id}")?.requestFocus()
+                }
+                layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (10 * dp).toInt() }
+            }
+            flixChips.addView(tv)
+            if (chip.id == focusedId) tv.requestFocus()
+        }
+        updateFlixHeader()
+    }
+
+    /** The wide card's feature: the runner-up wherever the hero's own feature comes from. */
+    private fun secondHeroTile(): Tile? = when (tab) {
+        0 -> trendingTitles.getOrNull(1)?.let { Tile.Mv(it) }
+        1, 2, 5, 7 -> featuredChannels(pool()).getOrNull(1)?.let { Tile.Ch(it) }
+        6 -> portalFeaturedCached.getOrNull(1)?.let { Tile.Ch(it) }
+        10 -> portal2FeaturedCached.getOrNull(1)?.let { Tile.Ch(it) }
+        9 -> when {
+            !xtreamAccount().isConfigured -> null
+            xtreamMode == 0 -> xtreamFeaturedCached.getOrNull(1)?.let { Tile.Ch(it) }
+            else -> vodRowsFor(9).firstOrNull()?.tiles?.filterIsInstance<Tile.Mv>()?.getOrNull(1)
+        }
+        else -> rows.firstOrNull()?.tiles?.getOrNull(1)
+    }
+
+    private fun setHero2(t: Tile?) {
+        hero2Tile = t
+        if (!heroCollapsed) fillHero2(t)
+    }
+
+    /** The wide card: the next feature beside the hero, filled the same way, without the extras. */
+    private fun fillHero2(t: Tile?) {
+        val key = when (t) {
+            is Tile.Ch -> "ch:" + t.c.key
+            is Tile.Mv -> "mv:" + t.m.imdb
+            else -> "brand"
+        }
+        hero2Key = key
+        if (t !is Tile.Mv) hero2Backdrop.setImageResource(R.drawable.home_hero_cinematic)
+        when (t) {
+            is Tile.Ch -> {
+                hero2Badge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
+                hero2Title.text = t.c.name
+                hero2Play.text = "▶   Play Live"
+            }
+            is Tile.Mv -> {
+                hero2Badge.text = listOfNotNull(
+                    t.m.year.takeIf { it.isNotEmpty() },
+                    t.m.genres.firstOrNull()?.takeIf { it.isNotBlank() },
+                    t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" }
+                ).joinToString("  ·  ")
+                hero2Title.text = t.m.name
+                hero2Play.text = if (t.m.imdb.startsWith("xtream_series:")) "▶   Episodes" else "▶   Play"
+                val artwork = t.m.background.ifBlank { t.m.poster }
+                if (artwork.isBlank()) {
+                    hero2Backdrop.setImageResource(R.drawable.home_hero_cinematic)
+                } else {
+                    hero2Backdrop.load(artwork) {
+                        crossfade(360)
+                        listener(onError = { _, _ ->
+                            if (hero2Key == key) hero2Backdrop.setImageResource(R.drawable.home_hero_cinematic)
+                        })
+                    }
+                }
+            }
+            else -> {
+                hero2Badge.text = "LIVE · FILMS · SERIES"
+                hero2Title.text = "STREAMR"
+                hero2Play.text = if (tab == 9) "▶   Sign in to StarShare" else ""
+            }
+        }
+    }
+
+    /** The hero cards are big tiles: one press runs the feature's primary action, whatever it is. */
+    private fun performHeroPrimary(t: Tile?) {
+        when (t) {
+            is Tile.Ch -> {
+                // The hero can show a playlist tile; it must then play that tile, not the TG catalogue's first row.
+                val pool = when {
+                    t.c.v2 -> allV2
+                    t.c.jio -> if (tab == 5 && tataJio.isNotEmpty()) tataJio else allJio
+                    t.c.xtream -> visibleXtreamChannels()
+                    t.c.portal -> if (t.c.portalId == 1) visiblePortal2Channels() else visiblePortalChannels()
+                    t.c.m3u -> allPlaylist
+                    else -> all
+                }
+                shown = pool.ifEmpty { listOf(t.c) }; shownCat = t.c.category
+                play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
+            }
+            is Tile.Mv -> {
+                stopPreview()
+                val m = t.m
+                when {
+                    m.imdb.startsWith("xtream_vod:") -> playXtreamVod(m)
+                    m.imdb.startsWith("xtream_series:") -> openXtreamSeriesEpisodes(m)
+                    else -> {
+                        val preferred = if (tab == 8) FrostProvider.OG.id else null
+                        // Play means play: a film starts on the first press, a series opens its episodes.
+                        if (!m.isSeries && m.tmdb > 0) {
+                            Movies.saveTitle(prefs, m)
+                            MoviePlayerActivity.open(this@MainActivity, m, 0, 0, emptyList(), provider = preferred)
+                            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                        } else DetailActivity.open(this@MainActivity, m, provider = preferred)
+                    }
+                }
+            }
+            else -> if (tab == 9) showStarShareDialog()
+        }
+    }
+
+    /** The cards hold the title, one facts line and the play row; everything else stays off them. */
+    private fun applyFlixHeroTrim() {
+        for (id in intArrayOf(R.id.heroDot, R.id.heroSubheading, R.id.heroProg, R.id.heroProgress,
+                R.id.heroDesc, R.id.heroNext, R.id.heroMono, R.id.heroChips)) {
+            findViewById<View>(id)?.visibility = View.GONE
+        }
+        heroBadge.setTextColor(FlixColors.CAPTION)
+        heroPulse?.cancel(); heroPulse = null
+        heroPlayLabel.text = when (val t = heroTile) {
+            is Tile.Ch -> "▶   Play Live"
+            is Tile.Mv -> if (t.m.imdb.startsWith("xtream_series:")) "▶   Episodes" else "▶   Play"
+            else -> if (tab == 9) "▶   Sign in to StarShare" else "▶   Play"
+        }
+    }
+
+    /** The counters under a poster: rating gold-starred, then the year. */
+    private fun posterMetaText(m: Movies.Title): String {
+        val parts = ArrayList<String>()
+        m.rating.takeIf { it.isNotEmpty() }?.let { parts += "★ $it" }
+        m.year.takeIf { it.isNotEmpty() }?.let { parts += it }
+        if (parts.isEmpty()) m.genres.firstOrNull()?.takeIf { it.isNotBlank() }?.let { parts += it }
+        return parts.joinToString("  |  ")
+    }
+
+    /** The bell's red dot: a release is waiting that a silent check held for the shelf. */
+    private fun updateFlixBadge() {
+        if (isFinishing || isDestroyed) return
+        runCatching { flixBellBadge.visibility = if (pendingUpdate != null) View.VISIBLE else View.GONE }
+    }
+
+    /** The profile chip: this build, the update answer, and the accounts that need attention. */
+    private fun showAboutSheet() {
+        if (isFinishing || isDestroyed) return
+        aboutDialog?.dismiss()
+        aboutDialog = AlertDialog.Builder(this)
+            .setTitle("STREAMR $appVersion")
+            .setMessage("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT} · ${Build.MODEL.take(48)}\n" +
+                "StarShare: ${if (xtreamAccount().isConfigured) "signed in" else "not signed in"}\n" +
+                "maxTV: ${if (stalkerAccount().portal.isNotBlank()) "portal saved" else "no portal saved"}\n" +
+                "Fusion: ${if (stalkerAccount2() != null) "subscription on board" else "not on board"}")
+            .setPositiveButton("Check update") { _, _ -> checkForUpdates(interactive = true, force = true) }
+            .setNeutralButton("StarShare") { _, _ -> showStarShareDialog() }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
     /** Folds the hero (preview + text) away once you go below the first row, and brings it back on the first row. */
     private fun setHeroCollapsed(c: Boolean) {
         if (c == heroCollapsed) return
@@ -3165,6 +3447,7 @@ class MainActivity : AppCompatActivity() {
             area.visibility = View.VISIBLE
             area.animate().alpha(1f).setDuration(220).start(); media.animate().alpha(1f).setDuration(220).start()
             fillHero(heroTile)
+            fillHero2(hero2Tile)
             scheduleHeroRotation()
         }
     }
@@ -3254,19 +3537,7 @@ class MainActivity : AppCompatActivity() {
                 (heroDot as? TextView)?.setTextColor(Accent.BRAND_LIGHT)   // over artwork: brighter stop
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
-                heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
-                    // The hero can show a playlist tile; it must then play that tile, not the TG catalogue's first row.
-                    val pool = when {
-                        t.c.v2 -> allV2
-                        t.c.jio -> if (tab == 5 && tataJio.isNotEmpty()) tataJio else allJio
-                        t.c.xtream -> visibleXtreamChannels()
-                        t.c.portal -> if (t.c.portalId == 1) visiblePortal2Channels() else visiblePortalChannels()
-                        t.c.m3u -> allPlaylist
-                        else -> all
-                    }
-                    shown = pool.ifEmpty { listOf(t.c) }; shownCat = t.c.category
-                    play(shown.indexOfFirst { it.key == t.c.key }.coerceAtLeast(0))
-                } })
+                heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener { performHeroPrimary(t) } })
                 heroChips.addView(chip("Details").apply { setOnClickListener { showHomeChannelDetails(t.c) } })
                 if (tab == 9 || t.c.xtream) {
                     heroChips.addView(chip("Account").apply { setOnClickListener { showStarShareDialog() } })
@@ -3305,22 +3576,7 @@ class MainActivity : AppCompatActivity() {
                 ).joinToString(" · ")
                 val isXtreamVod = t.m.imdb.startsWith("xtream_vod:")
                 val isXtreamSeries = t.m.imdb.startsWith("xtream_series:")
-                heroChips.addView(chip(if (isXtreamSeries) "▶   Episodes" else "▶   Play", true).apply { setOnClickListener {
-                    stopPreview()
-                    when {
-                        isXtreamVod -> playXtreamVod(t.m)
-                        isXtreamSeries -> openXtreamSeriesEpisodes(t.m)
-                        else -> {
-                            val preferred = if (tab == 8) FrostProvider.OG.id else null
-                            // Play means play: a film starts on the first press, a series opens its episodes.
-                            if (!t.m.isSeries && t.m.tmdb > 0) {
-                                Movies.saveTitle(prefs, t.m)
-                                MoviePlayerActivity.open(this@MainActivity, t.m, 0, 0, emptyList(), provider = preferred)
-                                overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-                            } else DetailActivity.open(this@MainActivity, t.m, provider = preferred)
-                        }
-                    }
-                } })
+                heroChips.addView(chip(if (isXtreamSeries) "▶   Episodes" else "▶   Play", true).apply { setOnClickListener { performHeroPrimary(t) } })
                 if (isXtreamVod || isXtreamSeries) {
                     heroChips.addView(chip("Account").apply { setOnClickListener { showStarShareDialog() } })
                 } else {
@@ -3359,7 +3615,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     heroDesc.visibility = if (!compact) View.VISIBLE else View.GONE
                     heroChips.addView(chip(if (configured) "Account & Server" else "▶   Sign in to StarShare", true).apply {
-                        setOnClickListener { showStarShareDialog() }
+                        setOnClickListener { performHeroPrimary(t) }
                     })
                     if (configured) {
                         heroChips.addView(chip("Reload").apply { setOnClickListener { loadXtreamCurrentMode(force = true) } })
@@ -3374,6 +3630,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        applyFlixHeroTrim()
     }
 
     // ---------- programme details ----------
@@ -5154,6 +5411,7 @@ class MainActivity : AppCompatActivity() {
         // A release found mid-playback waited for the shelf; offer it now that the video is gone.
         pendingUpdate?.let { release ->
             pendingUpdate = null
+            updateFlixBadge()
             ui.post { if (!isFinishing && !isDestroyed && !playbackActive) promptUpdate(release) }
         }
     }
@@ -5577,6 +5835,7 @@ class MainActivity : AppCompatActivity() {
                     if (UpdateManifest.defersToShelf(interactive, playbackActive)) pendingUpdate = release
                     else { pendingUpdate = null; promptUpdate(release) }
                 }
+                updateFlixBadge()
                 else if (interactive) {
                     Toast.makeText(this, if (reachable) "STREAMR $appVersion is the latest published build." else
                         "Couldn't reach the update service. Check the connection and try again.", Toast.LENGTH_LONG).show()
@@ -6155,11 +6414,14 @@ class MainActivity : AppCompatActivity() {
             10 -> fusionRows(allPortal2)
             else -> continueRow() + vodRowsFor(tab)
         }
+        rows = viewRows(rows)
         inner.clear(); rowAdapter.notifyDataSetChanged()
         val shift = rows.size - old.size
         if (pos >= 0) lm.scrollToPositionWithOffset((pos + if (pos > 0) shift else 0).coerceAtLeast(0), top)
         if (requestFocus) rowsView.postDelayed({ if (layer.visibility != View.VISIBLE && !searchShown && currentFocus == null) rowsView.requestFocus() }, 80)
         runCatching { prefetchGuideForRows() }
+        renderFlixChips()
+        if (!rowsView.hasFocus()) setHero2(secondHeroTile())
     }
 
     // ---------- adapters ----------
@@ -6195,7 +6457,7 @@ class MainActivity : AppCompatActivity() {
             val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
             HomeChrome.styleTile(v, poster = t == 1, landscape = t == 3, compact = compact, dp = dp)
-            if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 20f); v.clipToOutline = true }
+            if (t != 1 && t != 3) { v.background = Ui.pill(dp, FlixColors.CARD, 20f); v.clipToOutline = true }
             return if (t == 0) ChVH(v) else VH(v)
         }
         override fun onViewRecycled(h: VH) { (h as? ChVH)?.stopPulse(); super.onViewRecycled(h) }
@@ -6211,7 +6473,7 @@ class MainActivity : AppCompatActivity() {
                 is Tile.Ch -> {
                     val chh = h as? ChVH ?: return
                     val bg = chh.bg
-                    v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c), 0.12f))
+                    v.tag = t.c.key; bg.setColor(Ui.mix(FlixColors.CARD, accentOf(t.c), 0.22f))
                     chh.name.text = t.c.name
                     val playingNow = layer.visibility == View.VISIBLE && renderedFrame && shown.getOrNull(current)?.key == t.c.key
                     val result = channelPlaybackResults[t.c.key]
@@ -6251,7 +6513,7 @@ class MainActivity : AppCompatActivity() {
                             allowHardware(false); size(256, 256); placeholder(null)
                             listener(onSuccess = { _, r ->
                                 extractAccent(t.c.key, r.drawable) { c ->
-                                    if (v.tag == t.c.key) bg.setColor(Ui.mix(Accent.SURFACE, c, 0.12f))
+                                    if (v.tag == t.c.key) bg.setColor(Ui.mix(FlixColors.CARD, c, 0.22f))
                                 }
                             })
                         }
@@ -6262,6 +6524,10 @@ class MainActivity : AppCompatActivity() {
                         if (f) {
                             heroFilmFocus = false
                             setHero(t)                          // ignored on home, which keeps its films
+                            if (tab != HeroRotation.HOME) {
+                                val p = h.bindingAdapterPosition
+                                if (p >= 0) setHero2(row.tiles.getOrNull(p + 1))
+                            }
                             if (channelsTab) scheduleSourceWarmup(t.c)
                             fetchGuide(t.c) { guide ->
                                 if (nowCaption.tag == t.c.key) nowCaption.text = when {
@@ -6294,13 +6560,8 @@ class MainActivity : AppCompatActivity() {
                         v.findViewById<TextView>(R.id.posterName).text = t.m.name
                         img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
                         v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
-                        // The tile's crimson line is the kind, as on the site; year and rating stay in the
-                        // accessibility label instead of competing with the eyebrow.
-                        v.findViewById<TextView>(R.id.posterMeta).text = when {
-                            "Anime" in t.m.genres -> "ANIME"
-                            t.m.isSeries -> "SERIES"
-                            else -> "MOVIE"
-                        }
+                        // The counters sit under the artwork now: rating star, then the year.
+                        v.findViewById<TextView>(R.id.posterMeta).text = posterMetaText(t.m)
                         v.contentDescription =
                             (listOf(t.m.name, t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
                                 .filterNotNull()).joinToString(" · ")
@@ -6314,6 +6575,8 @@ class MainActivity : AppCompatActivity() {
                         if (f) {
                             heroFilmFocus = true
                             setHero(t)
+                            val p = h.bindingAdapterPosition
+                            if (p >= 0) setHero2(row.tiles.getOrNull(p + 1))
                             val p = h.bindingAdapterPosition
                             for (d in 1..3) (row.tiles.getOrNull(p + d) as? Tile.Mv)?.let { prefetch(it.m.background) }
                         }
@@ -6333,32 +6596,33 @@ class MainActivity : AppCompatActivity() {
                 }
                 is Tile.Action -> {
                     v.isFocusable = true; v.isClickable = true
-                    val baseFill = if (t.active) 0xCC3B1028.toInt() else Accent.SURFACE
-                    val baseStroke = if (t.active) Accent.BRAND else 0x4400ECF7
+                    val baseFill = if (t.active) FlixColors.PILL else FlixColors.CARD
+                    val baseStroke = if (t.active) FlixColors.PILL_HI else 0x55FFFFFF
                     v.background = Ui.pill(dp, baseFill, 20f).apply {
                         setStroke((1 * dp).toInt().coerceAtLeast(1), baseStroke)
                     }
-                    v.findViewById<TextView>(R.id.hintText).apply {
+                    val hint = v.findViewById<TextView>(R.id.hintText).apply {
                         text = t.label
-                        setTextColor(Accent.TEXT)
+                        setTextColor(if (t.active) 0xFFFFFFFF.toInt() else FlixColors.INK)
                         typeface = fSemi
                     }
                     v.setOnFocusChangeListener { x, f ->
                         focusAnim(x, f)
                         (x.background as? GradientDrawable)?.apply {
-                            setColor(if (f) Accent.BRAND else baseFill)
-                            setStroke((if (f) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (f) Accent.SIGNAL else baseStroke)
+                            setColor(if (f) FlixColors.PILL else baseFill)
+                            setStroke((if (f) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (f) 0xFFFFFFFF.toInt() else baseStroke)
                         }
+                        hint.setTextColor(if (f || t.active) 0xFFFFFFFF.toInt() else FlixColors.INK)
                     }
                     v.setOnClickListener { t.onClick() }
                 }
                 else -> {
                     v.isFocusable = false; v.isClickable = false
-                    v.background = Ui.pill(dp, Accent.SURFACE, 20f)
+                    v.background = Ui.pill(dp, FlixColors.CARD, 20f)
                     v.setOnFocusChangeListener(null)
                     v.setOnClickListener(null)
                     v.findViewById<TextView>(R.id.hintText).apply {
-                        setTextColor(Accent.DIM)
+                        setTextColor(FlixColors.MUTED)
                         typeface = fRegular
                         text = when {
                             row.title.equals("Trending on AK", true) && trendingFailed -> "Trending titles will appear when the catalogue is available."

@@ -29,33 +29,40 @@ class HomeChromeTest {
         } finally { controller.destroy() }
     }
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
-    fun `TV home matches the site bar and its full-bleed hero`() = screen(960, 540) { root ->
+    fun `TV home matches the reference bar and its two hero cards`() = screen(960, 540) { root ->
+        val box = root.findViewById<View>(R.id.flixContainer)
+        assertEquals(View.VISIBLE, box.visibility)
+        assertTrue("the container floats inside the screen", box.left in 10..30 && box.top in 4..20)
         val nav = root.findViewById<View>(R.id.navRail)
-        val content = root.findViewById<View>(R.id.content)
         assertEquals(View.VISIBLE, nav.visibility)
-        assertEquals("the bar spans the screen", 0, nav.left)
-        assertEquals(root.width, nav.right)
-        assertEquals("the bar sits on the top edge", 0, nav.top)
-        assertTrue("the bar is the site's 88dp strip", nav.height in 80..96)
-        assertTrue("content begins at the top edge too, under the bar", content.top <= nav.bottom)
-        assertEquals("mark and wordmark both belong in the bar", View.VISIBLE, root.findViewById<View>(R.id.brandMark).visibility)
-        assertEquals(View.GONE, root.findViewById<View>(R.id.railTagline).visibility)
+        assertTrue("the bar sits at the top of the container", nav.top >= box.top && nav.top <= box.top + 24)
+        assertTrue("the bar is a 76dp strip", nav.height in 68..84)
         assertEquals("the wordmark is the only brand in the bar", "STREAMR",
             root.findViewById<TextView>(R.id.akText).text.toString())
-        val media = root.findViewById<View>(R.id.heroMedia)
-        assertEquals("the hero bleeds to the left edge", 0, media.left)
-        assertEquals("the hero bleeds to the right edge", root.width, media.right)
-        assertEquals("the hero runs under the bar, like the site's fixed header", 0, media.top)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.brandMark).visibility)
+        assertEquals(View.GONE, root.findViewById<View>(R.id.railTagline).visibility)
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.navProfile).visibility)
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.flixBellBox).visibility)
         val search = root.findViewById<TextView>(R.id.searchBtn)
-        assertEquals("search is a round glyph button", search.width, search.height)
+        assertEquals("search lives at the end of the tab pill", R.id.navPills, (search.parent as View).id)
+        assertEquals("search is a square glyph button", search.width, search.height)
         assertEquals("", search.text.toString())
-        assertEquals("the profile chip is round", 38, root.findViewById<View>(R.id.profileAvatar).height)
-        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar, R.id.searchBtn)) {
+        val left = root.findViewById<View>(R.id.heroMedia)
+        val right = root.findViewById<View>(R.id.heroCard2)
+        assertEquals(View.VISIBLE, left.visibility)
+        assertEquals(View.VISIBLE, right.visibility)
+        assertTrue("the feature is narrow left, the next one wide right", left.width in 1 until right.width)
+        assertTrue("a gap sits between the cards", left.right < right.left)
+        assertEquals("the section header is on screen", View.VISIBLE, root.findViewById<View>(R.id.sectionTitle).visibility)
+        assertEquals("the chip strip is on screen", View.VISIBLE, root.findViewById<View>(R.id.flixChipScroll).visibility)
+        assertTrue("the first shelf peeks below the header", root.findViewById<View>(R.id.rows).height >= 100)
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segFusion, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
             val view = root.findViewById<TextView>(id)
             assertTrue(view.isFocusable); assertTrue(view.isClickable)
-            assertEquals("$id must lead down into the rows", R.id.rows, view.nextFocusDownId)
+            assertEquals("$id must lead down to the feature card", R.id.heroMedia, view.nextFocusDownId)
         }
+        assertTrue(left.isFocusable); assertTrue(left.isClickable)
+        assertTrue(right.isFocusable); assertTrue(right.isClickable)
         assertEquals("OG", root.findViewById<TextView>(R.id.segOg).text.toString())
         assertEquals("OG", root.findViewById<TextView>(R.id.phoneOg).text.toString())
         assertEquals("StarShare", root.findViewById<TextView>(R.id.segStar).text.toString())
@@ -64,7 +71,7 @@ class HomeChromeTest {
         assertNull("TG TV phone pill must be removed", root.findViewById<View?>(root.resources.getIdentifier("phoneTag", "id", root.context.packageName)))
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
-    fun `short landscape phone keeps horizontal section pills and the content shelf on screen`() = screen(800, 360) { root ->
+    fun `short landscape phone keeps horizontal section pills and one hero card`() = screen(800, 360) { root ->
         assertEquals(View.GONE, root.findViewById<View>(R.id.navRail).visibility)
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.phoneNavScroll).visibility)
         val phoneOg = root.findViewById<TextView>(R.id.phoneOg)
@@ -77,25 +84,23 @@ class HomeChromeTest {
         assertTrue("StarShare pill must fit on-screen without scrolling on mobile (right=${phoneStar.right})", phoneStar.right in 1..800)
         val search = root.findViewById<View>(R.id.phoneSearch)
         assertTrue(search.top >= 0); assertTrue(search.bottom <= 360)
-        assertTrue(root.findViewById<View>(R.id.rows).height >= 100)
+        assertEquals("phones keep one hero so the shelves stay on screen", View.GONE, root.findViewById<View>(R.id.heroCard2).visibility)
+        assertEquals(View.VISIBLE, root.findViewById<View>(R.id.heroMedia).visibility)
+        assertTrue(root.findViewById<View>(R.id.rows).height >= 50)
         assertTrue(root.findViewById<View>(R.id.heroTitle).width > 220)
-        val media = root.findViewById<View>(R.id.heroMedia)
-        assertEquals("the hero bleeds on a phone too", 0, media.left)
-        assertEquals(800, media.right)
     }
     @Test @Config(qualifiers = "w800dp-h360dp-land-mdpi")
     fun `movie mode leaves room for poster shelves on compact screens`() = screen(800, 360, movies = true) { root ->
-        assertTrue("Poster shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 165)
-        assertEquals(1, root.findViewById<TextView>(R.id.heroTitle).maxLines)
+        assertTrue("Poster shelf height: ${root.findViewById<View>(R.id.rows).height}", root.findViewById<View>(R.id.rows).height >= 50)
+        assertEquals(2, root.findViewById<TextView>(R.id.heroTitle).maxLines)
     }
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
-    fun `TV movie hero leaves the complete first poster row and labels visible`() = screen(960, 540, movies = true) { root ->
-        // A 2:3 poster at the rail's width, plus the label above it and the rail's own padding.
-        // The rail peeks on a fixed screen, but the hero's own copy must never run into the bar.
-        val hero = root.findViewById<View>(R.id.heroArea).height
-        val copy = root.findViewById<View>(R.id.heroText)
-        assertTrue("Hero copy ${copy.top}dp must clear the ${root.findViewById<View>(R.id.navRail).height}dp bar",
-            copy.top >= root.findViewById<View>(R.id.navRail).height)
+    fun `TV movie hero keeps the bar, the cards and the header clear of each other`() = screen(960, 540, movies = true) { root ->
+        val nav = root.findViewById<View>(R.id.navRail)
+        val hero = root.findViewById<View>(R.id.heroArea)
+        val header = root.findViewById<View>(R.id.sectionHeader)
+        assertTrue("the cards clear the bar", hero.top >= nav.bottom)
+        assertTrue("the header clears the cards", header.top >= hero.bottom)
         assertTrue(root.findViewById<TextView>(R.id.heroTitle).maxLines in 1..2)
     }
 

@@ -1,7 +1,7 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="216dp" android:layout_height="122dp" android:layout_margin="10dp"
     android:focusable="true" android:clickable="true" android:clipToOutline="true"
-    android:foreground="@drawable/focus_ring" android:background="@drawable/poster_round">
+    android:foreground="@drawable/flix_ring" android:background="@drawable/poster_round">
     <ImageView android:id="@+id/logo" android:layout_width="62dp" android:layout_height="62dp"
         android:layout_gravity="center_horizontal|top" android:layout_marginTop="18dp" android:scaleType="fitCenter"/>
     <TextView android:id="@+id/mono" android:layout_width="56dp" android:layout_height="56dp"

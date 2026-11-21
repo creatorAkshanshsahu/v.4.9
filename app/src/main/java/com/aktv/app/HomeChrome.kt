@@ -1,6 +1,6 @@
 package com.aktv.app
 
-import android.graphics.Color
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -16,7 +16,6 @@ internal object HomeChrome {
         val compact = height / dp < 420
         val phone = width / dp < 600 || (compact && width / dp < 900)
         val rail = if (phone) 0 else ((if (compact) 104 else 120) * dp).toInt()
-        // Give the lead artwork room to breathe, while keeping the first shelf visible on TV and mobile.
         val header = if (phone) ((if (compact) 54 else 76) * dp).toInt() else 0
         val heroRatio = when {
             phone && compact -> if (movies) 0.26f else 0.30f
@@ -32,79 +31,67 @@ internal object HomeChrome {
         val m = metrics(screenWidth, screenHeight, dp, movies)
         fun px(value: Int) = (value * dp).toInt()
         val short = screenHeight / dp < 400
-        val nav = if (m.phone) 0 else if (m.compact) 68 else 88
-        val side = if (m.compact) 20 else 48
+        val nav = if (m.compact) 64 else 76
+        val side = if (m.compact) 12 else 24
 
-        // Subtle cyber grid on #home ground matching screen-safari-studio styles.css (64px cyan hairline grid).
-        root.background = object : android.graphics.drawable.Drawable() {
-            private val bgPaint = android.graphics.Paint().apply { color = Accent.ABYSS }
-            private val linePaint = android.graphics.Paint().apply {
-                color = 0x1600ECF7
-                strokeWidth = dp.coerceAtLeast(1f)
+        // The screen is the light gradient with one big rounded glass container holding everything.
+        root.findViewById<View>(R.id.flixContainer).apply {
+            (layoutParams as ViewGroup.MarginLayoutParams).apply {
+                val mx = px(if (m.compact) 8 else 20); val my = px(if (m.compact) 6 else 12)
+                setMargins(mx, my, mx, my)
             }
-            override fun draw(canvas: android.graphics.Canvas) {
-                val b = bounds
-                canvas.drawRect(b, bgPaint)
-                val step = (64f * dp).coerceAtLeast(32f)
-                var x = b.left.toFloat()
-                while (x <= b.right) { canvas.drawLine(x, b.top.toFloat(), x, b.bottom.toFloat(), linePaint); x += step }
-                var y = b.top.toFloat()
-                while (y <= b.bottom) { canvas.drawLine(b.left.toFloat(), y, b.right.toFloat(), y, linePaint); y += step }
-            }
-            override fun setAlpha(alpha: Int) {}
-            override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {}
-            @Suppress("OVERRIDE_DEPRECATION")
-            override fun getOpacity(): Int = android.graphics.PixelFormat.OPAQUE
+            setPadding(px(side), px(6), px(side), px(6))
         }
 
-        // The bar: cyber icon + gradient wordmark left, glass pill tabs centred, round search and cyan profile right.
+        // The bar: plain white wordmark left, dark tab pill centred, bell and profile right.
         root.findViewById<View>(R.id.navRail).apply {
             visibility = if (m.phone) View.GONE else View.VISIBLE
             layoutParams.height = px(nav)
-            setPadding(px(side), 0, px(side), 0)
         }
+        root.findViewById<View>(R.id.brandMark).visibility = View.GONE
         root.findViewById<TextView>(R.id.akText).apply {
             visibility = View.VISIBLE
-            textSize = if (m.compact) 15f else 19f
-            setTextColor(Accent.BRAND)
-            letterSpacing = 0.03f
-            val applyGradient = {
-                val w = paint.measureText(text.toString())
-                if (w > 0f) paint.shader = android.graphics.LinearGradient(
-                    0f, 0f, w, 0f, Accent.WORDMARK_STOPS, null,
-                    android.graphics.Shader.TileMode.CLAMP)
-            }
-            applyGradient()
-            post { applyGradient(); invalidate() }
-        }
-        // Mark plus wordmark, as in the site header — the mark is no longer hidden.
-        root.findViewById<View>(R.id.brandMark).apply {
-            visibility = View.VISIBLE
-            // Square crimson-framed cyber badge beside the wordmark on TV; scaled cleanly when compact.
-            layoutParams.width = px(if (m.compact) 32 else 42)
-            layoutParams.height = px(if (m.compact) 32 else 42)
-            (layoutParams as ViewGroup.MarginLayoutParams).marginEnd = px(if (m.compact) 8 else 12)
+            textSize = if (m.compact) 17f else 22f
+            setTextColor(0xFFFFFFFF.toInt())
+            letterSpacing = -0.01f
+            paint.shader = null
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(root.context, R.font.sora_bold)
         }
         root.findViewById<View>(R.id.railTagline).visibility = View.GONE
+        val profileVisible = !m.phone && !short
         root.findViewById<View>(R.id.navProfile).apply {
-            visibility = if (m.phone || short) View.GONE else View.VISIBLE
-            layoutParams.width = px(38); layoutParams.height = px(38)
+            visibility = if (profileVisible) View.VISIBLE else View.GONE
         }
-        root.findViewById<View>(R.id.profileAvatar).apply {
+        root.findViewById<TextView>(R.id.profileAvatar).apply {
+            layoutParams.width = px(34); layoutParams.height = px(34)
+            text = "S"
+        }
+        root.findViewById<View>(R.id.flixBellBox).apply {
+            visibility = if (profileVisible) View.VISIBLE else View.GONE
+        }
+        root.findViewById<TextView>(R.id.flixBell).apply {
             layoutParams.width = px(38); layoutParams.height = px(38)
+            text = ""
+            val icon = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.ic_bell, root.context.theme)
+            val size = px(18)
+            icon?.setBounds(0, 0, size, size)
+            setCompoundDrawables(icon, null, null, null)
+            compoundDrawablePadding = 0
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            setPadding(px(10), 0, 0, 0)
         }
         root.findViewById<TextView>(R.id.navVersion).visibility = View.GONE
-        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
+        for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segFusion, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
             root.findViewById<TextView>(id)?.apply {
-                layoutParams.height = px(if (short) 34 else 36)
-                setPadding(px(if (m.compact) 9 else 11), 0, px(if (m.compact) 9 else 11), 0)
-                textSize = if (short) 11f else if (m.compact) 12f else 13.5f
+                layoutParams.height = px(if (short) 32 else 34)
+                setPadding(px(if (m.compact) 9 else 12), 0, px(if (m.compact) 9 else 12), 0)
+                textSize = if (short) 10.5f else if (m.compact) 11.5f else 13f
                 includeFontPadding = false
                 typeface = androidx.core.content.res.ResourcesCompat.getFont(root.context, R.font.sora_semibold)
             }
         }
         val narrowPhone = m.phone && screenWidth / dp < 680
-        for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar, R.id.phoneSearch)) {
+        for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneFusion, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar, R.id.phoneSearch)) {
             root.findViewById<TextView>(id)?.apply {
                 setPadding(px(if (narrowPhone) 9 else 11), 0, px(if (narrowPhone) 9 else 11), 0)
                 textSize = if (narrowPhone) 10.5f else 11f
@@ -113,114 +100,121 @@ internal object HomeChrome {
         root.findViewById<View>(R.id.navPills).apply {
             layoutParams.height = px(if (short) 40 else 42)
         }
-        // Round search button: the magnifier is a glyph, not a word, as on the site.
+        // The search glyph sits at the end of the dark pill, white on navy.
         root.findViewById<TextView>(R.id.searchBtn).apply {
-            layoutParams.width = px(38); layoutParams.height = px(38)
+            layoutParams.width = px(34); layoutParams.height = px(34)
             text = ""
             val icon = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.ic_search, root.context.theme)
-            val size = px(17)
+            val size = px(16)
             icon?.setBounds(0, 0, size, size)
             setCompoundDrawables(icon, null, null, null)
             compoundDrawablePadding = 0
-            gravity = android.view.Gravity.CENTER_VERTICAL or android.view.Gravity.START
-            setPadding(px(11), 0, 0, 0)
-            setTextColor(Accent.TEXT)
-            background = androidx.core.content.res.ResourcesCompat.getDrawable(root.resources, R.drawable.circle_glass, root.context.theme)
+            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            setPadding(px(9), 0, 0, 0)
+            setTextColor(0xFFFFFFFF.toInt())
         }
         root.findViewById<View>(R.id.phoneNavScroll).visibility = if (m.phone) View.VISIBLE else View.GONE
 
-        (root.findViewById<View>(R.id.content).layoutParams as FrameLayout.LayoutParams).marginStart = 0
-        root.findViewById<View>(R.id.content).setPadding(0, 0, 0, 0)
         root.findViewById<View>(R.id.topBar).visibility = View.GONE
-        root.findViewById<View>(R.id.topBar).layoutParams.height = 0
         root.findViewById<View>(R.id.librarySummary).visibility = View.GONE
 
-        // Hero: full-bleed artwork behind the bar, copy anchored bottom-left, as on the site. No card,
-        // no rounding, no inset — the still runs to every edge of the screen.
+        // Two hero cards: the feature narrow left, the next one wide right. Phones keep one card so
+        // the shelves stay on screen.
+        val singleHero = m.phone
         val heroHeight = (screenHeight * when {
-            m.phone && m.compact -> 0.40f
-            m.phone -> 0.46f
-            // A 2:3 poster shelf is the tallest row the app has, but the hero still has to be tall enough
-            // to hold its own copy clear of the bar: the rail peeks, the hero never collides.
-            movies -> 0.46f
-            m.compact -> 0.58f
-            else -> 0.60f
-        }).toInt()
+            m.phone && m.compact -> 0.37f
+            m.phone -> 0.30f
+            m.compact -> 0.38f
+            else -> 0.36f
+        }).toInt().coerceAtLeast(px(132))
+        root.findViewById<View>(R.id.heroArea).apply {
+            layoutParams.height = heroHeight
+            (this as LinearLayout).orientation = LinearLayout.HORIZONTAL
+        }
         root.findViewById<View>(R.id.heroMedia).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply {
-                height = heroHeight + px(nav)
-                topMargin = 0; marginStart = 0; marginEnd = 0
-            }
-            background = null
-            clipToOutline = false
+            val lp = layoutParams as LinearLayout.LayoutParams
+            lp.weight = if (singleHero) 1f else 0.38f
+            lp.width = 0
+            (lp as ViewGroup.MarginLayoutParams).marginEnd = px(if (singleHero) 0 else 7)
+        }
+        root.findViewById<View>(R.id.heroCard2).apply {
+            visibility = if (singleHero) View.GONE else View.VISIBLE
+            val lp = layoutParams as LinearLayout.LayoutParams
+            lp.weight = 0.62f
+            lp.width = 0
+            (lp as ViewGroup.MarginLayoutParams).marginStart = px(7)
         }
         root.findViewById<View>(R.id.heroGlow).visibility = View.GONE
         root.findViewById<View>(R.id.heroTagline).visibility = View.GONE
-        // The shelves ride up over the still by 40dp, the way the site pulls its rails with -mt-10.
-        root.findViewById<View>(R.id.heroArea).layoutParams.height =
-            heroHeight + px(nav) - (if (m.compact || m.phone) 0 else px(40))
-        root.findViewById<View>(R.id.heroText).apply {
+        root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE
+        root.findViewById<View>(R.id.heroChips).visibility = View.GONE
+        // The cards carry the card: the trim in MainActivity re-hides these after every hero bind.
+        for (id in listOf(R.id.heroDot, R.id.heroSubheading, R.id.heroProg, R.id.heroProgress, R.id.heroDesc, R.id.heroNext, R.id.heroMono)) {
+            root.findViewById<View>(id)?.visibility = View.GONE
+        }
+        // The hero logo sits at the card's top-right, as the studio mark does in the reference.
+        root.findViewById<View>(R.id.heroLogo).apply {
             (layoutParams as FrameLayout.LayoutParams).apply {
-                // max-w-2xl on the site: the copy never runs wider than 672dp.
-                width = minOf(px(672), (screenWidth - px(side) * 2).coerceAtLeast(px(260)))
-                marginStart = px(side)
-                bottomMargin = px(if (m.compact) 8 else 48)
+                width = px(if (m.compact) 44 else 56); height = px(if (m.compact) 44 else 56)
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = px(14); marginEnd = px(16)
             }
         }
         root.findViewById<TextView>(R.id.heroTitle).apply {
-            textSize = when { m.compact -> 22f; m.phone -> 30f; movies -> 36f; else -> 40f }
-            maxLines = if (m.compact) 1 else 2
-            (layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 4 else 10)
-            setTextColor(Accent.TEXT)
-            setShadowLayer(px(14).toFloat(), 0f, 0f, 0x88FF00D0.toInt())
-        }
-        root.findViewById<TextView>(R.id.heroDesc).apply {
-            maxLines = if (m.compact) 1 else 3
-            textSize = if (m.compact) 11f else 13f
-            (layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 4 else 10)
-            setTextColor(Accent.DIM)
+            textSize = when { m.compact -> 20f; m.phone -> 24f; else -> 30f }
+            maxLines = 2
         }
         root.findViewById<TextView>(R.id.heroBadge).apply {
+            textSize = if (m.compact) 10f else 11f
+            setTextColor(FlixColors.CAPTION)
+        }
+        root.findViewById<TextView>(R.id.heroPlayLabel).apply {
             textSize = if (m.compact) 11f else 13f
-            setTextColor(Accent.DIM)
         }
-        root.findViewById<TextView>(R.id.heroDot).apply {
-            textSize = if (m.compact) 9f else 11f
-            // Situated over artwork, so the eyebrow takes the brighter stop of the brand gradient.
-            setTextColor(Accent.BRAND_LIGHT)
+        root.findViewById<TextView>(R.id.hero2Title).apply {
+            textSize = when { m.compact -> 18f; else -> 26f }
+            maxLines = 2
         }
-        root.findViewById<View>(R.id.heroChips).let {
-            (it.layoutParams as LinearLayout.LayoutParams).topMargin = px(if (m.compact) 8 else 20)
+        root.findViewById<TextView>(R.id.hero2Badge).apply {
+            textSize = if (m.compact) 10f else 11f
         }
-        // The hero logo sits at the card's top-right, square for the 1:1 crimson cyber badge.
-        root.findViewById<View>(R.id.heroLogo).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply {
-                width = px(if (m.compact) 58 else 78); height = px(if (m.compact) 58 else 78)
-                gravity = android.view.Gravity.TOP or android.view.Gravity.END
-                topMargin = px(nav) + px(if (m.compact) 14 else 22)
-                marginEnd = px(if (m.compact) 20 else 48)
+        root.findViewById<TextView>(R.id.hero2Play).apply {
+            textSize = if (m.compact) 11f else 13f
+        }
+        // The chip strip and the section header ride between the heroes and the shelves.
+        root.findViewById<View>(R.id.flixChipScroll).apply {
+            layoutParams.height = px(if (m.compact) 42 else 46)
+        }
+        root.findViewById<View>(R.id.sectionHeader).apply {
+            layoutParams.height = px(if (m.compact) 46 else 52)
+        }
+        root.findViewById<TextView>(R.id.sectionTitle).apply {
+            textSize = if (m.compact) 18f else 24f
+            setTextColor(0xFFFFFFFF.toInt())
+        }
+        root.findViewById<View>(R.id.flixViewPill).apply {
+            layoutParams.height = px(if (m.compact) 36 else 40)
+        }
+        for (id in listOf(R.id.flixSortBtn, R.id.flixFilterBtn)) {
+            root.findViewById<ImageView>(id)?.apply {
+                val s = px(if (m.compact) 32 else 36)
+                layoutParams.width = s; layoutParams.height = s
             }
         }
-        root.findViewById<View>(R.id.heroLogoCaption).visibility = View.GONE
-        root.findViewById<View>(R.id.heroMono).apply {
-            (layoutParams as FrameLayout.LayoutParams).apply {
-                gravity = android.view.Gravity.TOP or android.view.Gravity.END
-                topMargin = px(nav) + px(24); marginEnd = px(if (m.compact) 20 else 56)
-            }
-        }
-        root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(if (m.compact) 8 else 12), 0, px(if (m.compact) 8 else 10))
-        (root.findViewById<View>(R.id.status).layoutParams as LinearLayout.LayoutParams).marginStart = px(side)
+        root.findViewById<RecyclerView>(R.id.rows).setPadding(0, px(8), 0, px(10))
+        (root.findViewById<View>(R.id.status).layoutParams as LinearLayout.LayoutParams).marginStart = px(if (m.compact) 12 else 16)
         root.requestLayout()
         return m
     }
 
     fun styleRow(row: View, compact: Boolean, dp: Float) {
         val title = row.findViewById<TextView>(R.id.rowTitle)
-        title.textSize = if (compact) 16f else 21f
-        title.setTextColor(Accent.TEXT)
-        (title.parent as View).let { (it.layoutParams as ViewGroup.MarginLayoutParams).marginStart = ((if (compact) 20 else 48) * dp).toInt() }
+        title.textSize = if (compact) 15f else 20f
+        title.setTextColor(0xFFFFFFFF.toInt())
+        (title.parent as View).let { (it.layoutParams as ViewGroup.MarginLayoutParams).marginStart = ((if (compact) 12 else 16) * dp).toInt() }
+        row.findViewById<TextView>(R.id.rowCount).setTextColor(FlixColors.FAINT)
         val rv = row.findViewById<RecyclerView>(R.id.rowList)
-        rv.setPadding(((if (compact) 18 else 48) * dp).toInt(), (10 * dp).toInt(), (48 * dp).toInt(), (10 * dp).toInt())
+        rv.setPadding(((if (compact) 8 else 12) * dp).toInt(), (8 * dp).toInt(), (40 * dp).toInt(), (12 * dp).toInt())
     }
 
     fun styleTile(tile: View, poster: Boolean, compact: Boolean, dp: Float, landscape: Boolean = false) {
@@ -231,24 +225,22 @@ internal object HomeChrome {
             lp.width = ((if (compact) 176 else 200) * dp).toInt()
             lp.height = ((if (compact) 99 else 113) * dp).toInt()
         } else if (!poster) {
-            // 16:9 artwork with the copy on a scrim, matching the poster rails beside it.
+            // 16:9 artwork with navy ink copy straight on the white glass card.
             lp.width = ((if (compact) 168 else 216) * dp).toInt()
             lp.height = ((if (compact) 95 else 122) * dp).toInt()
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 46 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
         } else {
-            // 2:3 artwork with the copy inside it: the site's rail cards carry the kind eyebrow and the
-            // title over a bottom scrim, and the tile is the artwork — no plate, no border, no caption row.
+            // 2:3 artwork with the title and counters beneath it, as in the reference rail.
             val width = ((if (compact) 104 else 116) * dp).toInt()
             lp.width = width
-            lp.height = (width * 1.5f).toInt()
-            tile.findViewById<View>(R.id.posterContent)?.layoutParams?.width = width
+            lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            tile.findViewById<View>(R.id.posterArt)?.layoutParams?.apply { this.width = width; height = (width * 1.5f).toInt() }
             tile.findViewById<TextView>(R.id.posterRank)?.apply {
-                textSize = if (compact) 43f else 62f
-                layoutParams.height = (width * 1.5f).toInt()
+                textSize = if (compact) 34f else 40f
             }
-            tile.findViewById<TextView>(R.id.posterTitle)?.textSize = if (compact) 10f else 12f
-            tile.findViewById<TextView>(R.id.posterMeta)?.textSize = if (compact) 8f else 9f
+            tile.findViewById<TextView>(R.id.posterTitle)?.textSize = if (compact) 11f else 12f
+            tile.findViewById<TextView>(R.id.posterMeta)?.textSize = if (compact) 9f else 10f
         }
     }
 }
