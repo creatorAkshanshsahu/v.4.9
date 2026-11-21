@@ -107,12 +107,13 @@ class FlixHomeTest {
     }
 
     @Test fun `resume fraction is halfway at halfway, zero when finished or unknown`() {
-        assertEquals(0.5f, FlixView.RailProgress.fraction(3_000, 6_000))
-        assertEquals(0f, FlixView.RailProgress.fraction(0, 6_000))
-        assertEquals(0f, FlixView.RailProgress.fraction(3_000, 0))
-        assertEquals(0f, FlixView.RailProgress.fraction(6_000, 6_000))
-        assertEquals(0f, FlixView.RailProgress.fraction(50_000, 60_000))
         assertEquals(0.5f, FlixView.RailProgress.fraction(60_000, 120_000))
+        assertEquals(0.25f, FlixView.RailProgress.fraction(30_000, 120_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(0, 120_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(60_000, 0))
+        assertEquals(0f, FlixView.RailProgress.fraction(120_000, 120_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(100_000, 120_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(3_000, 6_000))
     }
 
     @Test fun `skeleton placeholders survive sort and filter`() {
