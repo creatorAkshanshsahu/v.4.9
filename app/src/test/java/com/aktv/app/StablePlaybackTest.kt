@@ -117,4 +117,52 @@ class StablePlaybackTest {
         assertFalse(stalls.starving(70_000, ongoingSince = 0))
     }
 
+
+    @Test fun `frozen video with flowing audio hands off after the full window`() {
+        val watch = FrozenFrameWatchdog()
+        watch.arm(0)
+        // Audio flows (ticks keep coming) but no frame ever renders.
+        assertFalse(watch.tick(10_000))
+        assertFalse(watch.tick(29_999))
+        assertTrue(watch.tick(30_000))
+    }
+    @Test fun `choppy drops sustained at the pin rate hand off`() {
+        val watch = FrozenFrameWatchdog()
+        watch.arm(0)
+        // Frames flow but drops never stop: 5/sec for the full window.
+        var t = 0L
+        while (t < 30_000) {
+            t += 1_000
+            watch.onFrame(t)
+            watch.onDropped(t, 5)
+            if (t < 30_000) assertFalse(watch.tick(t))
+        }
+        assertTrue(watch.tick(30_000))
+    }
+    @Test fun `partial recovery restarts the window instead of burning the backup`() {
+        val watch = FrozenFrameWatchdog()
+        watch.arm(0)
+        // 20 bad seconds, then frames flow quietly for 8s: window restarts, never fires.
+        var t = 0L
+        while (t < 20_000) {
+            t += 1_000
+            watch.onFrame(t)
+            watch.onDropped(t, 5)
+            assertFalse(watch.tick(t))
+        }
+        t = 28_000
+        watch.onFrame(t)
+        assertFalse(watch.tick(t))
+        // Even at the old deadline the window is fresh: needs another full 30s of bad.
+        assertFalse(watch.tick(30_000))
+        assertFalse(watch.tick(57_999))
+    }
+    @Test fun `a pause gap restarts the window instead of handing off on resume`() {
+        val watch = FrozenFrameWatchdog()
+        watch.arm(0)
+        watch.onFrame(1_000)
+        // Ticks stopped for over a minute (paused): resume restarts, never fires.
+        assertFalse(watch.tick(120_000))
+        assertFalse(watch.tick(149_999))
+    }
 }

@@ -1,11 +1,12 @@
 package com.aktv.app
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
@@ -318,21 +319,61 @@ class DetailActivity : Activity() {
         }
     }
 
+    /** Dark bottom sheet over the details page: the server list in the app's own glass, not a system box. */
     private fun showServerPicker() {
-        val options = arrayOf(
-            "TG FROST (Default)",
-            "OG · TheOGPirateBot (Elfura / VidLink)",
-            "TG OUT"
+        val options = listOf(
+            "TG FROST" to "Default native movie sources",
+            "OG · TheOGPirateBot" to "Elfura / VidLink servers",
+            "TG OUT" to "Alternate native movie sources"
         )
-        val providerIds = arrayOf(FrostProvider.FROST.id, FrostProvider.OG.id, FrostProvider.OUT.id)
-        AlertDialog.Builder(this)
-            .setTitle("Play with server")
-            .setItems(options) { _, which ->
-                val chosen = providerIds.getOrNull(which)
-                playCurrent(chosen)
+        val providerIds = listOf(FrostProvider.FROST.id, FrostProvider.OG.id, FrostProvider.OUT.id)
+        val dialog = Dialog(this)
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val bg = GradientDrawable().apply {
+                setColor(Accent.SURFACE)
+                cornerRadii = floatArrayOf(20 * dp, 20 * dp, 20 * dp, 20 * dp, 0f, 0f, 0f, 0f)
+                setStroke((1 * dp).toInt().coerceAtLeast(1), 0x4000ECF7)
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            background = bg
+            setPadding((24 * dp).toInt(), (18 * dp).toInt(), (24 * dp).toInt(), (24 * dp).toInt())
+        }
+        sheet.addView(tv(17f, Accent.TEXT, fSemi).apply { text = "Play with server" },
+            LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = (14 * dp).toInt() })
+        val hairline = (1 * dp).toInt().coerceAtLeast(1)
+        val focusRing = (2 * dp).toInt().coerceAtLeast(2)
+        options.forEachIndexed { index, (label, sub) ->
+            val rowBg = GradientDrawable().apply { cornerRadius = 12 * dp }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                isFocusable = true; isClickable = true
+                background = rowBg
+                setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
+            }
+            row.addView(tv(14f, Accent.TEXT, fSemi).apply { text = label })
+            row.addView(tv(11f, Accent.DIM, fBody).apply { text = sub },
+                LinearLayout.LayoutParams(-2, -2).apply { topMargin = (2 * dp).toInt() })
+            val style = { f: Boolean ->
+                rowBg.setColor(if (f) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
+                rowBg.setStroke(if (f) focusRing else hairline, if (f) Accent.SIGNAL else 0x4000ECF7)
+            }
+            style(false)
+            row.setOnFocusChangeListener { _, f -> style(f) }
+            row.setOnClickListener { dialog.dismiss(); playCurrent(providerIds.getOrNull(index)) }
+            sheet.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (8 * dp).toInt() })
+            if (index == 0) row.post { row.requestFocus() }
+        }
+        val cancel = button("Cancel", primary = false) { dialog.dismiss() }
+        sheet.addView(cancel, LinearLayout.LayoutParams(-1, -2).apply { topMargin = (8 * dp).toInt() })
+        dialog.setContentView(sheet)
+        dialog.window?.let { w ->
+            w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
+            w.setGravity(Gravity.BOTTOM)
+            w.attributes = w.attributes.apply { dimAmount = 0.55f; flags = flags or WindowManager.LayoutParams.FLAG_DIM_BEHIND }
+            w.setWindowAnimations(android.R.style.Animation_InputMethodFancy)
+        }
+        dialog.show()
     }
 
     private fun playCurrent(providerOverride: String? = preferredProvider) {

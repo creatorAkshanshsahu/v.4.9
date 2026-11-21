@@ -64,6 +64,44 @@ internal object VodDurationGuard {
     }
 }
 
+/**
+ * Confirmation window for a short clip served for an unknown-length title. Music videos are
+ * shorter than the 210s unknown-movie floor, so skipping on sight burns every good server in
+ * turn; instead a clip that renders frames and advances unbroken for 20s is kept as the title.
+ * A clip that loops back on itself is a decoy and skips at once, and one that ends before the
+ * window closes is a decoy the ENDED handler moves past. Pure, so the rule itself is unit-tested.
+ */
+internal class ShortClipConfirmation(
+    private val confirmMs: Long = 20_000,
+    private val minAdvanceMs: Long = 5_000,
+    private val loopBackMs: Long = 10_000,
+) {
+    enum class Result { WAITING, CONFIRMED, LOOPED }
+
+    private var armedAt = 0L
+    private var startPosition = 0L
+    private var peakPosition = 0L
+
+    val armed get() = armedAt != 0L
+
+    fun arm(now: Long, positionMs: Long) {
+        if (armed) return
+        armedAt = now; startPosition = positionMs; peakPosition = positionMs
+    }
+
+    fun disarm() { armedAt = 0; startPosition = 0; peakPosition = 0 }
+
+    fun tick(now: Long, positionMs: Long, hasFrame: Boolean): Result {
+        if (!armed) return Result.WAITING
+        if (positionMs > peakPosition) peakPosition = positionMs
+        if (peakPosition - positionMs > loopBackMs) return Result.LOOPED
+        if (hasFrame && positionMs - startPosition >= minAdvanceMs && now - armedAt >= confirmMs) {
+            return Result.CONFIRMED
+        }
+        return Result.WAITING
+    }
+}
+
 /** One-click startup retries transient metadata and one 404 refresh per provider, then falls back. */
 internal object VodSourceConfirmation {
     const val REQUIRED_STABLE_PLAYBACK_MS = 15_000L

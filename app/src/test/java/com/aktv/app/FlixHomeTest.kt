@@ -105,4 +105,26 @@ class FlixHomeTest {
         assertEquals(8.1, FlixView.ratingOf((mv("A", "8.1") as MainActivity.Tile.Mv).m), 0.001)
         assertEquals(0.0, FlixView.ratingOf((mv("B") as MainActivity.Tile.Mv).m), 0.001)
     }
+
+    @Test fun `resume fraction is halfway at halfway, zero when finished or unknown`() {
+        assertEquals(0.5f, FlixView.RailProgress.fraction(3_000, 6_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(0, 6_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(3_000, 0))
+        assertEquals(0f, FlixView.RailProgress.fraction(6_000, 6_000))
+        assertEquals(0f, FlixView.RailProgress.fraction(50_000, 60_000))
+        assertEquals(0.5f, FlixView.RailProgress.fraction(60_000, 120_000))
+    }
+
+    @Test fun `skeleton placeholders survive sort and filter`() {
+        val rows = listOf(MainActivity.Row("Loading…", List(8) { MainActivity.Tile.Skeleton }))
+        val shaped = FlixView.apply(rows, FlixView.SORT_AZ, filterOn = true, favs = emptySet(), vod = true)
+        assertEquals(1, shaped.size)
+        assertEquals(8, shaped.first().tiles.size)
+        assertTrue(shaped.first().tiles.all { it is MainActivity.Tile.Skeleton })
+    }
+
+    @Test fun `skeleton rows earn no chips`() {
+        val rows = listOf(MainActivity.Row("Loading…", List(8) { MainActivity.Tile.Skeleton }))
+        assertTrue(FlixChips.chipsFor(3, rows, vod = true).isEmpty())
+    }
 }

@@ -99,6 +99,59 @@ internal class StallWindow(private val windowMs: Long = 90_000, private val limi
     private fun prune(now: Long) { while (stalls.isNotEmpty() && now - stalls.first().first > windowMs) stalls.removeFirst() }
 }
 
+/**
+ * Strike-two evidence for a channel already pinned at its lowest rendition. A choppy-but-ready
+ * player (audio fine, video falling behind) never enters buffering, so the buffering-backed
+ * StallWindow cannot see it; this watchdog watches rendered frames and dropped frames instead.
+ * The window only fires after the bad state continues unbroken for the full stretch: a healthy
+ * tick (frames flowing, drops quiet) restarts the window, so a partial recovery never burns the
+ * backup server. Pure, so the rule itself is unit-tested.
+ */
+internal class FrozenFrameWatchdog(
+    private val badWindowMs: Long = 30_000,
+    private val frozenMs: Long = 8_000,
+    private val minDropRate: Double = 4.0,
+    private val minDrops: Int = 60,
+) {
+    private var armed = false
+    private var badSince = 0L
+    private var lastFrameAt = 0L
+    private var drops = 0
+    private var lastDropAt = 0L
+
+    fun arm(now: Long) {
+        if (armed) return
+        armed = true; badSince = now; lastFrameAt = now; drops = 0; lastDropAt = 0
+    }
+    fun disarm() { armed = false; badSince = 0; drops = 0; lastDropAt = 0 }
+    fun onFrame(now: Long) { if (armed) lastFrameAt = now }
+    fun onDropped(now: Long, dropped: Int) { if (armed && dropped > 0) { drops += dropped; lastDropAt = now } }
+
+    /**
+     * Called on the periodic tick while playing. Returns true once when video has lagged
+     * unbroken for the full window: either frozen (audio masks a dead video pipeline) or
+     * choppy (drops sustained at the same rate that pinned the rendition down).
+     */
+    fun tick(now: Long): Boolean {
+        if (!armed) return false
+        // Ticks stop while paused or backgrounded: a gap that big restarts the window instead
+        // of handing off the instant playback resumes.
+        if (now - badSince > badWindowMs + 60_000) {
+            badSince = now; lastFrameAt = now; drops = 0; lastDropAt = 0
+            return false
+        }
+        val frozen = now - lastFrameAt >= frozenMs
+        if (!frozen) {
+            val quiet = lastDropAt == 0L || now - lastDropAt >= frozenMs
+            if (quiet) { badSince = now; drops = 0; return false }
+        }
+        if (now - badSince < badWindowMs) return false
+        if (frozen) return true
+        val elapsed = (now - badSince).coerceAtLeast(1)
+        return drops >= minDrops && drops * 1000.0 / elapsed >= minDropRate
+    }
+}
+
 /** One controller per player instance: old codec callbacks cannot lower a newly selected channel. */
 internal class NativePictureController(
     private val owner: ExoPlayer,
@@ -118,6 +171,7 @@ internal class NativePictureController(
     private var lock: VideoRendition? = null
     private var exhaustedNotice = false
     private val stalls = StallWindow()
+    private val frozenWatch = FrozenFrameWatchdog()
     private var bufferedAt = 0L
     private var hadFrame = false
     private var nextBufferStep = 0L
@@ -147,7 +201,7 @@ internal class NativePictureController(
 
     fun automatic(newCeiling: Int = ceiling) {
         if (!isCurrent()) return
-        fixed = false; lock = null; exhaustedNotice = false; stalls.reset(); ceiling = newCeiling
+        fixed = false; lock = null; exhaustedNotice = false; stalls.reset(); frozenWatch.disarm(); ceiling = newCeiling
         selector.setParameters(selector.buildUponParameters().clearOverridesOfType(C.TRACK_TYPE_VIDEO))
         drops.reset(SystemClock.elapsedRealtime())
     }
@@ -158,7 +212,7 @@ internal class NativePictureController(
     }
     fun select(choice: VideoRendition) {
         if (!isCurrent()) return
-        fixed = true; lock = choice; ceiling = choice.height; exhaustedNotice = false; stalls.reset()
+        fixed = true; lock = choice; ceiling = choice.height; exhaustedNotice = false; stalls.reset(); frozenWatch.disarm()
         applyLock(); remember(choice); drops.settledChange(SystemClock.elapsedRealtime())
     }
     private fun applyLock() {
@@ -179,7 +233,18 @@ internal class NativePictureController(
     }
     override fun onTracksChanged(tracks: Tracks) { if (isCurrent()) applyLock() }
     override fun onRenderedFirstFrame() { if (isCurrent()) { hadFrame = true; applyLock() } }
+    override fun onVideoFrameProcessingOffset(eventTime: AnalyticsListener.EventTime, totalProcessingOffsetUs: Long, frameCount: Int) {
+        if (isCurrent()) frozenWatch.onFrame(eventTime.realtimeMs)
+    }
     fun checkBuffering(now: Long) {
+        // Strike two for pinned-lowest video runs on every tick while playing, independent of
+        // the buffering gate below: choppy-but-ready playback never opens a buffering episode.
+        if (isCurrent() && fixed && hadFrame && owner.playWhenReady && frozenWatch.tick(now)) {
+            frozenWatch.disarm()
+            stalls.reset()
+            onExhausted()
+            return
+        }
         if (!isCurrent() || !fixed || !hadFrame || !owner.playWhenReady || bufferedAt == 0L ||
             now - bufferedAt < 5000 || now < nextBufferStep) return
         nextBufferStep = now + 15_000
@@ -196,6 +261,7 @@ internal class NativePictureController(
     override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
         if (!isCurrent()) return
         droppedTotal += droppedFrames
+        frozenWatch.onDropped(SystemClock.elapsedRealtime(), droppedFrames)
         if (!drops.observe(SystemClock.elapsedRealtime(), droppedFrames, elapsedMs, owner.playbackState == Player.STATE_READY && owner.isPlaying)) return
         stepDown("dropped frames")
     }
@@ -207,7 +273,7 @@ internal class NativePictureController(
         val lower = StableRenditions.lower(current, available)
         fixed = true
         if (lower != null) {
-            lock = lower; ceiling = lower.height; exhaustedNotice = false; stalls.reset()
+            lock = lower; ceiling = lower.height; exhaustedNotice = false; stalls.reset(); frozenWatch.disarm()
             applyLock(); remember(lower)
             nextBufferStep = SystemClock.elapsedRealtime() + 15_000
             notice("Stable picture · ${lower.label} after $reason. Quality will stay here instead of climbing back up.")
@@ -222,10 +288,14 @@ internal class NativePictureController(
                 exhaustedNotice = true
                 notice("Holding the lowest available rendition (${lock!!.height}p). If stutter continues, try another source; no lower track is supplied here.")
             }
+            // Already at the lowest rendition: arm strike two. If the picture stays frozen or
+            // choppy unbroken from here, the feed itself is bad and the next server gets a turn.
+            frozenWatch.arm(now)
             // A single-rendition server that keeps starving hands over to the next server (for example
             // StarShare HLS after MPEG-TS); passing blips ride out on the buffer instead of burning it.
             if (stalls.starving(now, ongoing)) {
                 stalls.reset()
+                frozenWatch.disarm()
                 onExhausted()
             }
         }

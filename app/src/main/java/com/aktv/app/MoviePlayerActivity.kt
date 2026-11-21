@@ -159,6 +159,8 @@ class MoviePlayerActivity : Activity() {
     private val containerRetried = HashSet<String>()
     private val subtitleRetried = HashSet<String>()
     private val bogusClipSkipped = HashSet<String>()
+    private val confirmedShortClips = HashSet<String>()
+    private val shortClipConfirmation = ShortClipConfirmation()
     private val startedIdentities = HashSet<String>()
     private lateinit var status: TextView
     private lateinit var spinner: ProgressBar
@@ -508,7 +510,8 @@ class MoviePlayerActivity : Activity() {
         captureProgress()
         recovery.reset(); sourceRecovery.reset(); softwareRetried.clear(); probed.clear(); diagnostics = PlaybackDiagnostics()
         failed = false; lastFailure = ""; compatible = false; startupAt = SystemClock.elapsedRealtime()
-        containerRetried.clear(); subtitleRetried.clear(); bogusClipSkipped.clear(); startedIdentities.clear()
+        containerRetried.clear(); subtitleRetried.clear(); bogusClipSkipped.clear(); confirmedShortClips.clear()
+        shortClipConfirmation.disarm(); startedIdentities.clear()
         if (directSources.isNotEmpty()) {
             generation++; lookup?.cancel(true); resolver.cancel()
             provider = FrostProvider.OG; recovery.visit(provider)
@@ -609,6 +612,7 @@ class MoviePlayerActivity : Activity() {
         captureProgress(); releasePlayer(); dialog?.dismiss()
         startedIdentities.add(source.identity)
         currentSource = source; compatible = software; frame = false; frameAt = 0L; framePosition = 0L; sourceConfirmed = false; failed = false
+        shortClipConfirmation.disarm()
         val attempt = diagnostics.begin(if (source.provider == FrostProvider.FROST) PlaybackDiagnostics.Provider.FROST else PlaybackDiagnostics.Provider.OUT,
             when (source.format) { VodFormat.DASH -> PlaybackDiagnostics.Media.DASH; VodFormat.HLS -> PlaybackDiagnostics.Media.HLS; VodFormat.MP4 -> PlaybackDiagnostics.Media.FILE },
             PlaybackDiagnostics.Drm.NONE, false, software)
@@ -670,15 +674,47 @@ class MoviePlayerActivity : Activity() {
     private fun skipIfBogusShortClip(owner: ExoPlayer): Boolean {
         val source = currentSource ?: return false
         val durationMs = owner.duration
+        if (source.identity in confirmedShortClips) return false
         if (!VodDurationGuard.isBogusShortClip(title.isSeries, expectedRuntimeMinutes, durationMs, hasUntriedSources())) {
             return false
         }
-        if (!bogusClipSkipped.add(source.identity)) return false
+        if (title.isSeries || expectedRuntimeMinutes >= 25) {
+            // Known shape, wrong clip: a series bumper or a minutes-long decoy for a feature.
+            if (!bogusClipSkipped.add(source.identity)) return false
+            skipShortClipNow(owner, source, durationMs, looped = false)
+            return true
+        }
+        // Unknown-length title: the short clip may be the whole title (music videos), so it gets a
+        // confirmation window instead of an instant skip. A clip that loops back on itself is a
+        // decoy and skips at once; one that ends first is moved past by the ENDED handler.
+        val confirmation = shortClipConfirmation
+        if (!confirmation.armed) {
+            confirmation.arm(SystemClock.elapsedRealtime(), owner.currentPosition)
+            status.text = "Short clip · confirming it's the full title…"
+            return false
+        }
+        return when (confirmation.tick(SystemClock.elapsedRealtime(), owner.currentPosition, frame)) {
+            ShortClipConfirmation.Result.CONFIRMED -> {
+                confirmation.disarm()
+                confirmedShortClips.add(source.identity)
+                status.text = "Playing · ${source.label}"
+                false
+            }
+            ShortClipConfirmation.Result.LOOPED -> {
+                confirmation.disarm()
+                if (!bogusClipSkipped.add(source.identity)) false
+                else { skipShortClipNow(owner, source, durationMs, looped = true); true }
+            }
+            ShortClipConfirmation.Result.WAITING -> false
+        }
+    }
+
+    private fun skipShortClipNow(owner: ExoPlayer, source: FrostSource, durationMs: Long, looped: Boolean) {
         forgetFailedSource(source)
         lastPosition = 0L
-        lastFailure = "Skipped mismatched short clip (${durationMs / 1000}s) · loading full stream…"
+        lastFailure = if (looped) "Skipped looping preview clip · loading full stream…"
+            else "Skipped mismatched short clip (${durationMs / 1000}s) · loading full stream…"
         ui.post { if (player === owner && foreground && !failed) nextSource() }
-        return true
     }
 
     private fun listener(owner: ExoPlayer, attempt: PlaybackDiagnostics.Attempt) = object : Player.Listener {
@@ -693,6 +729,16 @@ class MoviePlayerActivity : Activity() {
                 if (desiredPlay && owner.playWhenReady && !owner.isPlaying) owner.play()
             }
             if (state == Player.STATE_ENDED) {
+                val endedSource = currentSource
+                // A short clip that ends before its confirmation window closes is a decoy, not the
+                // title: move on while untried sources remain instead of declaring it finished.
+                if (endedSource != null && shortClipConfirmation.armed &&
+                    endedSource.identity !in confirmedShortClips && hasUntriedSources()) {
+                    shortClipConfirmation.disarm()
+                    bogusClipSkipped.add(endedSource.identity)
+                    skipShortClipNow(owner, endedSource, owner.duration, looped = false)
+                    return
+                }
                 prefs.edit().putLong(title.progressKey, 0).putLong(title.progressKey + "_duration", lastDuration).apply()
                 lastPosition = 0; frame = false; startupAt = 0; attemptAt = 0
                 val next = VodProgress.next(title, episodes)

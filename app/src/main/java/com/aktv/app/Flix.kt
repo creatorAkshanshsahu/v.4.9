@@ -1,7 +1,7 @@
 package com.aktv.app
 
 /**
- * The Flix home: a light glass screen in the shape of the reference design — wordmark left, a dark
+ * The Flix home: a dark glass screen in the shape of the reference design — wordmark left, a dark
  * pill of tabs beside the search glyph, a bell and a profile chip right, two hero cards, a chip
  * strip, a section header with sort/filter, then the shelves with captions under the posters.
  *
@@ -10,23 +10,26 @@ package com.aktv.app
  * the rules are unit-tested here without a device.
  */
 internal object FlixColors {
-    val SCREEN_TOP = 0xFF6F8AA1.toInt()
-    val SCREEN_MID = 0xFF9DB1C3.toInt()
-    val SCREEN_BOT = 0xFF879DAC.toInt()
-    /** The big rounded container the whole screen sits in: white glass over the gradient. */
-    val CONTAINER = 0x2EFFFFFF
-    /** Dark navy ink for copy on the glass. */
+    val SCREEN_TOP = 0xFF060410.toInt()
+    val SCREEN_MID = 0xFF0D0722.toInt()
+    val SCREEN_BOT = 0xFF060410.toInt()
+    /** The big rounded container the whole screen sits in: dark glass over the gradient. */
+    val CONTAINER = 0x4D0B0620
+    /** Dark navy ink for copy on the light selected tab/chip. */
     val INK = 0xFF1A2340.toInt()
+    /** Near-white copy for dark surfaces, and its dimmer companion. */
+    val PAPER = 0xFFF2F5FA.toInt()
+    val DIM = 0xFF9AA8C7.toInt()
     val MUTED = 0xFF5A6B8C.toInt()
     val FAINT = 0xFF8B98B8.toInt()
     /** The near-black navy of the tab pill and the sort/filter pill. */
     val PILL = 0xFF141B31.toInt()
     val PILL_HI = 0xFF232C4D.toInt()
     val TAB_IDLE = 0xFF98A2BC.toInt()
-    val CHIP = 0x4DFFFFFF
+    val CHIP = 0x4D1B1630
     val CHIP_SELECTED = 0xFFE8EEF7.toInt()
-    /** Channel tiles: white glass that still takes a breath of the channel's own tint. */
-    val CARD = 0x66FFFFFF
+    /** Channel tiles: dark glass that still takes a breath of the channel's own tint. */
+    val CARD = 0x66100A23
     val CAPTION = 0xFFD7E1F0.toInt()
     /** The counters under a poster: rating gold, divider and year pale. */
     val POSTER_META = 0xFFE4EAF5.toInt()
@@ -152,6 +155,19 @@ internal object FlixView {
         }
 
     fun ratingOf(m: Movies.Title): Double = m.rating.toDoubleOrNull() ?: 0.0
+
+    /**
+     * Watch-progress fraction for a Continue-watching poster, from the same persisted
+     * position/duration the player resumes from. Finished (or finish-adjacent, mirroring the
+     * 30s resume cutoff) means no bar at all.
+     */
+    internal object RailProgress {
+        fun fraction(positionMs: Long, durationMs: Long): Float {
+            if (durationMs <= 0 || positionMs <= 0) return 0f
+            if (durationMs - positionMs <= 30_000) return 0f
+            return (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+        }
+    }
 
     /** The section header: the reference screen says "Trending in Animation" over a genre. */
     fun headerFor(tabName: String, chip: FlixChip?, vod: Boolean): String {

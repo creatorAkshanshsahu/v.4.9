@@ -38,7 +38,7 @@
     <FrameLayout android:id="@+id/playerLayer" android:layout_width="match_parent" android:layout_height="match_parent"
         android:background="#020107" android:visibility="gone">
         <androidx.media3.ui.PlayerView android:id="@+id/playerView" android:layout_width="match_parent"
-            android:layout_height="match_parent" app:use_controller="false" app:resize_mode="fit"
+            android:layout_height="match_parent" app:use_controller="false" app:resize_mode="zoom"
             app:surface_type="surface_view" app:use_artwork="false"
             app:shutter_background_color="@android:color/transparent"/>
         <View android:id="@+id/playerScrim" android:layout_width="match_parent" android:layout_height="match_parent"

@@ -105,4 +105,9 @@ class HomeChromeTest {
         assertTrue(root.findViewById<TextView>(R.id.heroTitle).maxLines in 1..2)
     }
 
+
+    @Test fun `poster art is 7 to 10`() {
+        assertEquals(1000, HomeChrome.posterArtHeight(700))
+        assertEquals(165, HomeChrome.posterArtHeight(116))
+    }
 }

@@ -38,6 +38,7 @@ import androidx.media3.exoplayer.drm.*
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.TrackSelectionDialogBuilder
 import androidx.recyclerview.widget.*
@@ -107,6 +108,8 @@ class MainActivity : AppCompatActivity() {
         data class Mv(val m: Movies.Title) : Tile()
         data class Action(val label: String, val active: Boolean = false, val onClick: () -> Unit) : Tile()
         object Hint : Tile()
+        /** Loading placeholder: a breathing poster card until the shelf arrives. */
+        object Skeleton : Tile()
     }
     class Row(val title: String, var tiles: List<Tile>, val landscape: Boolean = false)
 
@@ -2843,7 +2846,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun liveRows(channels: List<Channel>, alwaysOn: Boolean = false): List<Row> {
-        val trend: List<Tile> = if (trendingTitles.isEmpty()) listOf(Tile.Hint) else trendingTitles.map { Tile.Mv(it) }
+        val trend: List<Tile> = when {
+            trendingTitles.isNotEmpty() -> trendingTitles.map { Tile.Mv(it) }
+            trendingFailed -> listOf(Tile.Hint)
+            else -> List(8) { Tile.Skeleton }
+        }
         return buildList {
             if (channels.isNotEmpty()) add(Row(if (alwaysOn) "Always-on Channels" else "Live Channels", featuredChannels(channels).map { Tile.Ch(it) }))
             add(playlistSwitcherRow())
@@ -3083,7 +3090,7 @@ class MainActivity : AppCompatActivity() {
             7 -> playlistRows(allPlaylist)
             9 -> xtreamRows()
             10 -> fusionRows(allPortal2)
-            else -> { loadVod(tab); continueRow() + vodRowsFor(tab) }
+            else -> { loadVod(tab); continueRow() + vodRowsFor(tab).ifEmpty { loadingRowsFor(tab) } }
         }
         rows = viewRows(rows)
         setHeroCollapsed(false)
@@ -3267,7 +3274,9 @@ class MainActivity : AppCompatActivity() {
                 isFocusable = true; isClickable = true
                 tag = "flix:${chip.id}"
                 setTextColor(if (sel) FlixColors.INK else 0xFFFFFFFF.toInt())
-                background = Ui.pill(dp, if (sel) FlixColors.CHIP_SELECTED else FlixColors.CHIP, 14f)
+                background = Ui.pill(dp, if (sel) FlixColors.CHIP_SELECTED else FlixColors.CHIP, 14f).apply {
+                    if (!sel) setStroke((1 * dp).toInt().coerceAtLeast(1), 0x4000ECF7)
+                }
                 setPadding((16 * dp).toInt(), (9 * dp).toInt(), (16 * dp).toInt(), (9 * dp).toInt())
                 nextFocusUpId = R.id.heroMedia; nextFocusDownId = R.id.rows
                 setOnFocusChangeListener { v, f -> focusAnim(v, f) }
@@ -4315,6 +4324,7 @@ class MainActivity : AppCompatActivity() {
         p.setVideoFrameMetadataListener { _, _, _, _ -> health.videoProgress(SystemClock.elapsedRealtime()) }
         p.setMediaSource(ms); p.playWhenReady = true; p.addListener(listenerFor(p, trace))
         pv.player = p; player = p
+        applyChannelAspect()
         prepareOnSurface(p)
         showInfo()
         // A silent picture is otherwise indistinguishable from a working one: if video is playing a
@@ -5045,6 +5055,15 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    /** Channels fill the screen by default (zoom crops, never stretches); the viewer can pin fit per channel. */
+    private fun channelAspectZoom(): Boolean =
+        prefs.getBoolean("aspect_zoom_${shown.getOrNull(current)?.key}", true)
+
+    private fun applyChannelAspect() {
+        pv.resizeMode = if (channelAspectZoom()) AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            else AspectRatioFrameLayout.RESIZE_MODE_FIT
+    }
+
     private fun showPictureMenu() {
         val controller = picture ?: return
         val ch = shown.getOrNull(current) ?: return
@@ -5063,7 +5082,14 @@ class MainActivity : AppCompatActivity() {
                     prefs.edit().putBoolean("stable_picture_${ch.key}", true).apply()
                     if (index == 1) controller.stable() else offered.getOrNull(index - 2)?.let(controller::select)
                 }
-            }.setNegativeButton("Close", null).create()
+            }.setNegativeButton("Close", null)
+            .setNeutralButton(if (channelAspectZoom()) "Aspect: fit inside screen" else "Aspect: fill screen") { _, _ ->
+                if (shown.getOrNull(current)?.key != ch.key) return@setNeutralButton
+                prefs.edit().putBoolean("aspect_zoom_${ch.key}", !channelAspectZoom()).apply()
+                applyChannelAspect()
+                Toast.makeText(this, if (channelAspectZoom()) "Aspect · fill screen (remembered for this channel)"
+                    else "Aspect · fit inside screen (remembered for this channel)", Toast.LENGTH_SHORT).show()
+            }.create()
         sourceMenu = dialog
         dialog.setOnDismissListener { if (sourceMenu === dialog) sourceMenu = null }
         dialog.show()
@@ -6446,6 +6472,47 @@ class MainActivity : AppCompatActivity() {
         fun startPulse() { pulse?.cancel(); pulse = startDotPulse(dot) }
         fun stopPulse() { pulse?.cancel(); pulse = null; dot.alpha = 1f }
     }
+    /** A skeleton tile's breathing animator, cancelled on recycle so idle shelves never leak one. */
+    private inner class SkelVH(v: View) : VH(v) {
+        val glow: View = v.findViewById(R.id.skelGlow)
+        var breath: ObjectAnimator? = null
+        fun startBreath() {
+            breath?.cancel()
+            breath = ObjectAnimator.ofFloat(glow, "alpha", 0.25f, 1f).apply {
+                duration = 900; repeatMode = ObjectAnimator.REVERSE; repeatCount = ObjectAnimator.INFINITE
+                start()
+            }
+        }
+        fun stopBreath() { breath?.cancel(); breath = null; glow.alpha = 1f }
+    }
+    /** Continue-watching posters carry their resume fraction as a cyan bar under the artwork. */
+    private fun bindRailProgress(v: View, continuing: Boolean, m: Movies.Title) {
+        val track = v.findViewById<View>(R.id.posterProgressTrack) ?: return
+        val fill = v.findViewById<View>(R.id.posterProgressFill) ?: return
+        val fraction = if (!continuing || m.tmdb <= 0) 0f else try {
+            val type = if (m.isSeries) "tv" else "movie"
+            val season = if (m.isSeries) prefs.getInt("last_season_${m.imdb}", 1) else 0
+            val episode = if (m.isSeries) prefs.getInt("last_ep_${m.imdb}", 1) else 0
+            val key = FrostTitle(m.tmdb, type, season, episode).progressKey
+            FlixView.RailProgress.fraction(prefs.getLong(key, 0), prefs.getLong(key + "_duration", 0))
+        } catch (_: Exception) { 0f }
+        if (fraction <= 0f) { track.visibility = View.GONE; return }
+        track.visibility = View.VISIBLE
+        (fill.layoutParams as LinearLayout.LayoutParams).weight = fraction
+        fill.requestLayout()
+    }
+
+    /** While a shelf tab loads, breathing skeleton posters hold the shelves' place. */
+    private fun loadingRowsFor(t: Int): List<Row> {
+        val loading = when (t) {
+            3, 4 -> vodLoading[t - 3]
+            8 -> ogLoading
+            else -> false
+        }
+        if (!loading) return emptyList()
+        return listOf(Row("Loading…", List(8) { Tile.Skeleton }))
+    }
+
     private inner class TileAdapter(val row: Row) : RecyclerView.Adapter<VH>() {
         override fun getItemCount() = row.tiles.size
         override fun getItemViewType(i: Int) = when {
@@ -6453,16 +6520,17 @@ class MainActivity : AppCompatActivity() {
             row.tiles[i] is Tile.Ch -> 0
             row.tiles[i] is Tile.Mv -> 1
             row.tiles[i] is Tile.Action -> 4
+            row.tiles[i] is Tile.Skeleton -> 5
             else -> 2
         }
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
-            val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; else -> R.layout.item_hint }
+            val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; 5 -> R.layout.item_skeleton; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
-            HomeChrome.styleTile(v, poster = t == 1, landscape = t == 3, compact = compact, dp = dp)
-            if (t != 1 && t != 3) { v.background = Ui.pill(dp, FlixColors.CARD, 20f); v.clipToOutline = true }
-            return if (t == 0) ChVH(v) else VH(v)
+            HomeChrome.styleTile(v, poster = t == 1 || t == 5, landscape = t == 3, compact = compact, dp = dp)
+            if (t != 1 && t != 3 && t != 5) { v.background = Ui.pill(dp, FlixColors.CARD, 20f); v.clipToOutline = true }
+            return when (t) { 0 -> ChVH(v); 5 -> SkelVH(v); else -> VH(v) }
         }
-        override fun onViewRecycled(h: VH) { (h as? ChVH)?.stopPulse(); super.onViewRecycled(h) }
+        override fun onViewRecycled(h: VH) { (h as? ChVH)?.stopPulse(); (h as? SkelVH)?.stopBreath(); super.onViewRecycled(h) }
         override fun onBindViewHolder(h: VH, i: Int, payloads: MutableList<Any>) {
             val t = row.tiles[i]
             val chh0 = h as? ChVH
@@ -6562,8 +6630,10 @@ class MainActivity : AppCompatActivity() {
                         v.findViewById<TextView>(R.id.posterName).text = t.m.name
                         img.load(t.m.poster) { crossfade(180); size(348, 522); placeholder(null) }
                         v.findViewById<TextView>(R.id.posterTitle).text = t.m.name
+                        v.findViewById<TextView>(R.id.posterTitle).isSelected = false
                         // The counters sit under the artwork now: rating star, then the year.
                         v.findViewById<TextView>(R.id.posterMeta).text = posterMetaText(t.m)
+                        bindRailProgress(v, row.title == CONTINUE, t.m)
                         v.contentDescription =
                             (listOf(t.m.name, t.m.year.takeIf { it.isNotEmpty() }, t.m.rating.takeIf { it.isNotEmpty() }?.let { "★ $it" })
                                 .filterNotNull()).joinToString(" · ")
@@ -6574,6 +6644,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     v.setOnFocusChangeListener { x, f ->
                         focusAnim(x, f)
+                        v.findViewById<TextView>(R.id.posterTitle)?.isSelected = f
                         if (f) {
                             heroFilmFocus = true
                             setHero(t)
@@ -6604,7 +6675,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     val hint = v.findViewById<TextView>(R.id.hintText).apply {
                         text = t.label
-                        setTextColor(if (t.active) 0xFFFFFFFF.toInt() else FlixColors.INK)
+                        setTextColor(if (t.active) 0xFFFFFFFF.toInt() else FlixColors.PAPER)
                         typeface = fSemi
                     }
                     v.setOnFocusChangeListener { x, f ->
@@ -6613,9 +6684,15 @@ class MainActivity : AppCompatActivity() {
                             setColor(if (f) FlixColors.PILL else baseFill)
                             setStroke((if (f) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (f) 0xFFFFFFFF.toInt() else baseStroke)
                         }
-                        hint.setTextColor(if (f || t.active) 0xFFFFFFFF.toInt() else FlixColors.INK)
+                        hint.setTextColor(if (f || t.active) 0xFFFFFFFF.toInt() else FlixColors.PAPER)
                     }
                     v.setOnClickListener { t.onClick() }
+                }
+                is Tile.Skeleton -> {
+                    v.isFocusable = false; v.isClickable = false
+                    v.setOnFocusChangeListener(null)
+                    v.setOnClickListener(null)
+                    (h as? SkelVH)?.startBreath()
                 }
                 else -> {
                     v.isFocusable = false; v.isClickable = false
@@ -6623,11 +6700,11 @@ class MainActivity : AppCompatActivity() {
                     v.setOnFocusChangeListener(null)
                     v.setOnClickListener(null)
                     v.findViewById<TextView>(R.id.hintText).apply {
-                        setTextColor(FlixColors.MUTED)
+                        setTextColor(FlixColors.DIM)
                         typeface = fRegular
                         text = when {
-                            row.title.equals("Trending on AK", true) && trendingFailed -> "Trending titles will appear when the catalogue is available."
-                            row.title.equals("Trending on AK", true) -> "Loading titles from the native catalogue…"
+                            row.title.startsWith("Trending", true) && trendingFailed -> "Trending titles will appear when the catalogue is available."
+                            row.title.startsWith("Trending", true) -> "Loading titles from the native catalogue…"
                             else -> "Hold OK on any channel to keep it here"
                         }
                     }

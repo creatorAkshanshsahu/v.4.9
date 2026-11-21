@@ -217,6 +217,9 @@ internal object HomeChrome {
         rv.setPadding(((if (compact) 8 else 12) * dp).toInt(), (8 * dp).toInt(), (40 * dp).toInt(), (12 * dp).toInt())
     }
 
+    /** Poster art is 7:10: a 116dp card carries 165dp of artwork, well above the 150dp touch floor. */
+    fun posterArtHeight(widthPx: Int): Int = (widthPx * 10 / 7)
+
     fun styleTile(tile: View, poster: Boolean, compact: Boolean, dp: Float, landscape: Boolean = false) {
         val lp = tile.layoutParams as ViewGroup.MarginLayoutParams
         lp.setMargins((6 * dp).toInt(), (4 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt())
@@ -231,11 +234,11 @@ internal object HomeChrome {
             tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 46 else 62) * dp).toInt(); height = width }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 13f
         } else {
-            // 2:3 artwork with the title and counters beneath it, as in the reference rail.
+            // 7:10 artwork with the title and counters beneath it, as in the reference rail.
             val width = ((if (compact) 104 else 116) * dp).toInt()
             lp.width = width
             lp.height = ViewGroup.LayoutParams.WRAP_CONTENT
-            tile.findViewById<View>(R.id.posterArt)?.layoutParams?.apply { this.width = width; height = (width * 1.5f).toInt() }
+            tile.findViewById<View>(R.id.posterArt)?.layoutParams?.apply { this.width = width; height = posterArtHeight(width) }
             tile.findViewById<TextView>(R.id.posterRank)?.apply {
                 textSize = if (compact) 34f else 40f
             }

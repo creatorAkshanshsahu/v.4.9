@@ -142,4 +142,24 @@ class VodPreflightTest {
         val ordered = VodSourceOrder.prioritize(listOf(fuzzy2, vidlink, source13))
         assertEquals(listOf("og-vl", "og-s13", "og-s2"), ordered.map { it.identity })
     }
+
+    @Test fun `short clip that plays fine for 20s is kept as the title`() {
+        val confirmation = ShortClipConfirmation()
+        confirmation.arm(0, 0)
+        assertEquals(ShortClipConfirmation.Result.WAITING, confirmation.tick(10_000, 9_000, true))
+        // Advanced but too soon: still waiting.
+        assertEquals(ShortClipConfirmation.Result.WAITING, confirmation.tick(19_999, 18_000, true))
+        assertEquals(ShortClipConfirmation.Result.CONFIRMED, confirmation.tick(20_000, 19_000, true))
+    }
+    @Test fun `short clip with no frames never confirms`() {
+        val confirmation = ShortClipConfirmation()
+        confirmation.arm(0, 0)
+        assertEquals(ShortClipConfirmation.Result.WAITING, confirmation.tick(60_000, 55_000, false))
+    }
+    @Test fun `short clip that loops back is a decoy at once`() {
+        val confirmation = ShortClipConfirmation()
+        confirmation.arm(0, 0)
+        assertEquals(ShortClipConfirmation.Result.WAITING, confirmation.tick(12_000, 12_000, true))
+        assertEquals(ShortClipConfirmation.Result.LOOPED, confirmation.tick(13_000, 500, true))
+    }
 }

@@ -28,19 +28,21 @@
     <color name="glass_deep">#D1090713</color>
     <color name="border">#4000ECF7</color>
     <!-- Flix home (light glass): screen gradient, navy ink, dark pills, glass chips and cards. -->
-    <color name="flix_top">#6F8AA1</color>
-    <color name="flix_mid">#9DB1C3</color>
-    <color name="flix_bot">#879DAC</color>
-    <color name="flix_container">#2EFFFFFF</color>
+    <color name="flix_top">#060410</color>
+    <color name="flix_mid">#0D0722</color>
+    <color name="flix_bot">#060410</color>
+    <color name="flix_container">#4D0B0620</color>
     <color name="flix_ink">#1A2340</color>
     <color name="flix_muted">#5A6B8C</color>
     <color name="flix_faint">#8B98B8</color>
     <color name="flix_pill">#141B31</color>
     <color name="flix_pill_hi">#232C4D</color>
     <color name="flix_tab_idle">#98A2BC</color>
-    <color name="flix_chip">#4DFFFFFF</color>
+    <color name="flix_chip">#4D1B1630</color>
     <color name="flix_chip_selected">#E8EEF7</color>
-    <color name="flix_card">#66FFFFFF</color>
+    <color name="flix_card">#66100A23</color>
     <color name="flix_caption">#D7E1F0</color>
     <color name="flix_poster_meta">#E4EAF5</color>
+    <color name="flix_paper">#F2F5FA</color>
+    <color name="flix_dim">#9AA8C7</color>
 </resources>
