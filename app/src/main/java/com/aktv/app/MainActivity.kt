@@ -6577,7 +6577,6 @@ class MainActivity : AppCompatActivity() {
                             setHero(t)
                             val p = h.bindingAdapterPosition
                             if (p >= 0) setHero2(row.tiles.getOrNull(p + 1))
-                            val p = h.bindingAdapterPosition
                             for (d in 1..3) (row.tiles.getOrNull(p + d) as? Tile.Mv)?.let { prefetch(it.m.background) }
                         }
                     }
