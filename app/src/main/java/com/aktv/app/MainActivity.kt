@@ -4517,7 +4517,8 @@ class MainActivity : AppCompatActivity() {
                     Player.STATE_ENDED -> PlaybackHealth.State.ENDED
                     else -> PlaybackHealth.State.IDLE
                 }
-                val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady, p.totalBufferedDurationMs)
+                val bufferedAhead = (p.bufferedPosition - p.currentPosition).coerceAtLeast(0)
+                val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady, bufferedAhead)
                 if (!expectsVideo() && state == PlaybackHealth.State.READY && p.isPlaying) {
                     if (healthScanAudioStartedAt == 0L) {
                         healthScanAudioStartedAt = now; healthScanAudioStartPosition = p.currentPosition
