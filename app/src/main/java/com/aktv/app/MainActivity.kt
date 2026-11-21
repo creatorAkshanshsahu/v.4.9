@@ -4026,6 +4026,12 @@ class MainActivity : AppCompatActivity() {
         val bw = androidx.media3.exoplayer.upstream.DefaultBandwidthMeter.Builder(this)
             .setInitialBitrateEstimate(if (profile.softwareFirst) 1_000_000L else if (television) 2_000_000L else 4_000_000L).build()
         val loadControl = when {
+            // Portal and StarShare live links are single-rendition MPEG-TS with 6–10 s segments and
+            // transcode jitter: they need segment margin plus a starting cushion, or every tune opens
+            // with a stall that the picture keeper then chases. Site streams keep their profile.
+            channel != null && (channel.portal || channel.xtream) -> androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(15_000, 45_000, 2500, 5000).setBackBuffer(0, false)
+                .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()
             stable -> androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(10_000, 30_000, 1500, 4000).setBackBuffer(0, false)
                 .setTargetBufferBytes(profile.bufferBytes).setPrioritizeTimeOverSizeThresholds(true).build()

@@ -87,30 +87,34 @@ class StablePlaybackTest {
         assertNull(StableRenditions.started(null, listOf(track("720", 720), low), 720))
     }
 
-    @Test fun `a first exhausted step-down only warns, the second one while buffering escalates`() {
-        val escalator = ExhaustionEscalator()
-        assertFalse(escalator.exhausted(10_000, bufferingNow = true, lastBufferAt = 9_000))
-        assertTrue(escalator.exhausted(30_000, bufferingNow = true, lastBufferAt = 29_000))
+    @Test fun `passing blips never starve a server`() {
+        val stalls = StallWindow()
+        stalls.addStall(10_000, 5_000)
+        assertFalse(stalls.starving(20_000, ongoingSince = 0))
+        stalls.addStall(30_000, 5_000)
+        assertEquals(10_000, stalls.stalledMs(40_000, ongoingSince = 0))
+        assertFalse(stalls.starving(40_000, ongoingSince = 0))
     }
-    @Test fun `drops without any buffering evidence never burn through servers`() {
-        val escalator = ExhaustionEscalator()
-        assertFalse(escalator.exhausted(10_000, bufferingNow = false, lastBufferAt = 0))
-        assertFalse(escalator.exhausted(30_000, bufferingNow = false, lastBufferAt = 0))
-        assertFalse(escalator.exhausted(60_000, bufferingNow = false, lastBufferAt = 0))
+    @Test fun `twenty-five stalled seconds in the window starve, continuous or flapping`() {
+        val flapping = StallWindow()
+        flapping.addStall(10_000, 10_000)
+        flapping.addStall(30_000, 10_000)
+        assertTrue(flapping.starving(50_000, ongoingSince = 44_000))
+        val continuous = StallWindow()
+        assertTrue(continuous.starving(30_000, ongoingSince = 4_000))
     }
-    @Test fun `recent buffering lets a sustained drops streak escalate, then the streak resets`() {
-        val escalator = ExhaustionEscalator()
-        assertFalse(escalator.exhausted(10_000, bufferingNow = false, lastBufferAt = 9_000))
-        assertTrue(escalator.exhausted(30_000, bufferingNow = false, lastBufferAt = 29_000))
-        // Escalation itself resets: one more event is only a warning again.
-        assertFalse(escalator.exhausted(50_000, bufferingNow = true, lastBufferAt = 49_000))
-        escalator.relieved()
-        assertFalse(escalator.exhausted(70_000, bufferingNow = true, lastBufferAt = 69_000))
+    @Test fun `old stalls fall out of the window`() {
+        val stalls = StallWindow()
+        stalls.addStall(10_000, 20_000)
+        assertFalse(stalls.starving(110_000, ongoingSince = 0))
+        assertEquals(0, stalls.stalledMs(110_000, ongoingSince = 0))
     }
-    @Test fun `stale buffering evidence does not escalate a decode-only streak`() {
-        val escalator = ExhaustionEscalator()
-        assertFalse(escalator.exhausted(10_000, bufferingNow = false, lastBufferAt = 9_000))
-        assertFalse(escalator.exhausted(200_000, bufferingNow = false, lastBufferAt = 9_000))
+    @Test fun `decode-only streaks with no stall backing never escalate`() {
+        val stalls = StallWindow()
+        assertFalse(stalls.starving(10_000, ongoingSince = 0))
+        assertFalse(stalls.starving(60_000, ongoingSince = 0))
+        stalls.reset()
+        assertFalse(stalls.starving(70_000, ongoingSince = 0))
     }
 
 }
