@@ -5,5 +5,6 @@ from pathlib import Path
 baseline=json.loads(Path('docs/playback-baseline-4.9.18.json').read_text())
 bad=[path for path,expected in baseline['sha256'].items() if hashlib.sha256(Path(path).read_bytes()).hexdigest()!=expected]
 if bad:
+    print('::error title=Playback baseline::' + ', '.join(bad).replace('%', '%25').replace('\n', '%0A'))
     raise SystemExit('Unexpected playback-contract change: '+', '.join(bad))
 print(f"Verified {len(baseline['sha256'])} network/DRM/VOD policy files against the working 4.9.18 baseline.")

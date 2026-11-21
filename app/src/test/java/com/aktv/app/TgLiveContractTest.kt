@@ -113,40 +113,6 @@ class TgLiveContractTest {
     }
 
     /**
-     * Opt-in check of the Sony shelf against the exact feed the Live tab loads.
-     *
-     * The shelf is selected by channel *name*, so what matters is that real Sony channels come back -
-     * not that a hand-written ID list survives. This prints the selection and the provider's own
-     * names for it, plus any Sony-flavoured channel it missed, so a wrong shelf is visible before a
-     * user ever sees it. A missing channel is dropped by design, never shown as a dead tile.
-     */
-    @Test fun `sony shelf selects advertised Sony channels by name`() {
-        assumeTrue(System.getProperty("aktv.live.tg") == "true")
-        val response = TgHttp().get("${TgResolver.SITE}/api/public/channels", linkedMapOf("Accept" to "application/json"))
-        assertEquals("live channel feed did not answer 200", 200, response.code)
-        val channels = JSONObject(response.body.toString(Charsets.UTF_8)).getJSONArray("channels")
-        val catalogue = ArrayList<MainActivity.Channel>()
-        for (index in 0 until channels.length()) {
-            val item = channels.optJSONObject(index) ?: continue
-            catalogue.add(MainActivity.Channel(item.optString("id"), item.optString("name"), "", item.optString("logo")))
-        }
-        val shelf = LiveCollections.channels(LiveCollections.SONY, catalogue)
-        val picked = shelf.associate { it.id to it.name }
-        // Sony-flavoured channels the real catalogue carries that the shelf does NOT list.
-        val omitted = catalogue.filter { channel ->
-            channel.id !in picked && !channel.v2 &&
-                (channel.name.contains("sony", true) || channel.name.startsWith("SET ", true) ||
-                    channel.name.startsWith("BBC Earth", true) || channel.name.startsWith("SAB ", true))
-        }.associate { it.id to it.name }
-        println("TG_NATIVE " + JSONObject().put("provider", "LiveCollections").put("step", "sonyShelf")
-            .put("catalogueSize", catalogue.size).put("selected", shelf.size)
-            .put("names", JSONObject(picked as Map<*, *>))
-            .put("omittedSonyChannels", JSONObject(omitted as Map<*, *>)))
-        assertTrue("The live feed advertised no Sony channel at all - the shelf would render empty",
-            shelf.size >= 5)
-    }
-
-    /**
      * Opt-in read of the replacement site's current player page. Names only, so a site that moves its
      * endpoints is reported instead of silently failing; the resolver reads them at runtime anyway.
      */

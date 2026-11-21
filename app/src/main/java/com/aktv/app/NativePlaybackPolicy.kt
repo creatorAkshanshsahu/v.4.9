@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import java.util.Locale
 
 /** Device playback choices, not network/DRM bypasses. Secure-decoder requirements are always retained. */
 internal object NativePlaybackPolicy {
@@ -67,11 +68,34 @@ internal object NativePlaybackPolicy {
     }
 
     fun renderers(context: Context, profile: Profile): DefaultRenderersFactory =
-        DefaultRenderersFactory(context).setEnableDecoderFallback(true).apply {
-            if (profile.synchronous) forceDisableMediaCodecAsynchronousQueueing()
-            if (profile.softwareFirst) setMediaCodecSelector(softwarePreferred())
-            // Otherwise leave Media3's platform-specific adapter choice intact, particularly on phones.
-        }
+        DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
+            // Software audio decoders (FFmpeg) fill the gaps platform decoders leave — Dolby AC-3 /
+            // E-AC-3 and DTS on phones without those licenses — instead of a silent picture.
+            // Platform decoders are still preferred whenever they can play the track.
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .apply {
+                if (profile.synchronous) forceDisableMediaCodecAsynchronousQueueing()
+                if (profile.softwareFirst) setMediaCodecSelector(softwarePreferred())
+                // Otherwise leave Media3's platform-specific adapter choice intact, particularly on phones.
+            }
+
+    /** Short codec name for the audio menus: shared by the live player and the VOD player. */
+    fun audioCodecLabel(mime: String): String = when (mime) {
+        MimeTypes.AUDIO_AAC -> "AAC"
+        MimeTypes.AUDIO_AC3 -> "Dolby AC-3"
+        MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC -> "Dolby Digital+"
+        MimeTypes.AUDIO_AC4 -> "Dolby AC-4"
+        MimeTypes.AUDIO_TRUEHD -> "Dolby TrueHD"
+        MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD, MimeTypes.AUDIO_DTS_EXPRESS -> "DTS"
+        MimeTypes.AUDIO_MPEG, MimeTypes.AUDIO_MPEG_L1, MimeTypes.AUDIO_MPEG_L2 -> "MP2/MP3"
+        MimeTypes.AUDIO_OPUS -> "Opus"
+        MimeTypes.AUDIO_VORBIS -> "Vorbis"
+        MimeTypes.AUDIO_FLAC -> "FLAC"
+        MimeTypes.AUDIO_ALAC -> "ALAC"
+        MimeTypes.AUDIO_RAW -> "PCM"
+        else -> mime.substringAfter('/', "").uppercase(Locale.ROOT)
+    }
 
     fun tracks(context: Context, profile: Profile, hindi: Boolean): DefaultTrackSelector =
         DefaultTrackSelector(context, AdaptiveTrackSelection.Factory(15_000, 20_000, 20_000, 0.75f)).apply {

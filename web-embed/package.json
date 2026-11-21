@@ -1,0 +1,15 @@
+{
+  "name": "streamr-maxtv-web-embed",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "STREAMR maxTV & StarShare Live TV JSON API, M3U Playlist Gateway, Stream Proxy, and Embeddable <iframe> Web Player for external websites (OG website integration).",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test server.test.mjs"
+  }
+}

@@ -7,7 +7,7 @@
         <TextView android:id="@+id/rowTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:textColor="@color/text" android:textSize="20sp" android:fontFamily="@font/sora_bold"/>
         <TextView android:id="@+id/rowCount" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:layout_marginStart="10dp" android:textColor="@color/text_faint" android:textSize="12sp"
+            android:layout_marginStart="10dp" android:textColor="@color/flix_faint" android:textSize="12sp"
             android:visibility="gone"/>
     </LinearLayout>
     <androidx.recyclerview.widget.RecyclerView android:id="@+id/rowList" android:layout_width="match_parent"

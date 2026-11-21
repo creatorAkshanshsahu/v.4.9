@@ -31,6 +31,29 @@ class FrostLiveContractTest {
             val sources = FrostResolver().resolve(title)
             report.put("sources", sources.size).put("formats", JSONArray(sources.map { it.format.name }.distinct()))
                 .put("subtitleCount", sources.first().subtitles.size)
+            // Which of the first few advertised sources actually answer? This is the evidence behind
+            // VodPreflight ordering a title onto a source that responded: status, type and body marker
+            // only - never a URL, token or media byte.
+            val reachability = JSONArray()
+            for (source in sources.take(VodPreflight.MAX_CANDIDATES)) {
+                val item = JSONObject().put("format", source.format.name).put("quality", source.quality)
+                try {
+                    FrostHttp.client(source).newBuilder().callTimeout(8, TimeUnit.SECONDS).build()
+                        .newCall(Request.Builder().url(source.url).header("Range", "bytes=0-511").build())
+                        .execute().use { response ->
+                            val type = response.header("Content-Type").orEmpty()
+                            val prefix = ByteArray(VodPreflight.PREFIX_BYTES)
+                            val count = response.body?.byteStream()?.read(prefix)?.coerceAtLeast(0) ?: 0
+                            item.put("status", response.code)
+                                .put("contentType", type.substringBefore(';').take(40))
+                                .put("prefixBytes", count)
+                                .put("manifest", VodPreflight.looksLikeManifest(type,
+                                    if (count > 0) String(prefix, 0, count, Charsets.UTF_8) else ""))
+                        }
+                } catch (error: Exception) { item.put("error", error.javaClass.simpleName) }
+                reachability.put(item)
+            }
+            report.put("sourceReachability", reachability)
             val source = sources.firstOrNull { it.format == VodFormat.DASH }
             assertNotNull("No DASH source returned for the sampled title", source)
             source!!

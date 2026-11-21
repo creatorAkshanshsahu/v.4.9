@@ -56,6 +56,41 @@ class PlaybackHealthTest {
         assertEquals(PlaybackHealth.Failure.VIDEO_STOPPED, health.sample(12_000, ready, true, 12_000).failure)
     }
 
+    @Test fun `buffering with arriving data is slow, not dead`() {
+        val health = PlaybackHealth(0)
+        health.firstFrame(0)
+        var buffered = 0L
+        for (second in 2..40) {
+            buffered += 400
+            assertNull("second $second", health.sample(second * 1_000L, buffering, false, 1_000, true, buffered).failure)
+        }
+    }
+
+    @Test fun `buffering with a frozen buffer still fails at twelve seconds`() {
+        val health = PlaybackHealth(0)
+        health.firstFrame(0)
+        for (second in 2..13) assertNull(health.sample(second * 1_000L, buffering, false, 1_000, true, 500).failure)
+        assertEquals(PlaybackHealth.Failure.BUFFERING, health.sample(14_000, buffering, false, 1_000, true, 500).failure)
+    }
+
+    @Test fun `startup with arriving data outlives fifteen seconds, then fails when the data stops`() {
+        val health = PlaybackHealth(0)
+        var buffered = 0L
+        for (second in 1..30) {
+            buffered += 500
+            assertNull("second $second", health.sample(second * 1_000L, buffering, false, 0, true, buffered).failure)
+        }
+        assertEquals(PlaybackHealth.Failure.NO_PICTURE, health.sample(46_000, buffering, false, 0, true, buffered).failure)
+    }
+
+    @Test fun `quietFor measures the silence since the last arrival`() {
+        val health = PlaybackHealth(0)
+        assertEquals(5_000, health.quietFor(5_000))
+        health.sample(6_000, buffering, false, 0, bufferedMs = 0)
+        health.sample(7_000, buffering, false, 0, bufferedMs = 900)
+        assertEquals(3_000, health.quietFor(10_000))
+    }
+
     @Test fun `READY but suppressed playback cannot leave a stale first frame forever`() {
         val health = PlaybackHealth(0)
         health.firstFrame(0)
