@@ -5834,8 +5834,8 @@ class MainActivity : AppCompatActivity() {
                     // checks hold their release for the shelf, while an asked-for check answers now.
                     if (UpdateManifest.defersToShelf(interactive, playbackActive)) pendingUpdate = release
                     else { pendingUpdate = null; promptUpdate(release) }
+                    updateFlixBadge()
                 }
-                updateFlixBadge()
                 else if (interactive) {
                     Toast.makeText(this, if (reachable) "STREAMR $appVersion is the latest published build." else
                         "Couldn't reach the update service. Check the connection and try again.", Toast.LENGTH_LONG).show()
