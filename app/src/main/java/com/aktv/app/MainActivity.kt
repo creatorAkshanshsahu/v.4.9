@@ -1218,7 +1218,6 @@ class MainActivity : AppCompatActivity() {
             tab == 2 && allJio.isEmpty() -> jioMsg
             tab == 5 && tataJio.isEmpty() -> tataMsg
             tab == 6 && allPortal.isEmpty() -> portalMsg
-            tab == 6 && allPortal2.isEmpty() && stalkerAccount2() != null && portal2Msg.isNotEmpty() -> portal2Msg
             tab == 10 && allPortal2.isEmpty() -> portal2Msg
             tab == 7 && allPlaylist.isEmpty() -> playlistMsg
             tab == 9 && xtreamNeedsStatus() -> xtreamMsg
@@ -4499,15 +4498,17 @@ class MainActivity : AppCompatActivity() {
                 fail("No playable picture within 60 seconds. Hold OK to retry.")
                 return
             }
-            if (providerWindow.expired(now)) {
+            val p = player
+            val health = playbackHealth
+            // A slow portal that keeps delivering gets to finish filling its buffer instead of
+            // being re-asked every turn; only a turn with no new data at all moves the tune on.
+            if (providerWindow.expired(now) && (health == null || health.quietFor(now) >= 25_000)) {
                 activeAttempt?.timeout()
                 recovery.skip(nativeSources.indices.filter { LiveProviders.provider(nativeSources[it]) == currentNativeProvider })
                 advanceNative("${providerName(currentNativeProvider)} did not start within its 25-second turn")
                 if (playbackActive) ui.postDelayed(this, 500)
                 return
             }
-            val p = player
-            val health = playbackHealth
             if (p != null && health != null) {
                 picture?.checkBuffering(now)
                 val state = when (p.playbackState) {
@@ -4516,7 +4517,7 @@ class MainActivity : AppCompatActivity() {
                     Player.STATE_ENDED -> PlaybackHealth.State.ENDED
                     else -> PlaybackHealth.State.IDLE
                 }
-                val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady)
+                val result = health.sample(now, state, p.isPlaying, p.currentPosition, p.playWhenReady, p.totalBufferedDurationMs)
                 if (!expectsVideo() && state == PlaybackHealth.State.READY && p.isPlaying) {
                     if (healthScanAudioStartedAt == 0L) {
                         healthScanAudioStartedAt = now; healthScanAudioStartPosition = p.currentPosition
