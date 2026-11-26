@@ -671,7 +671,7 @@ class MobileHomeActivity : AppCompatActivity() {
     }
 
     private fun loadProvider(name: String): List<LiveItem> {
-        when (name) {
+        return when (name) {
             "TG" -> buildList {
                 MobileCatalog.parseV1(tgGet("${TgServers.SITE}/api/public/channels", "mobile-v1.json"))
                     .forEach { add(LiveItem("TG", it.id, it.name, it.logo, it.category)) }

@@ -67,7 +67,7 @@ class MobilePlayerActivity : AppCompatActivity() {
                 .putExtra(EXTRA_LIVE, true))
         }
 
-        fun playVod(context: Context, name: String, frost: List<FrostSource>) {
+        internal fun playVod(context: Context, name: String, frost: List<FrostSource>) {
             context.startActivity(Intent(context, MobilePlayerActivity::class.java)
                 .putExtra(EXTRA_NAME, name)
                 .putExtra(EXTRA_STREAMS, encode(frost.take(8).map {
