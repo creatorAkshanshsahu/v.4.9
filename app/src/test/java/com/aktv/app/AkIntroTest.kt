@@ -60,4 +60,12 @@ class AkIntroTest {
         assertTrue("Expected H.264 avc1 track inside streamr_intro_video.mp4", ascii.contains("avc1"))
         assertTrue("Expected AAC mp4a audio track inside streamr_intro_video.mp4", ascii.contains("mp4a"))
     }
+
+    @Test fun `entrance plays on cold starts and skips on warm returns`() {
+        assertTrue(IntroPolicy.shouldPlay(0, 1_000_000))
+        assertTrue(IntroPolicy.shouldPlay(1_000_000, 1_000_000 + IntroPolicy.WARM_WINDOW_MS))
+        assertTrue(IntroPolicy.shouldPlay(1_000_000, 1_000_000 + IntroPolicy.WARM_WINDOW_MS + 1))
+        assertFalse(IntroPolicy.shouldPlay(1_000_000, 1_000_000 + IntroPolicy.WARM_WINDOW_MS - 1))
+        assertFalse(IntroPolicy.shouldPlay(1_000_000, 1_000_001))
+    }
 }

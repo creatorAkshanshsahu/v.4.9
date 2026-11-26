@@ -29,6 +29,16 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 
 /**
+ * Cold starts play the entrance; warm returns go straight to the shelf. Pure, so the rule itself
+ * is unit-tested.
+ */
+internal object IntroPolicy {
+    const val WARM_WINDOW_MS = 15 * 60_000L
+    fun shouldPlay(lastLaunchMs: Long, nowMs: Long): Boolean =
+        lastLaunchMs <= 0 || nowMs - lastLaunchMs >= WARM_WINDOW_MS
+}
+
+/**
  * Full-screen skippable cyber-neon STREAMR entrance playing `R.raw.streamr_intro_video`
  * (`streamr-cyber-logo-credit-motion.mp4`), with a deterministic vector/drawable fallback for
  * reduced-motion, headless preview rendering, or constrained decoders.

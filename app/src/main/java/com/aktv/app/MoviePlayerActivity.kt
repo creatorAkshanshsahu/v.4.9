@@ -361,6 +361,11 @@ class MoviePlayerActivity : Activity() {
         setContentView(root)
         view.setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { visibility ->
             setOverlayVisible(visibility == View.VISIBLE || failed || spinner.visibility == View.VISIBLE || actionHasFocus())
+            // A controller that appears with focus nowhere strands the next D-pad press: park it on
+            // play/pause (TV only; touch layouts have no focus ring to keep).
+            if (visibility == View.VISIBLE && television && currentFocus == null) {
+                view.findViewById<View>(androidx.media3.ui.R.id.exo_play_pause)?.requestFocus()
+            }
         })
         updateTitle()
         view.requestFocus()
@@ -1173,7 +1178,10 @@ class MoviePlayerActivity : Activity() {
                 KeyEvent.KEYCODE_MEDIA_NEXT -> { if (title.isSeries) nextEpisode(); return true }
                 KeyEvent.KEYCODE_MEDIA_REWIND -> { player?.seekBack(); view.showController(); return true }
                 KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> { player?.seekForward(); view.showController(); return true }
-                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> if (!view.isControllerFullyVisible) {
+                // Netflix transport: left/right always steps ∓10s, whether the controller is up or not,
+                // so seeking never means climbing to the ±10s buttons. A focused action button or an
+                // open dialog still owns the keys via the guards above; up/down still moves focus.
+                KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     if (event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT) player?.seekBack() else player?.seekForward()
                     view.showController(); return true
                 }

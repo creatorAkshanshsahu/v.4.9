@@ -154,6 +154,7 @@ class MainActivity : AppCompatActivity() {
     private val dp by lazy { resources.displayMetrics.density }
     /** True while the startup-failure screen owns the window: nothing else may touch a view it did not build. */
     private var crashScreen = false
+    private var launchInteraction = false
     private val CRASH_MARK = "Crash ·"
     private val ui = Handler(Looper.getMainLooper())
     private val fRegular by lazy { ResourcesCompat.getFont(this, R.font.sora_regular) ?: Typeface.DEFAULT }
@@ -708,6 +709,17 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     runCatching {
+                        val cachedJio = TgServers.cachedJioCatalogue()
+                        if (cachedJio.isNotEmpty()) {
+                            val channels = cachedJio.filter { PortalLanguages.keepsJio(it) }.map { e ->
+                                Channel(e.id, e.name, e.category.ifBlank { "Other" }, e.logo, v2 = false, jio = true)
+                            }
+                            if (channels.isNotEmpty()) runOnUiThread {
+                                if (!isFinishing && !isDestroyed && allJio.isEmpty()) applyJio(channels, fromCache = true)
+                            }
+                        }
+                    }
+                    runCatching {
                         val pAcc2 = stalkerAccount2() ?: return@runCatching
                         val (cachedList2, cachedGenres2) = StalkerProtocol.loadCache(portalCacheDir(), pAcc2.cacheKey)
                         if (cachedList2.isNotEmpty()) {
@@ -731,13 +743,16 @@ class MainActivity : AppCompatActivity() {
                 ui.postDelayed({
                     if (!isFinishing && !isDestroyed && !portalLoaded && !portalInFlight) loadPortalChannels()
                     if (!isFinishing && !isDestroyed && stalkerAccount2() != null && !portal2Loaded && !portal2InFlight) loadPortal2Channels()
+                    if (!isFinishing && !isDestroyed && !jioCatalogLoaded && !jioInFlight) loadJioChannels()
                 }, 1_200)
             }
         }.onFailure { playMsg("Something in the home screen did not start. Everything else is still usable.") }
 
         // Cyber-neon motion entrance (`streamr-cyber-logo-full-motion.mp4`), skippable by tap or any remote key.
         home.alpha = 1f; home.translationY = 0f
-        if (!safeMode && !crashScreen) {
+        val warmReturn = !IntroPolicy.shouldPlay(prefs.getLong("last_launch_ms", 0), System.currentTimeMillis())
+        prefs.edit().putLong("last_launch_ms", System.currentTimeMillis()).apply()
+        if (!safeMode && !crashScreen && !warmReturn) {
             intro.visibility = View.VISIBLE
             intro.bringToFront()
             intro.onReveal = { home.alpha = 1f; home.translationY = 0f }
@@ -745,8 +760,7 @@ class MainActivity : AppCompatActivity() {
                 intro.visibility = View.GONE
                 ui.post {
                     if (isFinishing || isDestroyed || currentFocus != null) return@post
-                    if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
-                    else segs[posOf(tab)].requestFocus()
+                    focusAfterIntro()
                 }
             }
             intro.start()
@@ -757,8 +771,7 @@ class MainActivity : AppCompatActivity() {
             intro.skip()
             ui.post {
                 if (isFinishing || currentFocus != null) return@post
-                if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
-                else segs[posOf(tab)].requestFocus()
+                focusAfterIntro()
             }
         }
         Movies.diskDir = File(filesDir, "tmdb").apply { mkdirs() }
@@ -791,6 +804,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    /** First focus lands on the shelf when it has tiles, otherwise on the tab strip. */
+    private fun focusAfterIntro() {
+        if (rowsHaveTiles()) rowsView.requestFocus()
+        else if (findViewById<View>(R.id.phoneNavScroll).visibility == View.VISIBLE) phoneSegs.getOrNull(posOf(tab))?.requestFocus()
+        else segs[posOf(tab)].requestFocus()
+    }
+
+    private fun rowsHaveTiles() = rows.any { row -> row.tiles.any { it is Tile.Ch || it is Tile.Mv } }
 
     // ---------- crash screen ----------
 
@@ -1774,6 +1796,9 @@ class MainActivity : AppCompatActivity() {
             )
         )
         add(playlistSwitcherRow())
+        if (channels.isEmpty() && portal2InFlight) {
+            add(Row("Loading…", List(8) { Tile.Skeleton }))
+        }
         if (portal2FeaturedCached.isNotEmpty()) {
             add(Row("Fusion · Featured Playlist", portal2FeaturedCached.take(30).map { Tile.Ch(it) }))
         }
@@ -2886,6 +2911,9 @@ class MainActivity : AppCompatActivity() {
             .map { Tile.Ch(it) }
         return buildList {
             add(playlistSwitcherRow())
+            if (channels.isEmpty() && jioInFlight) {
+                add(Row("Loading…", List(8) { Tile.Skeleton }))
+            }
             if (channels.isNotEmpty()) add(Row("Allinone Playlist", featuredChannels(channels).map { Tile.Ch(it) }))
             add(Row(FAV, jioFavs))
             if (jioRecent.isNotEmpty()) add(Row(RECENT, jioRecent))
@@ -3103,6 +3131,13 @@ class MainActivity : AppCompatActivity() {
         // Captions paint over finished shelves: a throw here must never reach the rows' own catch.
         runCatching { prefetchGuideForRows() }
         renderFlixChips()
+        // First paint owns initial focus: with no interaction yet, the shelf takes focus instead of
+        // leaving the viewer parked on the tab strip above an open playlist.
+        if (!launchInteraction && layer.visibility != View.VISIBLE && !searchShown &&
+            (currentFocus == null || currentFocus in segs || currentFocus in phoneSegs) && rowsHaveTiles()
+        ) {
+            rowsView.requestFocus()
+        }
     }
 
     private fun toggleFav(c: Channel) {
@@ -5457,7 +5492,10 @@ class MainActivity : AppCompatActivity() {
     private fun playerActionFocused(): Boolean = ::infoGuideAction.isInitialized &&
         listOf(infoGuideAction, infoSourceAction, infoAudioAction, infoQualityAction, infoRetryAction).any { it.isFocused && it.isShown }
 
+    override fun onUserInteraction() { super.onUserInteraction(); launchInteraction = true }
+
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        if (e.action == KeyEvent.ACTION_DOWN) launchInteraction = true
         // The failure screen is built by hand; the shelf's key handling must not run against views that were
         // never created. Back or D-pad still reaches the buttons inside it.
         if (crashScreen) return super.dispatchKeyEvent(e)
