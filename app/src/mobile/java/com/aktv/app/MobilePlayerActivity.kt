@@ -67,13 +67,27 @@ class MobilePlayerActivity : AppCompatActivity() {
                 .putExtra(EXTRA_LIVE, true))
         }
 
-        fun playVod(context: Context, name: String, streams: List<StreamRef>, subs: List<Pair<String, String>> = emptyList()) {
+        fun playVod(context: Context, name: String, frost: List<FrostSource>) {
             context.startActivity(Intent(context, MobilePlayerActivity::class.java)
                 .putExtra(EXTRA_NAME, name)
-                .putExtra(EXTRA_STREAMS, encode(streams))
-                .putExtra(EXTRA_LIVE, false)
-                .putExtra(EXTRA_SUBS, subs.joinToString("\n") { "${it.first}\t${it.second}" }.take(8_192)))
+                .putExtra(EXTRA_STREAMS, encode(frost.take(8).map {
+                    StreamRef(it.url, it.format.name.lowercase(), frostExtra(it))
+                }))
+                .putExtra(EXTRA_LIVE, false))
         }
+
+        /** A [FrostSource] flattened for the intent, rebuilt on the other side for [FrostMedia]. */
+        private fun frostExtra(source: FrostSource): String = JSONObject()
+            .put("frost", true)
+            .put("headers", JSONObject(source.headers))
+            .put("identity", source.identity.take(256))
+            .put("cred", source.credentialOrigin.take(512))
+            .put("format", source.format.name)
+            .put("subs", org.json.JSONArray(source.subtitles.take(8).map { track ->
+                JSONObject().put("u", track.url.take(2048)).put("m", track.mime.take(64))
+                    .put("l", track.label.take(64)).put("g", (track.language ?: "").take(16))
+                    .put("d", track.default)
+            })).toString()
 
         fun playFile(context: Context, label: String, path: String) {
             context.startActivity(Intent(context, MobilePlayerActivity::class.java)
@@ -192,8 +206,7 @@ class MobilePlayerActivity : AppCompatActivity() {
         Glass.density = resources.displayMetrics.density
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Glass.card(20, 0x30)
-            Glass.frost(this)
+            Glass.frostBack(this)
             setPadding(dp(14), dp(10), dp(14), dp(12))
             layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
                 leftMargin = dp(10); rightMargin = dp(10); bottomMargin = dp(10)
@@ -383,6 +396,28 @@ class MobilePlayerActivity : AppCompatActivity() {
             return ProgressiveMediaSource.Factory(FileDataSource.Factory()).createMediaSource(item)
         }
         val extra = runCatching { JSONObject(ref.extra) }.getOrElse { JSONObject() }
+        if (extra.optBoolean("frost", false)) {
+            // VOD goes through the TV shelf's own builder: per-source headers/cookies, container
+            // mime and subtitle tracks. Rebuilding FrostSource here is what keeps the two players
+            // from drifting — a source that plays on the TV plays here with identical requests.
+            val headers = LinkedHashMap<String, String>()
+            extra.optJSONObject("headers")?.let { h -> h.keys().forEach { headers[it] = h.optString(it) } }
+            val subs = ArrayList<FrostSubtitle>()
+            extra.optJSONArray("subs")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val track = arr.optJSONObject(i) ?: continue
+                    subs += FrostSubtitle(track.optString("u"), track.optString("l"),
+                        track.optString("g").ifBlank { null }, track.optString("m"), track.optBoolean("d", false))
+                }
+            }
+            val format = runCatching { VodFormat.valueOf(extra.optString("format")) }.getOrElse { VodFormat.HLS }
+            val source = FrostSource(FrostProvider.FROST, extra.optString("identity").ifBlank { ref.url },
+                ref.url, format, "", "", null, headers, subs, extra.optString("cred").ifBlank { ref.url }, "")
+            if (source.credentialOrigin == XtreamClient.XTREAM_ORIGIN_TAG) {
+                return XtreamClient.vodMediaSource(source.url, source.identity)
+            }
+            return FrostMedia.create(source)
+        }
         val headers = LinkedHashMap<String, String>()
         extra.optJSONObject("headers")?.let { h -> h.keys().forEach { headers[it] = h.optString(it) } }
         val cookie = extra.optString("cookie")
@@ -403,20 +438,6 @@ class MobilePlayerActivity : AppCompatActivity() {
                 "mp4" -> MimeTypes.VIDEO_MP4
                 else -> MimeTypes.APPLICATION_MPD
             })
-        val subs = intent.getStringExtra(EXTRA_SUBS).orEmpty().lines().mapNotNull { line ->
-            val parts = line.split("\t")
-            val url = parts.getOrNull(0).orEmpty()
-            if (url.isBlank()) null else url to parts.getOrNull(1).orEmpty().ifBlank { "en" }
-        }.take(8)
-        if (subs.isNotEmpty()) {
-            item.setSubtitleConfigurations(subs.mapIndexed { i, (url, lang) ->
-                MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
-                    .setMimeType(if (url.contains(".srt")) MimeTypes.APPLICATION_SUBRIP else MimeTypes.TEXT_VTT)
-                    .setLanguage(lang)
-                    .setSelectionFlags(if (i == 0) C.SELECTION_FLAG_DEFAULT else 0)
-                    .build()
-            })
-        }
         val drmRaw = extra.optString("drm")
         if (drmRaw.isNotBlank()) {
             val drm = runCatching { JSONObject(drmRaw) }.getOrNull()

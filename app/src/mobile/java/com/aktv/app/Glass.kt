@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 
 /**
@@ -52,6 +53,21 @@ internal object Glass {
         intArrayOf(Color.TRANSPARENT, Color.argb(0xCC, 0x0B, 0x06, 0x13))
     )
 
+    /**
+     * Frosted-glass backing for a container: a dedicated background view carrying the blur, so the
+     * container's own children (text, buttons) stay tack-sharp. The blur must never sit on the
+     * container itself — a RenderEffect blurs the whole subtree into grey mush.
+     */
+    fun frostBack(container: ViewGroup, radiusDp: Int = 20, fillAlpha: Int = 0x30) {
+        container.background = null
+        val bg = View(container.context).apply {
+            background = card(radiusDp, fillAlpha)
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+        }
+        frost(bg)
+        container.addView(bg, 0)
+    }
+
     /** Frosted blur on 12+, a no-op below — the translucency still reads as glass. */
     fun frost(view: View, radiusDp: Int = 18) {
         if (Build.VERSION.SDK_INT >= 31) {
@@ -72,5 +88,16 @@ internal object Glass {
         }
         view.clipToOutline = true
         view.outlineProvider = ViewOutlineProvider.BACKGROUND
+    }
+}
+
+/** One-line, secret-free failure reasons for empty states. Never leaks URLs, keys or cookies. */
+internal object MobileErrors {
+    fun why(error: Throwable): String {
+        val raw = (error.message.orEmpty().ifBlank { error.javaClass.simpleName })
+            .replace(Regex("https?://[^\\s]+"), "·")
+            .replace(Regex("[0-9a-fA-F]{16,}"), "·")
+            .replace(Regex("\\s+"), " ").trim().take(140)
+        return raw.ifBlank { "request failed" }
     }
 }

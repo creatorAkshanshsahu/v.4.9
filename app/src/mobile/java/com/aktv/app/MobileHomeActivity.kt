@@ -72,6 +72,7 @@ class MobileHomeActivity : AppCompatActivity() {
     private var providerTabs = listOf("All", "TG", "Jio", "TATA", "Portal", "Portal 2", "Xtream")
     private val liveCache = HashMap<String, List<LiveItem>>()
     private val liveLoading = HashSet<String>()
+    private val liveErrors = HashMap<String, String>()
     private var liveQuery = ""
     private var liveCategory = "All"
 
@@ -123,8 +124,7 @@ class MobileHomeActivity : AppCompatActivity() {
         }
         val tabRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = Glass.card(26, 0x2E)
-            Glass.frost(this)
+            Glass.frostBack(this, 26, 0x2E)
             setPadding(dp(4), dp(6), dp(4), dp(6))
         }
         this.tabRow = tabRow
@@ -346,8 +346,7 @@ class MobileHomeActivity : AppCompatActivity() {
         })
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Glass.card(20, 0x30)
-            Glass.frost(this)
+            Glass.frostBack(this, 20, 0x30)
             setPadding(dp(16), dp(12), dp(16), dp(12))
             layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
                 leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(12)
@@ -542,8 +541,14 @@ class MobileHomeActivity : AppCompatActivity() {
         wanted.forEach { name ->
             if (liveCache[name] == null && liveLoading.add(name)) {
                 io.submit {
-                    val items = loadProvider(name)
-                    liveCache[name] = items
+                    try {
+                        val items = loadProvider(name)
+                        if (items.isEmpty()) throw java.io.IOException("empty $name list")
+                        liveCache[name] = items
+                        liveErrors.remove(name)
+                    } catch (error: Exception) {
+                        liveErrors[name] = MobileErrors.why(error)
+                    }
                     liveLoading.remove(name)
                     runOnUiThread { if (tab == 1) showTab() }
                 }
@@ -565,10 +570,13 @@ class MobileHomeActivity : AppCompatActivity() {
                 listBox.addView(ProgressBar(this).apply { isIndeterminate = true })
                 listBox.addView(hint("Loading $provider channels…"))
             } else {
-                listBox.addView(hint("No $provider channels — check the connection, then retry."))
+                val reason = if (provider == "All") liveErrors.values.firstOrNull()
+                    else liveErrors[provider]
+                listBox.addView(hint("No $provider channels" +
+                    (if (reason != null) " ($reason)." else " — check the connection,") + " then retry."))
                 listBox.addView(pillButton("↻ Retry") {
-                    if (provider == "All") providerTabs.drop(1).forEach { liveCache.remove(it) }
-                    else liveCache.remove(provider)
+                    if (provider == "All") providerTabs.drop(1).forEach { liveCache.remove(it); liveErrors.remove(it) }
+                    else { liveCache.remove(provider); liveErrors.remove(provider) }
                     ensureLiveLoaded(provider)
                     showTab()
                 }.apply {
@@ -662,7 +670,7 @@ class MobileHomeActivity : AppCompatActivity() {
         return row
     }
 
-    private fun loadProvider(name: String): List<LiveItem> = runCatching {
+    private fun loadProvider(name: String): List<LiveItem> {
         when (name) {
             "TG" -> buildList {
                 MobileCatalog.parseV1(tgGet("${TgServers.SITE}/api/public/channels", "mobile-v1.json"))
@@ -670,26 +678,18 @@ class MobileHomeActivity : AppCompatActivity() {
                 MobileCatalog.parseV2(tgGet("${TgServers.SITE}/api/public/v2/channels", "mobile-v2.json"))
                     .forEach { add(LiveItem("TG", it.id, it.name, it.logo, it.category, v2 = true)) }
             }
-            "Jio" -> JioM3uResolver().catalogue().map { LiveItem("Jio", it.id, it.name, it.logo, it.category) }
+            "Jio" -> run {
+                val cached = runCatching { TgServers.cachedJioCatalogue() }.getOrElse { emptyList() }
+                val entries = if (cached.isNotEmpty()) cached else TgServers.jioCatalogue()
+                entries.filter { PortalLanguages.keepsJio(it) }.map {
+                    LiveItem("Jio", it.id, it.name, it.logo, it.category.ifBlank { "Other" })
+                }
+            }
             "TATA" -> TgServers.tataCatalogue().map { LiveItem("TATA", it.id, it.name, it.logo, it.category) }
-            "Portal" -> {
-                val portal = StalkerPortal()
-                val genres = portal.genres()
-                portal.channels().map { c ->
-                    LiveItem("Portal", c.id, c.name, c.logo,
-                        StalkerProtocol.categoryFor(genres, c.genre, c.name), cmd = c.cmd)
-                }
-            }
-            "Portal 2" -> {
-                val fusion = StalkerPortal(StalkerAccount(
-                    StalkerAccount.FUSION_DEFAULT_PORTAL, StalkerAccount.FUSION_DEFAULT_MAC,
-                    StalkerAccount.FUSION_DEFAULT_SERIAL, ""))
-                val genres = fusion.genres()
-                fusion.channels().map { c ->
-                    LiveItem("Portal 2", c.id, c.name, c.logo,
-                        StalkerProtocol.categoryFor(genres, c.genre, c.name), cmd = c.cmd)
-                }
-            }
+            "Portal" -> stalkerItems("Portal", StalkerAccount.DEFAULT, "portal_endpoint")
+            "Portal 2" -> stalkerItems("Portal 2", StalkerAccount(
+                StalkerAccount.FUSION_DEFAULT_PORTAL, StalkerAccount.FUSION_DEFAULT_MAC,
+                StalkerAccount.FUSION_DEFAULT_SERIAL, ""), "portal2_endpoint")
             "Xtream" -> {
                 val account = XtreamAccount.INBUILT
                 if (!account.isConfigured) emptyList()
@@ -699,7 +699,32 @@ class MobileHomeActivity : AppCompatActivity() {
             }
             else -> emptyList()
         }
-    }.getOrElse { emptyList() }
+    }
+
+    /** The TV shelf's portal flow: disk cache first, network with the remembered endpoint after. */
+    private fun stalkerItems(tag: String, account: StalkerAccount, endpointKey: String): List<LiveItem> {
+        val dir = java.io.File(filesDir, "portal")
+        val (cachedList, cachedGenres) = StalkerProtocol.loadCache(dir, account.cacheKey)
+        if (cachedList.isNotEmpty()) {
+            return cachedList.map { c ->
+                LiveItem(tag, c.id, c.name,
+                    if (c.logo.startsWith("/")) account.origin + c.logo else c.logo,
+                    StalkerProtocol.categoryFor(cachedGenres, c.genre, c.name), cmd = c.cmd)
+            }
+        }
+        val portal = StalkerPortal(account, knownEndpoint = prefs.getString(endpointKey, null))
+        val listed = portal.channels()
+        portal.workingEndpoint?.let { endpoint ->
+            if (prefs.getString(endpointKey, null) != endpoint) prefs.edit().putString(endpointKey, endpoint).apply()
+        }
+        val genres = runCatching { portal.genres() }.getOrElse { emptyMap() }
+        if (listed.isNotEmpty()) StalkerProtocol.saveCache(dir, account.cacheKey, listed, genres)
+        return listed.map { c ->
+            LiveItem(tag, c.id, c.name,
+                if (c.logo.startsWith("/")) account.origin + c.logo else c.logo,
+                StalkerProtocol.categoryFor(genres, c.genre, c.name), cmd = c.cmd)
+        }
+    }
 
     private fun playLive(item: LiveItem) {
         Toast.makeText(this, "Loading ${item.name}…", Toast.LENGTH_SHORT).show()
@@ -735,7 +760,7 @@ class MobileHomeActivity : AppCompatActivity() {
                     listOf(MobilePlayerActivity.StreamRef(url, MobilePlayerActivity.guessType(url))))
             }
             "Jio" -> {
-                val streams = JioM3uResolver().resolve(item.id)
+                val streams = TgServers.fetchFrom(LiveProvider.JIOM3U, item.id)
                 if (streams.isEmpty()) return null
                 MobilePlayerActivity.LiveCommand(item.name,
                     streams.map { MobilePlayerActivity.StreamRef(it.url, it.type, MobilePlayerActivity.extraOf(it)) })
@@ -987,23 +1012,29 @@ class MobileHomeActivity : AppCompatActivity() {
                     }
                     episodes.take(200).forEach { episode ->
                         val row = LinearLayout(this).apply {
-                            orientation = LinearLayout.HORIZONTAL
-                            gravity = Gravity.CENTER_VERTICAL
+                            orientation = LinearLayout.VERTICAL
                             background = Glass.card(14, 0x1E)
-                            setPadding(dp(12), dp(8), dp(4), dp(8))
+                            setPadding(dp(12), dp(8), dp(12), dp(8))
                             layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
                                 topMargin = dp(4); bottomMargin = dp(4)
                             }
                         }
-                        val label = TextView(this).apply {
+                        row.addView(TextView(this).apply {
                             text = "S${episode.season} E${episode.episode} · ${episode.name}"
                             setTextColor(Color.parseColor(Glass.TEXT)); textSize = 14f
-                            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                            typeface = Typeface.DEFAULT_BOLD
+                            maxLines = 2
+                        })
+                        val actions = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            setPadding(0, dp(6), 0, 0)
                         }
-                        row.addView(label)
-                        row.addView(pillButton("▶") { playTitle(title, episode.season, episode.episode) })
-                        row.addView(pillButton("⬇") { downloadTitle(title, episode.season, episode.episode) })
-                        row.addView(pillButton("📺") { castTitle(title, episode.season, episode.episode) })
+                        val play = pillButton("▶ Play") { playTitle(title, episode.season, episode.episode) }
+                        play.layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { rightMargin = dp(6) }
+                        val save = pillButton("⬇") { downloadTitle(title, episode.season, episode.episode) }
+                        val tv = pillButton("📺") { castTitle(title, episode.season, episode.episode) }
+                        actions.addView(play); actions.addView(save); actions.addView(tv)
+                        row.addView(actions)
                         column.addView(row)
                     }
                 }
@@ -1027,10 +1058,7 @@ class MobileHomeActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
                 Movies.saveTitle(prefs, title)
-                val subs = sources.firstOrNull()?.subtitles.orEmpty()
-                    .map { it.url to it.language.orEmpty().ifBlank { "en" } }
-                MobilePlayerActivity.playVod(this, title.name,
-                    sources.map { MobilePlayerActivity.StreamRef(it.url, it.format.name.lowercase(), gsonOf(it.headers)) }, subs)
+                MobilePlayerActivity.playVod(this, title.name, sources)
             }
         }
     }
@@ -1038,15 +1066,13 @@ class MobileHomeActivity : AppCompatActivity() {
     private fun frostSources(title: Movies.Title, season: Int, episode: Int): List<FrostSource> {
         val type = if (title.isSeries) "tv" else "movie"
         val frostTitle = FrostTitle(title.tmdb, type, season, episode)
-        val first = runCatching { FrostResolver().resolve(frostTitle) }.getOrElse { emptyList() }
-        if (first.isNotEmpty()) return first
-        return runCatching { FrostResolver().resolve(frostTitle, FrostProvider.OG) }.getOrElse { emptyList() }
-    }
-
-    private fun gsonOf(headers: Map<String, String>): String =
-        headers.entries.joinToString(",", "{", "}") { (k, v) ->
-            "\"${k.replace("\"", "")}\":\"${v.replace("\"", "")}\""
+        val resolver = FrostResolver()
+        for (provider in listOf(FrostProvider.FROST, FrostProvider.OUT, FrostProvider.OG)) {
+            val sources = runCatching { resolver.resolve(frostTitle, provider) }.getOrElse { emptyList() }
+            if (sources.isNotEmpty()) return sources
         }
+        return emptyList()
+    }
 
     private fun downloadTitle(title: Movies.Title, season: Int, episode: Int) {
         val label = if (season > 0) "${title.name} S${season}E$episode" else title.name
