@@ -66,11 +66,11 @@ jobs:
             echo "not-set" > out/starshare-prebake-status.txt
           fi
           env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
-            gradle testArm32DebugUnitTest testArm64DebugUnitTest --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
+            gradle testTvArm32DebugUnitTest testTvArm64DebugUnitTest --stacktrace --console=plain 2>&1 | tee "$RUNNER_TEMP/aktv-gradle.log"
           ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
           ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
           ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
-            gradle assembleArm32Release assembleArm64Release --no-daemon --stacktrace --console=plain 2>&1 | tee -a "$RUNNER_TEMP/aktv-gradle.log"
+            gradle assembleTvArm32Release assembleTvArm64Release assembleMobileArm32Release assembleMobileArm64Release --no-daemon --stacktrace --console=plain 2>&1 | tee -a "$RUNNER_TEMP/aktv-gradle.log"
       - name: Report deterministic tests for both APK variants
         if: always()
         run: python3 .github/scripts/report-unit-tests.py
@@ -101,7 +101,7 @@ jobs:
         # Upstream/geographic outages must not make deterministic unit tests flaky.
         continue-on-error: true
         timeout-minutes: 5
-        run: gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' --tests 'com.aktv.app.FrostLiveContractTest' -PliveTg=true -PliveFrost=true --console=plain
+        run: gradle testTvArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' --tests 'com.aktv.app.FrostLiveContractTest' -PliveTg=true -PliveFrost=true --console=plain
       - name: Report live native checks without credentials
         if: always()
         run: python3 .github/scripts/report-live-player.py
@@ -114,8 +114,10 @@ jobs:
       - name: Rename APKs
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
-          cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
+          cp app/build/outputs/apk/tvArm32/release/*.apk out/STREAMR-arm32.apk
+          cp app/build/outputs/apk/tvArm64/release/*.apk out/STREAMR-arm64.apk
+          cp app/build/outputs/apk/mobileArm32/release/*.apk out/STREAMR-mobile-arm32.apk
+          cp app/build/outputs/apk/mobileArm64/release/*.apk out/STREAMR-mobile-arm64.apk
       - name: Validate APK ZIP integrity, 32-bit/64-bit ABIs and publish checksums
         run: |
           python3 .github/scripts/verify-apk-archives.test.py
@@ -174,5 +176,5 @@ jobs:
           fi
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
-            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \
+            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/STREAMR-mobile-arm32.apk out/STREAMR-mobile-arm64.apk out/update.json out/SHA256SUMS \
             --title "STREAMR latest build" --notes-file out/update-notes.md

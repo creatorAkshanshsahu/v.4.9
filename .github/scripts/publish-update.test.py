@@ -28,7 +28,7 @@ def test_manifest_points_at_the_rolling_release_assets():
         assert manifest["versionCode"] == 63
         assert manifest["versionName"] == "4.9.46"
         assert manifest["published"] == "2026-11-04T00:00:00Z"
-        assert set(manifest["apks"]) == {"arm32", "arm64"}
+        assert set(manifest["apks"]) == {"arm32", "arm64", "mobile-arm32", "mobile-arm64"}
         for abi, filename in module.ASSETS:
             item = manifest["apks"][abi]
             assert item["url"] == f"https://github.com/owner/repo/releases/latest/download/{filename}"

@@ -3,7 +3,7 @@ from pathlib import Path
 import json
 import xml.etree.ElementTree as ET
 
-for flavor in ('Arm32', 'Arm64'):
+for flavor in ('TvArm32', 'TvArm64', 'MobileArm64'):
     files = list(Path(f'app/build/test-results/test{flavor}DebugUnitTest').glob('TEST-*.xml'))
     result = {'abi': flavor.lower(), 'tests': 0, 'passed': 0, 'skipped': 0, 'failures': 0, 'errors': 0}
     for path in files:
@@ -18,7 +18,7 @@ for flavor in ('Arm32', 'Arm64'):
         print(f'::notice title=Offline tests {flavor}::{message}')
 
 # Only static native-layout fixture metrics, never player logs or source responses.
-for path in Path('app/build/test-results/testArm32DebugUnitTest').glob('TEST-com.aktv.app.HomeChromeTest.xml'):
+for path in Path('app/build/test-results/testTvArm32DebugUnitTest').glob('TEST-com.aktv.app.HomeChromeTest.xml'):
     root = ET.parse(path).getroot()
     lines = [line for node in root.findall('system-out') for line in (node.text or '').splitlines() if line.startswith('UI_GEOMETRY ')]
     if lines:

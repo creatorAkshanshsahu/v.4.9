@@ -64,6 +64,13 @@ internal object UpdateManifest {
     fun abiTag(abis: List<String> = Build.SUPPORTED_ABIS.toList()): String =
         if (abis.any { it.contains("64") }) "arm64" else "arm32"
 
+    /**
+     * The `apks` key in update.json for this exact build: the TV app keeps `arm32`/`arm64`, the
+     * mobile edition reads `mobile-arm32`/`mobile-arm64`, so each app updates to its own file.
+     */
+    fun assetKey(abis: List<String> = Build.SUPPORTED_ABIS.toList()): String =
+        (if (BuildConfig.MOBILE) "mobile-" else "") + abiTag(abis)
+
     fun parse(body: String, abi: String = abiTag()): UpdateRelease? {
         if (body.isBlank() || body.length > 64 * 1024) return null
         val root = try { JSONObject(body) } catch (_: Exception) { return null }
@@ -114,7 +121,7 @@ internal object UpdateManifest {
         val code = Regex("Version code \\*\\*(\\d{1,9})\\*\\*").find(notes)?.groupValues?.get(1)?.toLongOrNull()
             ?.takeIf { it in 1..Int.MAX_VALUE.toLong() } ?: return null
         val name = Regex("#\\s*STREAMR\\s+([0-9A-Za-z._+-]{1,40})").find(notes)?.groupValues?.get(1).orEmpty()
-        val wanted = if (abi == "arm64") "STREAMR-arm64.apk" else "STREAMR-arm32.apk"
+        val wanted = "STREAMR-$abi.apk"
         val assets = root.optJSONArray("assets") ?: return null
         for (i in 0 until assets.length()) {
             val asset = assets.optJSONObject(i) ?: continue
@@ -199,7 +206,7 @@ internal object Updater {
 
     /** Returns a release only when it is actually newer than this installation. */
     fun check(context: Context): UpdateRelease? {
-        val abi = UpdateManifest.abiTag()
+        val abi = UpdateManifest.assetKey()
         // The release API first: it is answered from GitHub's database, whereas the download path is a
         // redirect whose CDN copy is not invalidated by a query string (GitHub strips it on the 302) and
         // can therefore keep answering with the previous release's 404 for hours after a publish. The

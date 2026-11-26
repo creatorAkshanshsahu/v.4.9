@@ -35,12 +35,12 @@ jobs:
           set -o pipefail
           # Keep the full log so a compiler error can be reported as an annotation, not only in this step.
           env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
-            gradle testArm32DebugUnitTest testArm64DebugUnitTest --console=plain 2>&1 \
+            gradle testTvArm32DebugUnitTest testTvArm64DebugUnitTest testMobileArm64DebugUnitTest --console=plain 2>&1 \
             | tee "$RUNNER_TEMP/aktv-gradle.log" | tail -40
           ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
           ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
           ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
-            gradle assembleArm32Release assembleArm64Release --no-daemon --console=plain 2>&1 \
+            gradle assembleTvArm32Release assembleTvArm64Release assembleMobileArm32Release assembleMobileArm64Release --no-daemon --console=plain 2>&1 \
             | tee -a "$RUNNER_TEMP/aktv-gradle.log" | tail -40
       - name: Report deterministic tests
         if: always()
@@ -56,14 +56,16 @@ jobs:
         run: |
           # One run, so both live reports land in the same result XML: the TG feed and the playlist the
           # one Sony section is bound to.
-          gradle testArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' --tests 'com.aktv.app.JioM3uLiveTest' -PliveTg=true -PliveJio=true --console=plain 2>&1 | tail -20 || true
+          gradle testTvArm64DebugUnitTest --tests 'com.aktv.app.TgLiveContractTest' --tests 'com.aktv.app.JioM3uLiveTest' -PliveTg=true -PliveJio=true --console=plain 2>&1 | tail -20 || true
           python3 .github/scripts/report-live-player.py
       - name: Stage APKs
         if: success()
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/arm32/release/*.apk out/STREAMR-arm32.apk
-          cp app/build/outputs/apk/arm64/release/*.apk out/STREAMR-arm64.apk
+          cp app/build/outputs/apk/tvArm32/release/*.apk out/STREAMR-arm32.apk
+          cp app/build/outputs/apk/tvArm64/release/*.apk out/STREAMR-arm64.apk
+          cp app/build/outputs/apk/mobileArm32/release/*.apk out/STREAMR-mobile-arm32.apk
+          cp app/build/outputs/apk/mobileArm64/release/*.apk out/STREAMR-mobile-arm64.apk
       - name: Validate and checksum the APKs
         if: success()
         run: |

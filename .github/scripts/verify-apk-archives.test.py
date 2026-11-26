@@ -21,6 +21,8 @@ with tempfile.TemporaryDirectory(prefix="aktv-apk-check-") as temp:
     out = Path(temp)
     apk(out / "STREAMR-arm32.apk", "armeabi-v7a")
     apk(out / "STREAMR-arm64.apk", "arm64-v8a")
+    apk(out / "STREAMR-mobile-arm32.apk", "armeabi-v7a")
+    apk(out / "STREAMR-mobile-arm64.apk", "arm64-v8a")
     result = subprocess.run([sys.executable, str(SCRIPT), str(out)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (out / "SHA256SUMS").is_file()

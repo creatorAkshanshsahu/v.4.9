@@ -26,7 +26,7 @@ android {
     namespace = "com.aktv.app"
     compileSdk = 35
     buildFeatures { buildConfig = true }
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 172; versionName = "5.4.53"
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 173; versionName = "5.4.54"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
         buildConfigField("String", "STARSHARE_SERVER", quoteBuildConfig(starshareServer))
         buildConfigField("String", "STARSHARE_USER", quoteBuildConfig(starshareUser))
@@ -60,8 +60,16 @@ android {
             it.systemProperty("aktv.live.jio", project.findProperty("liveJio")?.toString() ?: "false")
         }
     }
+    flavorDimensions += "edition"
     flavorDimensions += "abi"
-    productFlavors { create("arm32") { dimension = "abi"; ndk { abiFilters.add("armeabi-v7a") } }; create("arm64") { dimension = "abi"; ndk { abiFilters.add("arm64-v8a") } } }
+    productFlavors {
+        create("tv") { dimension = "edition"; buildConfigField("Boolean", "MOBILE", "false") }
+        create("mobile") {
+            dimension = "edition"; applicationIdSuffix = ".mobile"; buildConfigField("Boolean", "MOBILE", "true")
+        }
+        create("arm32") { dimension = "abi"; ndk { abiFilters.add("armeabi-v7a") } }
+        create("arm64") { dimension = "abi"; ndk { abiFilters.add("arm64-v8a") } }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs { useLegacyPackaging = true } }
@@ -86,6 +94,8 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("androidx.palette:palette:1.0.0")
-    "arm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
-    "arm64Implementation"("org.mozilla.geckoview:geckoview-arm64-v8a:123.0.20240213221259")
+    "tvArm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
+    "tvArm64Implementation"("org.mozilla.geckoview:geckoview-arm64-v8a:123.0.20240213221259")
+    "mobileArm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
+    "mobileArm64Implementation"("org.mozilla.geckoview:geckoview-arm64-v8a:123.0.20240213221259")
 }

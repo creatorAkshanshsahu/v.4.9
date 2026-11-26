@@ -155,6 +155,7 @@ class MainActivity : AppCompatActivity() {
     /** True while the startup-failure screen owns the window: nothing else may touch a view it did not build. */
     private var crashScreen = false
     private var launchInteraction = false
+    private var castReceiver: CastReceiver? = null
     private val CRASH_MARK = "Crash ·"
     private val ui = Handler(Looper.getMainLooper())
     private val fRegular by lazy { ResourcesCompat.getFont(this, R.font.sora_regular) ?: Typeface.DEFAULT }
@@ -813,6 +814,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun rowsHaveTiles() = rows.any { row -> row.tiles.any { it is Tile.Ch || it is Tile.Mv } }
+
+    /** "Play on TV" from the mobile app: the phone picks, this TV resolves and plays. */
+    private fun onCastCommand(command: CastProtocol.Command) {
+        if (isFinishing || isDestroyed || crashScreen) return
+        if (command.kind == CastProtocol.KIND_VOD) {
+            val title = Movies.Title("", command.tmdb, if (command.type == "tv") "series" else "movie",
+                command.label.ifBlank { "From phone" }, "", "", "", "", "", emptyList(), "")
+            val provider = command.provider.takeIf { it.isNotBlank() }
+            Toast.makeText(this, "Playing from phone · ${title.name}", Toast.LENGTH_SHORT).show()
+            MoviePlayerActivity.open(this, title, command.season, command.episode, emptyList(), provider = provider)
+            return
+        }
+        playCastLive(command.provider, command.id, command.label.ifBlank { "From phone" }, triesLeft = 40)
+    }
+
+    private fun castPool(provider: String): List<Channel> = when (provider) {
+        "tg" -> all
+        "tgv2" -> allV2
+        "jio" -> allJio
+        "tata" -> tataJio
+        "portal" -> visiblePortalChannels().ifEmpty { allPortal }
+        "portal2" -> visiblePortal2Channels().ifEmpty { allPortal2 }
+        "xtream" -> visibleXtreamChannels().ifEmpty { allXtream }
+        "m3u" -> allPlaylist
+        else -> emptyList()
+    }
+
+    private fun ensureCastPool(provider: String) {
+        when (provider) {
+            "tg", "tgv2" -> loadChannels()
+            "jio" -> loadJioChannels()
+            "tata" -> if (tataJio.isEmpty()) loadTataChannels()
+            "portal" -> if (!portalLoaded) loadPortalChannels()
+            "portal2" -> if (!portal2Loaded) loadPortal2Channels()
+            "xtream" -> if (!xtreamAccount().isConfigured) showStarShareDialog() else loadXtreamCurrentMode(force = false)
+            "m3u" -> if (!playlistLoaded) loadPlaylistChannels()
+        }
+    }
+
+    private fun playCastLive(provider: String, id: String, label: String, triesLeft: Int) {
+        if (isFinishing || isDestroyed) return
+        val pool = castPool(provider)
+        val index = pool.indexOfFirst { it.id == id || it.key.endsWith(id) }
+        if (index < 0) {
+            if (triesLeft <= 0) {
+                Toast.makeText(this, "Couldn't find $label on this TV", Toast.LENGTH_SHORT).show()
+                return
+            }
+            ensureCastPool(provider)
+            ui.postDelayed({ playCastLive(provider, id, label, triesLeft - 1) }, 500)
+            return
+        }
+        shown = pool
+        shownCat = pool[index].category
+        Toast.makeText(this, "Playing from phone · $label", Toast.LENGTH_SHORT).show()
+        play(index)
+    }
 
     // ---------- crash screen ----------
 
@@ -5659,6 +5717,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        if (!BuildConfig.MOBILE && !crashScreen && castReceiver == null) {
+            runCatching {
+                castReceiver = CastReceiver(this) { command, _ ->
+                    runOnUiThread { onCastCommand(command) }
+                }.also { it.start() }
+            }
+        }
         if (crashScreen) return
         // Everything the start does - the update check, the guide feed, a channel refresh - is optional.
         // A throw in any of it must cost that feature, never the process.
@@ -5676,6 +5741,8 @@ class MainActivity : AppCompatActivity() {
         if (System.currentTimeMillis() - lastRefresh > 3 * 60_000L) loadChannels()
     }
     override fun onStop() {
+        runCatching { castReceiver?.stop() }
+        castReceiver = null
         if (crashScreen) { super.onStop(); return }
         ui.removeCallbacks(heroRotate)
         abortChannelHealthScanForLifecycle()
