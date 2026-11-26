@@ -109,6 +109,8 @@ jobs:
         run: |
           test -s out/STREAMR-arm32.apk
           test -s out/STREAMR-arm64.apk
+          test -s out/STREAMR-mobile-arm32.apk
+          test -s out/STREAMR-mobile-arm64.apk
           python3 .github/scripts/publish-update.test.py
           python3 .github/scripts/publish-update.py out "$GITHUB_RUN_NUMBER" "$GITHUB_REPOSITORY" "$GITHUB_SHA"
       - name: Publish the rolling latest release
@@ -123,6 +125,6 @@ jobs:
           fi
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest \
-            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/update.json out/SHA256SUMS \
+            out/STREAMR-arm32.apk out/STREAMR-arm64.apk out/STREAMR-mobile-arm32.apk out/STREAMR-mobile-arm64.apk out/update.json out/SHA256SUMS \
             --target "$GITHUB_SHA" \
             --title "STREAMR latest build" --notes-file out/update-notes.md
