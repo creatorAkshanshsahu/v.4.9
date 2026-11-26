@@ -94,8 +94,6 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("androidx.palette:palette:1.0.0")
-    "tvArm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
-    "tvArm64Implementation"("org.mozilla.geckoview:geckoview-arm64-v8a:123.0.20240213221259")
-    "mobileArm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
-    "mobileArm64Implementation"("org.mozilla.geckoview:geckoview-arm64-v8a:123.0.20240213221259")
+    "arm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")
+    "arm64Implementation"("org.mozilla.geckoview:geckoview-arm64-v8a:123.0.20240213221259")
 }
