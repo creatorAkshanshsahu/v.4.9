@@ -189,11 +189,15 @@ class MobilePlayerActivity : AppCompatActivity() {
         }
         frame.addView(status)
 
+        Glass.density = resources.displayMetrics.density
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.argb(180, 10, 6, 16))
-            setPadding(dp(12), dp(8), dp(12), dp(12))
-            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+            background = Glass.card(20, 0x30)
+            Glass.frost(this)
+            setPadding(dp(14), dp(10), dp(14), dp(12))
+            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+                leftMargin = dp(10); rightMargin = dp(10); bottomMargin = dp(10)
+            }
         }
         controls = bar
         val name = TextView(this).apply {
