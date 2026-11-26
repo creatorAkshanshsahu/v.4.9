@@ -26,7 +26,9 @@ import java.net.URI
 internal object JioM3uProtocol {
 
     const val SITE = "https://allinonereborn2.online"
-    const val PLAYLIST = "$SITE/jiotv-m3u/jtv39.m3u8"
+    const val PLAYLIST = "$SITE/jiotv-m3u/jtv3929.m3u8"
+    /** The previous number, kept as a last fallback: a wrong new number must not strand the section. */
+    const val LEGACY_PLAYLIST = "$SITE/jiotv-m3u/jtv39.m3u8"
     /** The site's other list (its "tata" playlist), served by the same resolver and shown as its own section. */
     const val TATA_PLAYLIST = "$SITE/playlist/ttv6t.m3u"
     const val UA_OVERRIDE = "@allinone_reborn"
@@ -34,13 +36,14 @@ internal object JioM3uProtocol {
     val HOST: String = URI(SITE).host.orEmpty()
     const val MAX_KEY_BYTES = 64 * 1024
 
-    private val PLAYLIST_NUMBER = Regex("jtv(\\d{1,3})\\.m3u8$")
+    private val PLAYLIST_NUMBER = Regex("jtv(\\d{1,6})\\.m3u8$")
 
     /**
-     * The playlist is a numbered file the site rebuilds from time to time (`jtv33` became `jtv39` and the old
-     * one simply stopped existing). The shipped number is asked first, then its neighbours — the file moves
-     * forward far more often than back — so a rebuild does not leave the section with a 404 until the next
-     * release. [remembered] is the address that last answered on this device and is asked before all of them.
+     * The playlist is a numbered file the site rebuilds from time to time (`jtv39` became `jtv3929` and the
+     * old one simply stopped existing). The shipped number is asked first, then its neighbours — the file moves
+     * forward far more often than back — then the previous shipped number, so a rebuild does not leave the
+     * section with a 404 until the next release. [remembered] is the address that last answered on this device
+     * and is asked before all of them.
      * Only addresses on this site are ever tried; anything else is ignored rather than followed.
      */
     fun playlistCandidates(remembered: String? = null, ahead: Int = 3, behind: Int = 2): List<String> {
@@ -52,6 +55,7 @@ internal object JioM3uProtocol {
             for (step in 1..ahead) urls += "$SITE/jiotv-m3u/jtv${number + step}.m3u8"
             for (step in 1..behind) urls += "$SITE/jiotv-m3u/jtv${number - step}.m3u8"
         }
+        urls += LEGACY_PLAYLIST
         return urls.distinct()
     }
 

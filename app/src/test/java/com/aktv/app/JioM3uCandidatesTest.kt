@@ -18,10 +18,13 @@ class JioM3uCandidatesTest {
         assertEquals("a duplicate costs a request, so there is none", urls.size, urls.distinct().size)
         assertTrue("every candidate is the site's own numbered playlist",
             urls.all { JioM3uProtocol.isPlaylistAddress(it) })
+        val number = Regex("jtv(\\d+)\\.m3u8$").find(JioM3uProtocol.PLAYLIST)!!.groupValues[1].toInt()
         assertTrue("the file moves forward, so the next number is tried",
-            urls.contains("${JioM3uProtocol.SITE}/jiotv-m3u/jtv40.m3u8"))
+            urls.contains("${JioM3uProtocol.SITE}/jiotv-m3u/jtv${number + 1}.m3u8"))
         assertTrue("and one step back still covers a hasty rebuild",
-            urls.contains("${JioM3uProtocol.SITE}/jiotv-m3u/jtv38.m3u8"))
+            urls.contains("${JioM3uProtocol.SITE}/jiotv-m3u/jtv${number - 1}.m3u8"))
+        assertTrue("the previous shipped number stays a last fallback",
+            urls.contains(JioM3uProtocol.LEGACY_PLAYLIST))
     }
 
     @Test
