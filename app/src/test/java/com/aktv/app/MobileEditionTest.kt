@@ -85,6 +85,13 @@ class MobileEditionTest {
     }
 
     @Test
+    fun `episode lists survive the player intent encoding`() {
+        val episodes = listOf(MobileVod.Episode(1, 1, "Pilot"), MobileVod.Episode(1, 2, ""))
+        assertEquals(episodes, MobileVod.decodeEpisodes(MobileVod.encodeEpisodes(episodes)))
+        assertEquals(emptyList<MobileVod.Episode>(), MobileVod.decodeEpisodes("junk\n0\t-1\tx"))
+    }
+
+    @Test
     fun `abi tag follows bitness`() {
         assertEquals("arm64", UpdateManifest.abiTag(listOf("arm64-v8a", "armeabi-v7a")))
         assertEquals("arm32", UpdateManifest.abiTag(listOf("armeabi-v7a")))

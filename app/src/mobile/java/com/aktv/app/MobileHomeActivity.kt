@@ -441,6 +441,15 @@ class MobileHomeActivity : AppCompatActivity() {
                     }
                 }
                 if (trending.isNotEmpty()) addHomeRail("Top 10 movies", trending)
+                // A dead hero never sits on its spinner: say so, with a retry.
+                if (trending.isEmpty() && heroTitles.isEmpty()) heroFrame?.let { frame ->
+                    frame.removeAllViews()
+                    val retry = pillButton("Couldn't load home — tap to retry") {
+                        homeStarted = false
+                        if (tab == 0) showTab()
+                    }
+                    frame.addView(retry, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+                }
             }
         }
         // Every other rail loads on its own thread and lands when it lands.
@@ -732,7 +741,7 @@ class MobileHomeActivity : AppCompatActivity() {
                     Toast.makeText(this, "Couldn't load ${item.name}", Toast.LENGTH_SHORT).show()
                     return@runOnUiThread
                 }
-                MobilePlayerActivity.playLive(this, item.name, command)
+                MobilePlayerActivity.playLive(this, item.name, command, item.provider, item.category)
             }
         }
     }
@@ -1045,7 +1054,7 @@ class MobileHomeActivity : AppCompatActivity() {
         })
     }
 
-    private fun playTitle(title: Movies.Title, season: Int, episode: Int) {
+    private fun playTitle(title: Movies.Title, season: Int, episode: Int, preloaded: List<Movies.Episode> = emptyList()) {
         // Series-level Play starts at S01E01 — resolving a series without an episode is invalid.
         if (title.isSeries && season <= 0) {
             Toast.makeText(this, "Finding ${title.name}…", Toast.LENGTH_SHORT).show()
@@ -1057,7 +1066,7 @@ class MobileHomeActivity : AppCompatActivity() {
                         Toast.makeText(this, "Episode list didn't load for ${title.name}", Toast.LENGTH_SHORT).show()
                         return@runOnUiThread
                     }
-                    playTitle(title, first.season, first.episode)
+                    playTitle(title, first.season, first.episode, episodes)
                 }
             }
             return
@@ -1065,6 +1074,10 @@ class MobileHomeActivity : AppCompatActivity() {
         Toast.makeText(this, "Finding ${title.name}…", Toast.LENGTH_SHORT).show()
         io.submit {
             val (sources, reason) = frostSources(title, season, episode)
+            // The player needs the full episode list for its in-player episode menu.
+            val eps = if (preloaded.isNotEmpty()) preloaded
+                else if (title.isSeries) runCatching { Movies.details(title.type, title.tmdb).second }.getOrElse { emptyList() }
+                else emptyList()
             runOnUiThread {
                 if (sources.isEmpty()) {
                     Toast.makeText(this, "No playable source for ${title.name}" +
@@ -1072,37 +1085,16 @@ class MobileHomeActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
                 Movies.saveTitle(prefs, title)
-                MobilePlayerActivity.playVod(this, title.name, sources)
+                val type = if (title.isSeries) "tv" else "movie"
+                MobilePlayerActivity.playVod(this, title.name, sources, title.tmdb, type, season, episode,
+                    MobileVod.encodeEpisodes(eps.map { MobileVod.Episode(it.season, it.episode, it.name) }))
             }
         }
     }
 
-    /**
-     * The TV shelf's VOD chain: FROST, OUT, OG in order, each retried fresh once when it errors
-     * instead of answering. Returns the sources plus the first failure reason, so an empty shelf
-     * can say WHY (blocked host, timeout…) instead of shrugging.
-     */
-    private fun frostSources(title: Movies.Title, season: Int, episode: Int): Pair<List<FrostSource>, String?> {
-        val type = if (title.isSeries) "tv" else "movie"
-        val frostTitle = try {
-            FrostTitle(title.tmdb, type, season, episode)
-        } catch (_: IllegalArgumentException) {
-            return emptyList<FrostSource>() to "pick an episode first"
-        }
-        val resolver = FrostResolver()
-        var reason: String? = null
-        for (provider in listOf(FrostProvider.FROST, FrostProvider.OUT, FrostProvider.OG)) {
-            val attempt = runCatching { resolver.resolve(frostTitle, provider) }
-            val sources = attempt.getOrNull().orEmpty()
-            if (sources.isNotEmpty()) return sources to null
-            val fresh = attempt.exceptionOrNull()?.let {
-                if (reason == null) reason = MobileErrors.why(it)
-                runCatching { resolver.resolve(frostTitle, provider, fresh = true) }.getOrNull().orEmpty()
-            }.orEmpty()
-            if (fresh.isNotEmpty()) return fresh to null
-        }
-        return emptyList<FrostSource>() to reason
-    }
+    /** One shared VOD chain for the home and the player overlay — see [MobileVod]. */
+    private fun frostSources(title: Movies.Title, season: Int, episode: Int): Pair<List<FrostSource>, String?> =
+        MobileVod.resolve(if (title.isSeries) "tv" else "movie", title.tmdb, season, episode)
 
     private fun downloadTitle(title: Movies.Title, season: Int, episode: Int) {
         if (title.isSeries && season <= 0) {
