@@ -60,9 +60,10 @@ internal object CastSender {
         }
 
         fun start() {
-            if (browsing || manager == null) return
+            if (browsing) return
+            val nsd = manager ?: return
             runCatching {
-                manager.discoverServices(CastProtocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+                nsd.discoverServices(CastProtocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
                 browsing = true
             }
         }

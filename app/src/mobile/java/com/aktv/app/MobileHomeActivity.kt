@@ -435,7 +435,7 @@ class MobileHomeActivity : AppCompatActivity() {
     }
 
     /** Resolve one channel to playable streams on a worker thread. Null when it stays dark. */
-    internal fun liveCommand(item: LiveItem): MobilePlayerActivity.LiveCommand? = runCatching {
+    private fun liveCommand(item: LiveItem): MobilePlayerActivity.LiveCommand? = runCatching {
         when (item.provider) {
             "Xtream" -> {
                 val account = XtreamAccount.INBUILT
