@@ -124,11 +124,10 @@ class MobileHomeActivity : AppCompatActivity() {
         }
         val tabRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            Glass.frostBack(this, 26, 0x2E)
             setPadding(dp(4), dp(6), dp(4), dp(6))
         }
         this.tabRow = tabRow
-        tabShell.addView(tabRow, FrameLayout.LayoutParams(-1, -2))
+        tabShell.addView(Glass.frostPanel(tabRow, 26, 0x2E), FrameLayout.LayoutParams(-1, -2))
         root.addView(tabShell, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
         buildTabs()
@@ -346,11 +345,7 @@ class MobileHomeActivity : AppCompatActivity() {
         })
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            Glass.frostBack(this, 20, 0x30)
             setPadding(dp(16), dp(12), dp(16), dp(12))
-            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
-                leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(12)
-            }
         }
         info.addView(TextView(this).apply {
             text = title.name
@@ -376,7 +371,9 @@ class MobileHomeActivity : AppCompatActivity() {
         val more = pillButton("ⓘ") { openDetail(title) }
         buttons.addView(play); buttons.addView(save); buttons.addView(tv); buttons.addView(more)
         info.addView(buttons)
-        frame.addView(info)
+        frame.addView(Glass.frostPanel(info, 20, 0x30), FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(12)
+        })
         if (heroTitles.size > 1) {
             val dots = TextView(this).apply {
                 text = heroTitles.indices.joinToString(" ") { if (it == heroIndex) "●" else "○" }
@@ -1165,20 +1162,77 @@ class MobileHomeActivity : AppCompatActivity() {
         }
     }
 
+    private fun onWifi(): Boolean = runCatching {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+        val network = manager?.activeNetwork ?: return false
+        manager.getNetworkCapabilities(network)
+            ?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) == true
+    }.getOrDefault(false)
+
     private fun pickTv(onTv: (CastSender.Tv) -> Unit) {
         if (tvs.isEmpty()) {
-            Toast.makeText(this, "Looking for your TV… keep STREAMR open on it, then try again.", Toast.LENGTH_LONG).show()
+            // Discovery is LAN multicast: on mobile data the TV is unreachable by physics, not by
+            // bug. Say so, and offer the direct-IP escape hatch that needs no discovery at all.
+            if (!onWifi()) {
+                Toast.makeText(this, "Join the same Wi-Fi as your TV first — mobile data can't see it.",
+                    Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(this, "Looking for your TV… keep STREAMR open on it, then try again.",
+                    Toast.LENGTH_LONG).show()
+            }
             discovery?.refresh()
+            AlertDialog.Builder(this)
+                .setTitle("TV not found")
+                .setMessage("Make sure this phone is on the same Wi-Fi as the TV with STREAMR open. " +
+                    "Or type the TV's IP — no discovery needed.")
+                .setPositiveButton("Enter TV IP") { _, _ -> manualTvIp(onTv) }
+                .setNegativeButton("Cancel", null)
+                .show()
             return
         }
         if (tvs.size == 1) {
             onTv(tvs.first())
             return
         }
+        val names = tvs.map { it.name }.toTypedArray() + "Enter TV IP…"
         AlertDialog.Builder(this)
             .setTitle("Play on TV")
-            .setItems(tvs.map { it.name }.toTypedArray()) { _, which -> onTv(tvs[which]) }
+            .setItems(names) { _, which ->
+                if (which < tvs.size) onTv(tvs[which]) else manualTvIp(onTv)
+            }
             .setNegativeButton("Cancel", null)
             .show()
     }
+
+    private fun manualTvIp(onTv: (CastSender.Tv) -> Unit) {
+        val input = EditText(this).apply {
+            hint = "e.g. 192.168.1.20"
+            setHintTextColor(Color.parseColor("#5E5A6B"))
+            setTextColor(Color.parseColor(Glass.TEXT))
+            setText(prefs.getString("tv_ip", ""))
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("TV address")
+            .setView(input.apply {
+                layoutParams = ViewGroup.LayoutParams(-1, -2).apply {}
+            }.let { frameOf(it) })
+            .setPositiveButton("Connect") { _, _ ->
+                val ip = input.text.toString().trim()
+                if (!ip.matches(Regex("[0-9A-Za-z.:]{3,64}"))) {
+                    Toast.makeText(this, "That doesn't look like an address.", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                prefs.edit().putString("tv_ip", ip).apply()
+                onTv(CastSender.Tv("TV", ip, CastProtocol.PORT))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun frameOf(view: View): View =
+        FrameLayout(this).apply {
+            setPadding(dp(18), dp(8), dp(18), 0)
+            addView(view)
+        }
 }

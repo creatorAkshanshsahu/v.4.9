@@ -1,10 +1,22 @@
+<!-- Poster focus: the same core-plus-halo treatment at poster radius. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
-        <shape android:shape="rectangle">
-            <solid android:color="#00000000"/>
-            <corners android:radius="8dp"/>
-            <stroke android:width="2dp" android:color="@color/brand_light"/>
-        </shape>
+        <layer-list>
+            <item android:left="2dp" android:top="2dp" android:right="2dp" android:bottom="2dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="#00000000"/>
+                    <corners android:radius="6dp"/>
+                    <stroke android:width="2dp" android:color="@color/brand_light"/>
+                </shape>
+            </item>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="#00000000"/>
+                    <corners android:radius="8dp"/>
+                    <stroke android:width="5dp" android:color="#5900ECF7"/>
+                </shape>
+            </item>
+        </layer-list>
     </item>
     <item>
         <shape android:shape="rectangle">

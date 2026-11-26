@@ -77,6 +77,14 @@ class MobileEditionTest {
     }
 
     @Test
+    fun `empty-state reasons hide urls and hex tokens`() {
+        val reason = MobileErrors.why(java.io.IOException("HTTP 403 https://cdn.example.com/k/abcdef0123456789"))
+        assertFalse(reason.contains("https://"))
+        assertFalse(reason.contains("abcdef0123456789"))
+        assertTrue(reason.contains("403"))
+    }
+
+    @Test
     fun `abi tag follows bitness`() {
         assertEquals("arm64", UpdateManifest.abiTag(listOf("arm64-v8a", "armeabi-v7a")))
         assertEquals("arm32", UpdateManifest.abiTag(listOf("armeabi-v7a")))

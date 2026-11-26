@@ -79,6 +79,7 @@ class MobilePlayerActivity : AppCompatActivity() {
         /** A [FrostSource] flattened for the intent, rebuilt on the other side for [FrostMedia]. */
         private fun frostExtra(source: FrostSource): String = JSONObject()
             .put("frost", true)
+            .put("label", source.label.take(120))
             .put("headers", JSONObject(source.headers))
             .put("identity", source.identity.take(256))
             .put("cred", source.credentialOrigin.take(512))
@@ -128,7 +129,7 @@ class MobilePlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
     private var playerView: PlayerView? = null
-    private var controls: LinearLayout? = null
+    private var controls: View? = null
     private var seekBar: SeekBar? = null
     private var timeLabel: TextView? = null
     private var status: TextView? = null
@@ -151,6 +152,17 @@ class MobilePlayerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Video starts full-stage: landscape with the system bars tucked away, like every
+        // streaming app. The ⛶ button still drops back to portrait for one-handed browsing.
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        runCatching {
+            supportActionBar?.hide()
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+        }
         titleName = intent.getStringExtra(EXTRA_NAME).orEmpty().ifBlank { "STREAMR" }
         isLive = intent.getBooleanExtra(EXTRA_LIVE, false)
         val file = intent.getStringExtra(EXTRA_FILE).orEmpty()
@@ -206,13 +218,8 @@ class MobilePlayerActivity : AppCompatActivity() {
         Glass.density = resources.displayMetrics.density
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            Glass.frostBack(this)
             setPadding(dp(14), dp(10), dp(14), dp(12))
-            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
-                leftMargin = dp(10); rightMargin = dp(10); bottomMargin = dp(10)
-            }
         }
-        controls = bar
         val name = TextView(this).apply {
             text = titleName
             setTextColor(Color.parseColor("#F5F0E6")); textSize = 14f
@@ -245,11 +252,16 @@ class MobilePlayerActivity : AppCompatActivity() {
         buttons.addView(ctrl("−10s") { player?.seekTo((player?.currentPosition ?: 0) - 10_000) })
         buttons.addView(playPause)
         buttons.addView(ctrl("+10s") { player?.seekTo((player?.currentPosition ?: 0) + 10_000) })
-        buttons.addView(ctrl("⇄") { hopSource() })
+        buttons.addView(ctrl("⇄") { pickSource() })
+        buttons.addView(ctrl("💬") { pickTracks() })
         buttons.addView(ctrl("⛶") { toggleRotate() })
         buttons.addView(ctrl("⧉") { enterPip() })
         bar.addView(buttons)
-        frame.addView(bar)
+        val panel = Glass.frostPanel(bar)
+        controls = panel
+        frame.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = dp(10); rightMargin = dp(10); bottomMargin = dp(10)
+        })
         setContentView(frame)
     }
 
@@ -288,14 +300,44 @@ class MobilePlayerActivity : AppCompatActivity() {
             else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
 
-    private fun hopSource() {
+    private fun sourceLabels(): Array<String> = streams.mapIndexed { i, ref ->
+        val vod = runCatching { JSONObject(ref.extra).optString("label") }.getOrNull().orEmpty()
+        (if (vod.isNotBlank()) vod else "Source ${i + 1} · ${ref.type.uppercase()}") +
+            if (i == streamIndex) " ✓" else ""
+    }.toTypedArray()
+
+    private fun pickSource() {
         if (streams.size < 2) {
             Toast.makeText(this, "Only one source.", Toast.LENGTH_SHORT).show()
             return
         }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Play from")
+            .setItems(sourceLabels()) { _, which ->
+                if (which != streamIndex) {
+                    streamIndex = which
+                    failedStreams = 0
+                    bindSource(keepPosition = true)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun pickTracks() {
+        val player = player ?: return
+        runCatching {
+            androidx.media3.ui.TrackSelectionDialogBuilder(this, "Audio & subtitles", player, C.TRACK_TYPE_TEXT)
+                .build().show()
+        }.onFailure {
+            Toast.makeText(this, "No alternate tracks on this source.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun hopSource() {
+        if (streams.size < 2) return
         streamIndex = (streamIndex + 1) % streams.size
         failedStreams = 0
-        Toast.makeText(this, "Source ${streamIndex + 1} of ${streams.size}", Toast.LENGTH_SHORT).show()
         bindSource(keepPosition = true)
     }
 

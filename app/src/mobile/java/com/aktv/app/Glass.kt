@@ -29,13 +29,19 @@ internal object Glass {
         intArrayOf(Color.parseColor(BG0), Color.parseColor(BG1))
     )
 
-    /** A frosted card: translucent white fill, hairline light edge, rounded corners. */
+    /**
+     * A frosted card: a top-lit vertical gloss, hairline light edge, rounded corners. The gradient
+     * is the gloss — light falling off toward the bottom the way glass does.
+     */
     fun card(radiusDp: Int = 18, fillAlpha: Int = 0x24): GradientDrawable =
-        GradientDrawable().apply {
+        GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(
+            Color.argb((fillAlpha + 18).coerceAtMost(0xFF), 0xFF, 0xFF, 0xFF),
+            Color.argb(fillAlpha, 0xF2, 0xE8, 0xFF),
+            Color.argb((fillAlpha * 3 / 4).coerceAtLeast(0), 0xC9, 0xB8, 0xFF)
+        )).apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = dp(radiusDp).toFloat()
-            setColor(Color.argb(fillAlpha, 0xFF, 0xFF, 0xFF))
-            setStroke(dp(1).coerceAtLeast(1), Color.argb(0x40, 0xFF, 0xFF, 0xFF))
+            setStroke(dp(1).coerceAtLeast(1), Color.argb(0x55, 0xFF, 0xFF, 0xFF))
         }
 
     /** A filled accent pill, rose-to-violet, for primary actions. */
@@ -54,18 +60,21 @@ internal object Glass {
     )
 
     /**
-     * Frosted-glass backing for a container: a dedicated background view carrying the blur, so the
-     * container's own children (text, buttons) stay tack-sharp. The blur must never sit on the
-     * container itself — a RenderEffect blurs the whole subtree into grey mush.
+     * A frosted-glass panel: a FrameLayout holding a blurred backing plus the content. The backing
+     * must live in a frame — a match-parent view inside a LinearLayout eats the whole axis and
+     * pushes the real children off-screen, which is how the hero info card vanished.
      */
-    fun frostBack(container: ViewGroup, radiusDp: Int = 20, fillAlpha: Int = 0x30) {
-        container.background = null
-        val bg = View(container.context).apply {
+    fun frostPanel(content: View, radiusDp: Int = 20, fillAlpha: Int = 0x30): android.widget.FrameLayout {
+        val panel = android.widget.FrameLayout(content.context)
+        val bg = View(content.context).apply {
             background = card(radiusDp, fillAlpha)
             layoutParams = ViewGroup.LayoutParams(-1, -1)
         }
         frost(bg)
-        container.addView(bg, 0)
+        panel.addView(bg)
+        content.layoutParams = ViewGroup.LayoutParams(-1, -2)
+        panel.addView(content)
+        return panel
     }
 
     /** Frosted blur on 12+, a no-op below — the translucency still reads as glass. */

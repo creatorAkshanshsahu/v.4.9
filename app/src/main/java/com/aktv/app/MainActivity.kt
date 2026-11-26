@@ -4474,6 +4474,7 @@ class MainActivity : AppCompatActivity() {
             trace.state(when (state) { Player.STATE_READY -> "READY"; Player.STATE_BUFFERING -> "BUFFERING"; Player.STATE_ENDED -> "ENDED"; else -> "IDLE" })
             when (state) {
                 Player.STATE_READY -> {
+                    edgeResyncs = 0
                     if (renderedFrame || !expectsVideo()) {
                         spinner.visibility = View.GONE; playMsg(null)
                         if (!expectsVideo()) { startupBudget.rendered(); providerWindow.rendered() }
@@ -4487,7 +4488,10 @@ class MainActivity : AppCompatActivity() {
                 // CONNECTING banner alone.
                 Player.STATE_BUFFERING -> if (renderedFrame) { spinner.visibility = View.VISIBLE; playMsg("Buffering…") }
                 else spinner.visibility = View.GONE
-                Player.STATE_ENDED -> { trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded")); advanceNative("The live stream ended") }
+                Player.STATE_ENDED -> {
+                    trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded"))
+                    if (!tryEdgeResync(owner)) advanceNative("The live stream ended")
+                }
             }
         }
         override fun onRenderedFirstFrame() {
@@ -4514,6 +4518,7 @@ class MainActivity : AppCompatActivity() {
         override fun onPlayerError(error: PlaybackException) {
             if (player !== owner) return
             trace.failed(PlaybackProblems.from(error, error.errorCode))
+            if (edgeResyncable(error) && tryEdgeResync(owner)) return
             val code = httpCode(error)
             val provider = LiveProviders.displayName(
                 if (nativeSources.getOrNull(serverIdx)?.requestOrigin == JjtvResolver.SITE) LiveProvider.JJTV
@@ -4535,6 +4540,35 @@ class MainActivity : AppCompatActivity() {
                 retryCompatibleDecoder(message)) return
             advanceNative(message)
         }
+    }
+
+    private var edgeResyncIdx = -1
+    private var edgeResyncs = 0
+
+    /** Window slips and IO blips rejoin the live edge; HTTP refusals, DRM and decoder faults hop. */
+    private fun edgeResyncable(error: PlaybackException): Boolean = error.errorCode ==
+        PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
+        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+        error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+        error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED
+
+    /**
+     * Rejoins the live edge on the SAME source instead of hopping servers. Hopping on every blip
+     * is what made live playback visibly stop and rebuffer; two failed rejoins still fall through
+     * to the normal recovery chain.
+     */
+    private fun tryEdgeResync(owner: ExoPlayer): Boolean {
+        if (player !== owner) return false
+        if (serverIdx != edgeResyncIdx) { edgeResyncIdx = serverIdx; edgeResyncs = 0 }
+        if (edgeResyncs >= 2) return false
+        edgeResyncs++
+        playMsg("Rejoining live…")
+        runCatching {
+            owner.seekToDefaultPosition()
+            owner.prepare()
+            owner.playWhenReady = true
+        }
+        return true
     }
 
     private fun httpCode(error: Throwable): Int? {
