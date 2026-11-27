@@ -39,7 +39,8 @@ jobs:
           STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
         run: |
           set -o pipefail
-          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then login="Included (inbuilt default)"; else login="Not set (secrets missing)"; fi
+          # Same wording as build.yml's release notes: without secrets the app uses XtreamClient's built-in account.
+          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then login="Included (Secret override)"; else login="Included (Inbuilt default)"; fi
           echo "STARSHARE_LOGIN=$login" >> "$GITHUB_ENV"
           ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
           ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
