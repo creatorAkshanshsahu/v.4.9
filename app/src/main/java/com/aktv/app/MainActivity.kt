@@ -3251,6 +3251,8 @@ class MainActivity : AppCompatActivity() {
                     ui.postDelayed({ if (!isFinishing && !isDestroyed && tab == 9 && !xtreamAccount().isConfigured) showStarShareDialog() }, 240)
                 }
             }
+            // Cyberpunk: the section title glitches as the new tab lands.
+            findViewById<TextView>(R.id.sectionTitle)?.let { title -> title.post { Motion.glitch(title, 420) } }
             val dir = if (t > tab) 1 else -1
             ui.removeCallbacks(heroRotate)
             tab = t; layoutHero(); stopPreview()

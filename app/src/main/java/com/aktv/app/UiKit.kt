@@ -539,8 +539,8 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
     var paused = false
         set(value) { field = value; updateRunning() }
     private var tintAnim: ValueAnimator? = null
-    /** Synthwave perspective grid rolling toward the viewer under the aurora (off by default to keep TVs smooth). */
-    var grid = false
+    /** Synthwave perspective grid rolling toward the viewer under the aurora. */
+    var grid = true
         set(value) { field = value; invalidate() }
     var gridColor = Accent.BRAND
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -550,7 +550,8 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         override fun doFrame(frameTimeNanos: Long) {
             if (!running) return
             val now = SystemClock.uptimeMillis()
-            if (now - lastFrame >= 40) { lastFrame = now; invalidate() }
+            // ~11 fps (90 ms): smooth for slow aurora/grid drift without starving 2 GB TV GPUs.
+            if (now - lastFrame >= 90) { lastFrame = now; invalidate() }
             Choreographer.getInstance().postFrameCallback(this)
         }
     }
@@ -597,7 +598,7 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         if (grid) drawGrid(canvas, t)
     }
 
-    /** ~40 lines per frame: a vanishing-point grid in the lower half, plus a slow cyan scan sweep. */
+    /** Lightweight perspective grid in the lower half, plus a slow scan sweep (zero per-frame allocations). */
     private fun drawGrid(canvas: Canvas, t: Float) {
         val w = width.toFloat(); val h = height.toFloat()
         val d = resources.displayMetrics.density
@@ -607,10 +608,10 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         val strength = (0.45f + intensity) * 0.5f
         // Rays toward the vanishing point.
         gridPaint.color = Ui.alpha(gridColor, 0.20f * strength)
-        for (i in -14..14) canvas.drawLine(cx + i * w * 0.010f, horizon, cx + i * w * 0.115f, h, gridPaint)
+        for (i in -10..10) canvas.drawLine(cx + i * w * 0.014f, horizon, cx + i * w * 0.16f, h, gridPaint)
         // Cross lines advancing toward the viewer; brighter as they come near.
         val phase = (t * 0.35f) % 1f
-        for (k in 0 until 18) {
+        for (k in 0 until 12) {
             val z = 1f + k - phase
             if (z <= 0.2f) continue
             val y = horizon + (h - horizon) / z
@@ -622,15 +623,13 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         // Horizon glow line.
         gridPaint.color = Ui.alpha(Accent.BRAND_LIGHT, 0.30f * strength)
         canvas.drawLine(0f, horizon, w, horizon, gridPaint)
-        // Scan sweep: a faint band rolls down the screen every eight seconds.
+        // Scan sweep: a faint band rolls down the screen every eight seconds without allocating a shader.
         val sy = ((t % 8f) / 8f) * h
-        sweepPaint.shader = LinearGradient(0f, sy - 40f * d, 0f, sy, intArrayOf(Color.TRANSPARENT, Ui.alpha(Accent.BRAND_LIGHT, 0.06f)),
-            null, Shader.TileMode.CLAMP)
-        canvas.drawRect(0f, sy - 40f * d, w, sy, sweepPaint)
+        sweepPaint.color = Ui.alpha(Accent.BRAND_LIGHT, 0.035f)
+        canvas.drawRect(0f, sy - 28f * d, w, sy, sweepPaint)
     }
 
-    /** Continuous 25fps background drift is off by default so low-RAM TVs stay smooth. */
-    var animate = false
+    var animate = true
         set(value) { field = value; updateRunning() }
 
     private fun updateRunning() {
