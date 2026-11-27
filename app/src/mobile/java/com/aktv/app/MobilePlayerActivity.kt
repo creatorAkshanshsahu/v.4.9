@@ -269,7 +269,7 @@ class MobilePlayerActivity : AppCompatActivity() {
         }
         val back = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
             text = "‹"; textSize = 26f
-            setTextColor(Color.parseColor("#F5F0E6"))
+            setTextColor(Color.parseColor(Glass.TEXT))
             setOnClickListener { finish() }
         }
         topInner.addView(back, LinearLayout.LayoutParams(-2, -2))
@@ -279,7 +279,7 @@ class MobilePlayerActivity : AppCompatActivity() {
         }
         titleCol.addView(TextView(this).apply {
             text = titleName
-            setTextColor(Color.parseColor("#F5F0E6")); textSize = 16f
+            setTextColor(Color.parseColor(Glass.TEXT)); textSize = 16f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
         })
@@ -291,7 +291,7 @@ class MobilePlayerActivity : AppCompatActivity() {
         topInner.addView(titleCol, LinearLayout.LayoutParams(0, -2, 1f))
         srcChip = Button(this, null, android.R.attr.borderlessButtonStyle).apply {
             textSize = 13f
-            setTextColor(Color.parseColor("#E8B4B8"))
+            setTextColor(Color.parseColor(Glass.ACCENT))
             background = Glass.card(16, 0x30)
             setOnClickListener { pickSource() }
         }
@@ -308,7 +308,7 @@ class MobilePlayerActivity : AppCompatActivity() {
             setPadding(dp(20), dp(16), dp(20), dp(16))
         }
         errorMsg = TextView(this).apply {
-            setTextColor(Color.parseColor("#F5F0E6")); textSize = 15f
+            setTextColor(Color.parseColor(Glass.TEXT)); textSize = 15f
             gravity = Gravity.CENTER
         }
         errInner.addView(errorMsg)
@@ -383,7 +383,7 @@ class MobilePlayerActivity : AppCompatActivity() {
         Button(this, null, android.R.attr.borderlessButtonStyle).apply {
             this.text = text
             textSize = 15f
-            setTextColor(Color.parseColor("#E8B4B8"))
+            setTextColor(Color.parseColor(Glass.ACCENT))
             setOnClickListener { onTap() }
         }
 

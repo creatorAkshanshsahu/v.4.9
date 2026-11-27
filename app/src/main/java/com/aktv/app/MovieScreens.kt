@@ -103,6 +103,9 @@ class DetailActivity : Activity() {
         val root = FrameLayout(this); root.setBackgroundColor(Accent.ABYSS)
         // Gradients fade to the ground colour itself, so a palette change cannot leave an old navy behind.
         val gr = Color.red(Accent.ABYSS); val gg = Color.green(Accent.ABYSS); val gb = Color.blue(Accent.ABYSS)
+        // Living STREAMR aurora under the page, so it breathes before (or without) a backdrop.
+        root.addView(AuroraView(this).apply { intensity = 0.5f; tintTo(if (title.isSeries) Accent.BRAND_LIGHT else Accent.BRAND) },
+            FrameLayout.LayoutParams(-1, -1))
         backdrop = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0f }
         root.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
         root.addView(View(this).apply {
@@ -180,36 +183,30 @@ class DetailActivity : Activity() {
         root.addView(toolbar, FrameLayout.LayoutParams(-1, (76 * dp).toInt(), Gravity.TOP))
         setContentView(root)
 
-        body.alpha = 0f; body.translationX = -30 * dp
-        body.animate().alpha(1f).translationX(0f).setDuration(420).setInterpolator(DecelerateInterpolator(2f)).start()
+        // Staggered entrance: each block rises in a beat after the one above it.
+        for (i in 0 until body.childCount) Motion.rise(body.getChildAt(i), delay = 60L + i * 55L, distanceDp = 20f, duration = 480)
         playBtn.requestFocus()
     }
 
     private fun button(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
         text = label; textSize = 14f; typeface = fSemi; gravity = Gravity.CENTER; isFocusable = true; isClickable = true
         setPadding((28 * dp).toInt(), (13 * dp).toInt(), (28 * dp).toInt(), (13 * dp).toInt())
-        val bg = GradientDrawable().apply { cornerRadius = 12 * dp }
-        background = bg
-        val hairline = (1 * dp).toInt().coerceAtLeast(1)
-        val focusRing = (2 * dp).toInt().coerceAtLeast(2)
-        val style = { f: Boolean ->
-            bg.setColor(if (primary) Accent.BRAND else if (f) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
-            bg.setStroke(
-                if (f) focusRing else if (primary) 0 else hairline,
-                if (f) Accent.SIGNAL else 0x4000ECF7
-            )
-            setTextColor(Accent.TEXT)
-            animate().scaleX(if (f) 1.05f else 1f).scaleY(if (f) 1.05f else 1f).translationZ(if (f) 8 * dp else 0f)
-                .setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
-        }
-        style(false)
-        setOnFocusChangeListener { _, f -> style(f) }
+        // Aurora Glass: Play is magenta glass, the rest clear glass; focus melts into the aurora with a light sweep.
+        background = if (primary) GlassDrawable(dp, 14f, glassTint = Accent.BRAND, restAlpha = 0.92f, activeAlpha = 0.92f,
+            focusAlpha = 0.92f, focusFill = Accent.aurora()) else GlassKit.pill(dp, 14f, rest = 0.14f)
+        setTextColor(Accent.TEXT)
+        setOnFocusChangeListener { _, f -> Motion.focus(this, f, scale = 1.06f, liftDp = 10f, glow = Accent.BRAND_LIGHT) }
         setOnClickListener { onClick() }
     }
 
     private fun bind() {
         if (title.background.isNotEmpty()) backdrop.load(title.background) {
-            crossfade(true); listener(onSuccess = { _, _ -> backdrop.animate().alpha(1f).setDuration(600).start() })
+            crossfade(true); listener(onSuccess = { _, _ ->
+                // Fade in, then a slow Ken Burns settle so the still feels alive.
+                if (backdrop.alpha < 1f && Motion.enabled) { backdrop.scaleX = 1.08f; backdrop.scaleY = 1.08f }
+                backdrop.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(if (Motion.enabled) 9000 else 0)
+                    .setInterpolator(DecelerateInterpolator(1.4f)).start()
+            })
         }
         nameTv.text = title.name
         if (title.logo.isNotEmpty()) logo.load(title.logo) {
@@ -234,7 +231,7 @@ class DetailActivity : Activity() {
     private fun metadataChip(label: String) = TextView(this).apply {
         text = label; textSize = 10f; typeface = fSemi; setTextColor(Accent.DIM)
         setPadding((11 * dp).toInt(), (6 * dp).toInt(), (11 * dp).toInt(), (6 * dp).toInt())
-        background = Ui.pill(dp, 0x552D4652, 24f)
+        background = GlassDrawable(dp, 100f, restAlpha = 0.12f, shine = false)
     }
 
     private fun lastEpisode(): Pair<Int, Int> {
@@ -250,10 +247,10 @@ class DetailActivity : Activity() {
             val chip = TextView(this).apply {
                 text = "Season $s"; textSize = 14f; typeface = fSemi; isFocusable = true; isClickable = true
                 setPadding((20 * dp).toInt(), (9 * dp).toInt(), (20 * dp).toInt(), (9 * dp).toInt())
-                val bg = GradientDrawable().apply { cornerRadius = 40 * dp }; background = bg
+                background = GlassKit.pill(dp, rest = 0.08f)
                 val style = { f: Boolean ->
-                    bg.setColor(when { f -> Color.WHITE; s == season -> Color.argb(70, 255, 255, 255); else -> Color.argb(22, 255, 255, 255) })
-                    setTextColor(if (f) Accent.ABYSS else if (s == season) Accent.TEXT else Accent.DIM)
+                    isActivated = s == season
+                    setTextColor(if (f || s == season) Accent.TEXT else Accent.DIM)
                 }
                 style(false); tag = style
                 setOnFocusChangeListener { _, f -> style(f); if (f && season != s) { season = s; refreshSeasonChips(); showSeason() } }
@@ -281,7 +278,8 @@ class DetailActivity : Activity() {
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
             val card = LinearLayout(p.context).apply { orientation = LinearLayout.VERTICAL; isFocusable = true; isClickable = true }
             val img = ImageView(p.context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; id = 1; clipToOutline = true
-                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(Color.argb(30, 255, 255, 255)) } }
+                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(Color.argb(30, 255, 255, 255)) }
+                foreground = getDrawable(R.drawable.flix_ring); isDuplicateParentStateEnabled = true }
             card.addView(img, LinearLayout.LayoutParams((240 * dp).toInt(), (135 * dp).toInt()))
             val n = tv(14f, Accent.TEXT, fSemi).apply { id = 2; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
             card.addView(n, LinearLayout.LayoutParams((240 * dp).toInt(), -2).apply { topMargin = (10 * dp).toInt() })
@@ -295,8 +293,7 @@ class DetailActivity : Activity() {
             val img = v.findViewById<ImageView>(1); img.setImageDrawable(null); if (e.thumb.isNotEmpty()) img.load(e.thumb) { crossfade(true) }
             v.findViewById<TextView>(2).text = "${e.episode}. ${e.name}"
             v.setOnFocusChangeListener { x, f ->
-                x.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).translationZ(if (f) 20 * dp else 0f)
-                    .setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
+                Motion.focus(x, f, scale = 1.07f, liftDp = 16f, glow = Accent.BRAND_LIGHT)
                 (x as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(if (f) Accent.TEXT else Accent.DIM) }
                 if (f) {
                     selectedEpisode = e.season to e.episode
@@ -387,7 +384,6 @@ class DetailActivity : Activity() {
         Movies.saveTitle(prefs, title)
         if (title.isSeries) prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
         MoviePlayerActivity.open(this, title, s, e, episodes, provider = providerOverride)
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -396,6 +392,6 @@ class DetailActivity : Activity() {
     }
 
     override fun onResume() { super.onResume(); if (::playBtn.isInitialized) bind() }
-    override fun onBackPressed() { finish(); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out) }
+    override fun onBackPressed() { finish() }
     override fun onDestroy() { io.shutdownNow(); ui.removeCallbacksAndMessages(null); super.onDestroy() }
 }

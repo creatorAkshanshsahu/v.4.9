@@ -102,7 +102,11 @@ class PlayerPreviewTest {
             }
             layer.findViewById<View>(R.id.infoHint).visibility = View.GONE
             val primary = layer.findViewById<TextView>(R.id.infoGuideAction)
-            primary.background = Ui.pill(1f, Accent.BRAND, 12f)
+            // The real player_action selector, shown in its focused (aurora) state.
+            primary.background = primary.context.getDrawable(R.drawable.player_action)!!.apply {
+                state = intArrayOf(android.R.attr.state_focused); jumpToCurrentState()
+            }
+            primary.scaleX = 1.07f; primary.scaleY = 1.07f
             primary.setTextColor(Accent.TEXT)
             capture(root, 960, 540, file)
         } finally { controller.destroy() }

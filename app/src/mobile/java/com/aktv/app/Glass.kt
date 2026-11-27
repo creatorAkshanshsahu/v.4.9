@@ -11,17 +11,17 @@ import android.view.View.MeasureSpec
 import android.widget.FrameLayout
 
 /**
- * The mobile edition's liquid-glass design language: deep violet ground, frosted translucent
- * cards with hairline light borders, rose/violet accent pills. On Android 12+ the frosted
+ * The mobile edition's liquid-glass design language, in STREAMR's Aurora Glass palette: deep
+ * violet-ink ground, frosted translucent cards with hairline light borders, magenta -> violet -> cyan accents. On Android 12+ the frosted
  * surfaces get a real background blur; below that the translucency alone carries the look.
  */
 internal object Glass {
-    const val BG0 = "#0B0613"
-    const val BG1 = "#1A0E2A"
-    const val TEXT = "#F5F0E6"
-    const val SUB = "#A7A2B8"
-    const val ACCENT = "#E8B4B8"
-    const val VIOLET = "#8E7BFF"
+    const val BG0 = "#060410"
+    const val BG1 = "#120A2A"
+    const val TEXT = "#F5F5F5"
+    const val SUB = "#98AFD5"
+    const val ACCENT = "#00ECF7"
+    const val VIOLET = "#7B5CFF"
 
     var density = 2f
 
@@ -47,10 +47,9 @@ internal object Glass {
             setStroke(dp(1).coerceAtLeast(1), Color.argb(0x55, 0xFF, 0xFF, 0xFF))
         }
 
-    /** A filled accent pill, rose-to-violet, for primary actions. */
+    /** A filled accent pill in the STREAMR aurora (magenta -> violet -> cyan), for primary actions. */
     fun accentPill(): GradientDrawable = GradientDrawable(
-        GradientDrawable.Orientation.LEFT_RIGHT,
-        intArrayOf(Color.parseColor(VIOLET), Color.parseColor("#C86B8A"))
+        GradientDrawable.Orientation.LEFT_RIGHT, Accent.aurora()
     ).apply {
         shape = GradientDrawable.RECTANGLE
         cornerRadius = dp(24).toFloat()
@@ -59,7 +58,7 @@ internal object Glass {
     /** Bottom-up scrim so text sits readable over artwork. */
     fun scrim(): GradientDrawable = GradientDrawable(
         GradientDrawable.Orientation.TOP_BOTTOM,
-        intArrayOf(Color.TRANSPARENT, Color.argb(0xCC, 0x0B, 0x06, 0x13))
+        intArrayOf(Color.TRANSPARENT, Color.argb(0xCC, 0x06, 0x04, 0x10))
     )
 
     /**

@@ -1,0 +1,94 @@
+name: STREAMR Aurora APK
+# Builds installable STREAMR APKs for the Aurora Glass integration branch. Runs ONLY for
+# streamr-aurora-integration-5.4.61 (and manually from the Actions tab); never for main.
+# It uploads workflow artifacts only: it never publishes or edits a GitHub release, so the
+# app's in-app "Update" (which reads the `latest` release) is unaffected.
+on:
+  push:
+    branches: [ streamr-aurora-integration-5.4.61 ]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: streamr-aurora-apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    if: github.ref == 'refs/heads/streamr-aurora-integration-5.4.61'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v3
+        with: { gradle-version: 8.9 }
+      - name: Verify the working playback contracts are untouched
+        run: python3 .github/scripts/check-playback-baseline.py
+      - name: Unit tests (TV and mobile editions)
+        # Tests run without the StarShare login, exactly like the main build.
+        run: |
+          env -u STARSHARE_SERVER -u STARSHARE_USER -u STARSHARE_PASS \
+            gradle testTvArm64DebugUnitTest testMobileArm64DebugUnitTest --console=plain --stacktrace
+      - name: Build release APKs (signed with the STREAMR update key)
+        # Release builds use keystore/aktv-update.p12, the same key as every published STREAMR build,
+        # so these APKs install over an existing STREAMR without uninstalling (versionCode stays 180).
+        env:
+          STARSHARE_SERVER: ${{ secrets.STARSHARE_SERVER || secrets.STARSHARE_URL }}
+          STARSHARE_USER: ${{ secrets.STARSHARE_USER || secrets.STARSHARE_USERNAME }}
+          STARSHARE_PASS: ${{ secrets.STARSHARE_PASS || secrets.STARSHARE_PASSWORD }}
+        run: |
+          set -o pipefail
+          if [ -n "$STARSHARE_USER" ] && [ -n "$STARSHARE_PASS" ]; then login="Included (inbuilt default)"; else login="Not set (secrets missing)"; fi
+          echo "STARSHARE_LOGIN=$login" >> "$GITHUB_ENV"
+          ORG_GRADLE_PROJECT_starshareServer="$STARSHARE_SERVER" \
+          ORG_GRADLE_PROJECT_starshareUser="$STARSHARE_USER" \
+          ORG_GRADLE_PROJECT_starsharePass="$STARSHARE_PASS" \
+            gradle assembleTvArm64Release assembleTvArm32Release assembleMobileArm64Release assembleMobileArm32Release \
+              --no-daemon --console=plain --stacktrace
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/tvArm64/release/*.apk out/STREAMR-Aurora-arm64.apk
+          cp app/build/outputs/apk/tvArm32/release/*.apk out/STREAMR-Aurora-arm32.apk
+          cp app/build/outputs/apk/mobileArm64/release/*.apk out/STREAMR-Aurora-mobile-arm64.apk
+          cp app/build/outputs/apk/mobileArm32/release/*.apk out/STREAMR-Aurora-mobile-arm32.apk
+          (cd out && sha256sum *.apk > SHA256SUMS)
+          ls -la out
+          {
+            echo "### STREAMR 5.4.61-aurora (code 180)"
+            echo "| APK | For |"
+            echo "| --- | --- |"
+            echo "| STREAMR-Aurora-arm64.apk | Android TV / Google TV / Fire TV (most devices) |"
+            echo "| STREAMR-Aurora-arm32.apk | Older or low-memory TV boxes |"
+            echo "| STREAMR-Aurora-mobile-arm64.apk | Phones and tablets (most devices) |"
+            echo "| STREAMR-Aurora-mobile-arm32.apk | Older phones |"
+            echo
+            echo "Inbuilt StarShare login: **$STARSHARE_LOGIN**"
+            echo
+            echo "Download the **STREAMR-Aurora-APK** artifact at the bottom of this run's page."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: STREAMR-Aurora-APK
+          path: |
+            out/*.apk
+            out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload UI previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: STREAMR-Aurora-previews
+          path: app/build/reports/ui-preview/*.webp
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: STREAMR-Aurora-test-report
+          path: app/build/reports/tests/
+          if-no-files-found: ignore

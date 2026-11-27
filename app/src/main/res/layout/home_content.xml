@@ -1,6 +1,9 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent"
     android:background="@drawable/flix_screen">
+    <!-- Living aurora in STREAMR neon: slow colour fields drifting behind the glass container. -->
+    <com.aktv.app.AuroraView android:id="@+id/aurora" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:alpha="0.85" android:importantForAccessibility="no"/>
     <!-- The whole screen sits in one big rounded glass container, as in the reference design. -->
     <LinearLayout android:id="@+id/flixContainer" android:layout_width="match_parent" android:layout_height="match_parent"
         android:layout_marginStart="20dp" android:layout_marginEnd="20dp" android:layout_marginTop="12dp" android:layout_marginBottom="12dp"

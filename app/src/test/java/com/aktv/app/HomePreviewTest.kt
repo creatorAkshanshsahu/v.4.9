@@ -81,7 +81,10 @@ class HomePreviewTest {
             for (id in listOf(R.id.segLive, R.id.segJio, R.id.segPortal, R.id.segFusion, R.id.segSites, R.id.segSeries, R.id.segOg, R.id.segStar)) {
                 val selected = id == if (movies) R.id.segSites else R.id.segLive
                 val view = root.findViewById<TextView>(id)
-                view.background = Ui.pill(1f, Color.TRANSPARENT, 18f)
+                // Production tab look: the open section is lit glass with white type.
+                view.background = Ui.pill(1f, if (selected) Ui.alpha(Color.WHITE, 0.14f) else Color.TRANSPARENT, 18f).apply {
+                    if (selected) setStroke(1, Ui.alpha(Color.WHITE, 0.22f))
+                }
                 view.setTextColor(if (selected) Color.WHITE else FlixColors.TAB_IDLE)
             }
             for (id in listOf(R.id.phoneLive, R.id.phoneJio, R.id.phonePortal, R.id.phoneFusion, R.id.phoneMovies, R.id.phoneSeries, R.id.phoneOg, R.id.phoneStar, R.id.phoneSearch)) {
@@ -97,7 +100,9 @@ class HomePreviewTest {
                 strip.addView(TextView(activity).apply {
                     text = label; textSize = if (compact) 11f else 12.5f; setTextColor(if (selected) FlixColors.INK else Color.WHITE)
                     setPadding(16, 9, 16, 9)
-                    background = Ui.pill(1f, if (selected) FlixColors.CHIP_SELECTED else FlixColors.CHIP, 14f)
+                    // Same glass as renderFlixChips(): frosted white when selected, clear glass otherwise.
+                    background = if (selected) GlassDrawable(1f, 14f, restAlpha = 0.92f, activeAlpha = 0.92f, focusAlpha = 0.92f, focusFill = Accent.aurora())
+                        else GlassKit.pill(1f, 14f, rest = 0.10f)
                 }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = 10 })
             }
             // The Live tab's real shape: the live row, the trending strip, then the recent row. The Sony
@@ -156,11 +161,13 @@ class HomePreviewTest {
                                 }
                             } else {
                                 val cardColor = colors[index % 5]
-                                tile.background = GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                                    intArrayOf(Ui.mix(FlixColors.CARD, cardColor, 0.22f), FlixColors.CARD)).apply {
-                                    cornerRadius = 20f
-                                    if (position == 0 && index == 0) setStroke(3, FlixColors.PILL)
+                                // Same tinted glass card the TileAdapter uses; the first tile shows its focused look.
+                                val focusedTile = position == 0 && index == 0
+                                tile.background = GlassKit.card(1f, 20f, cardColor).apply {
+                                    restAlpha = 0.18f; activeAlpha = 0.24f; focusAlpha = 0.32f
+                                    accent = Ui.mix(cardColor, Accent.BRAND_LIGHT, 0.5f); setLook(focusedTile)
                                 }
+                                if (focusedTile) { tile.scaleX = 1.06f; tile.scaleY = 1.06f }
                                 tile.clipToOutline = true
                                 tile.findViewById<ImageView>(R.id.logo).visibility = View.GONE
                                 tile.findViewById<TextView>(R.id.mono).apply {
@@ -168,19 +175,21 @@ class HomePreviewTest {
                                     text = initials(listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")[index % 5])
                                     setTextColor(Color.WHITE)
                                     textSize = if (compact) 18f else 23f
-                                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Ui.mix(cardColor, Color.WHITE, 0.16f)) }
+                                    background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Ui.mix(cardColor, Color.WHITE, 0.22f), Accent.partner(cardColor))).apply {
+                                        shape = GradientDrawable.OVAL; setStroke(1, Ui.alpha(Color.WHITE, 0.40f))
+                                    }
                                 }
                                 tile.findViewById<TextView>(R.id.name).apply {
                                     text = listOf("News Now", "Match Centre", "Fresh Stories", "Family Time", "Hits")[index % 5]
-                                    setTextColor(FlixColors.INK)
+                                    setTextColor(Accent.TEXT)
                                 }
                                 tile.findViewById<TextView>(R.id.nowCaption).apply {
                                     text = listOf("Global headlines", "Match centre", "Fresh stories", "Family time", "Now playing")[index % 5]
-                                    setTextColor(FlixColors.MUTED)
+                                    setTextColor(Accent.DIM)
                                 }
                                 tile.findViewById<TextView>(R.id.liveBadge).apply {
                                     text = "WORKING"; setTextColor(Color.WHITE)
-                                    background = GradientDrawable().apply { cornerRadius = 7f; setColor(0xFF16885D.toInt()) }
+                                    background = GradientDrawable().apply { cornerRadius = 100f; setColor(Accent.OK) }
                                 }
                                 tile.findViewById<View>(R.id.healthDot).backgroundTintList = ColorStateList.valueOf(FlixColors.RED)
                             }

@@ -399,26 +399,14 @@ class MoviePlayerActivity : Activity() {
             isFocusable = true; isClickable = true; setPadding(px(22), px(12), px(22), px(12))
             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = px(12) }
             typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
-            fun style(focused: Boolean) {
-                // Cyber control row (watch.$id.tsx): rounded-xl cyber glass, electric cyan ring on focus;
-                // "Next episode" uses primary cyber magenta (`bg-primary`).
-                val primary = label.startsWith("Next")
-                val hairline = px(1).coerceAtLeast(1)
-                background = GradientDrawable().apply {
-                    cornerRadius = px(12).toFloat()
-                    setColor(if (primary) Accent.BRAND else if (focused) 0xCC1B1630.toInt() else 0xB3100A23.toInt())
-                    setStroke(
-                        if (focused) px(2) else if (primary) 0 else hairline,
-                        if (focused) Accent.SIGNAL else 0x4000ECF7
-                    )
-                }
-                setTextColor(Accent.TEXT)
-                elevation = if (focused) px(9).toFloat() else 0f
-            }
-            style(false)
+            // Aurora Glass control row: frosted ink glass, or magenta glass for "Next episode";
+            // focus melts into the STREAMR aurora with a white rim, a light sweep and a springy lift.
+            val primary = label.startsWith("Next")
+            background = GlassDrawable(dp, 14f, glassTint = if (primary) Accent.BRAND else Accent.SURFACE_HI,
+                restAlpha = if (primary) 0.92f else 0.72f, activeAlpha = if (primary) 0.92f else 0.72f,
+                focusAlpha = if (primary) 0.92f else 0.72f, focusFill = Accent.aurora())
             setOnFocusChangeListener { v, focused ->
-                style(focused)
-                v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f).setDuration(150).start()
+                Motion.focus(v, focused, scale = 1.07f, liftDp = 9f, glow = Accent.BRAND_LIGHT)
                 if (focused) {
                     setOverlayVisible(true)
                     if (!failed) view.showController()

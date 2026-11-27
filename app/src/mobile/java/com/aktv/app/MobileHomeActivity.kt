@@ -105,16 +105,15 @@ class MobileHomeActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             background = Glass.ground()
         }
-        val header = TextView(this).apply {
-            text = "STREAMR"
-            setTextColor(Color.parseColor(Glass.TEXT))
-            textSize = 24f
-            typeface = Typeface.DEFAULT_BOLD
-            letterSpacing = 0.12f
-            gravity = Gravity.CENTER
-            setPadding(0, dp(14), 0, dp(4))
+        // The real STREAMR wordmark (with the "by Akshansh Sahu" credit), not plain text.
+        val header = android.widget.ImageView(this).apply {
+            setImageResource(R.drawable.streamr_logo_full)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            adjustViewBounds = true
+            contentDescription = "STREAMR"
+            setPadding(dp(48), dp(14), dp(48), dp(6))
         }
-        root.addView(header, LinearLayout.LayoutParams(-1, -2))
+        root.addView(header, LinearLayout.LayoutParams(-1, dp(68)))
         val body = ScrollView(this).apply { isFillViewport = true }
         this.body = body
         root.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -129,7 +128,14 @@ class MobileHomeActivity : AppCompatActivity() {
         this.tabRow = tabRow
         tabShell.addView(Glass.frostPanel(tabRow, 26, 0x2E), FrameLayout.LayoutParams(-1, -2))
         root.addView(tabShell, LinearLayout.LayoutParams(-1, -2))
-        setContentView(root)
+        // Living STREAMR aurora behind the whole mobile home; the glass cards sit over it.
+        root.background = null
+        setContentView(FrameLayout(this).apply {
+            background = Glass.ground()
+            addView(AuroraView(this@MobileHomeActivity).apply { intensity = 0.45f; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO },
+                FrameLayout.LayoutParams(-1, -1))
+            addView(root, FrameLayout.LayoutParams(-1, -1))
+        })
         buildTabs()
         showTab()
         runCatching {
@@ -178,6 +184,7 @@ class MobileHomeActivity : AppCompatActivity() {
                 setTextColor(Color.parseColor(if (selected) Glass.ACCENT else Glass.SUB))
                 typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 background = if (selected) Glass.card(20, 0x30) else null
+                stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(context, R.animator.glass_lift)
             }
             button.setOnClickListener { if (tab != i) { tab = i; buildTabs(); showTab() } }
             row.addView(button, LinearLayout.LayoutParams(0, -2, 1f))
@@ -221,8 +228,9 @@ class MobileHomeActivity : AppCompatActivity() {
             this.text = text
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(if (primary) Color.parseColor("#1A0E2A") else Color.parseColor(Glass.ACCENT))
+            setTextColor(if (primary) Color.WHITE else Color.parseColor(Glass.ACCENT))
             background = if (primary) Glass.accentPill() else Glass.card(24, 0x2E)
+            stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(context, R.animator.glass_lift)
             setPadding(dp(20), dp(10), dp(20), dp(10))
             setOnClickListener { onTap() }
         }
@@ -232,8 +240,9 @@ class MobileHomeActivity : AppCompatActivity() {
             this.text = text
             textSize = 13f
             typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            setTextColor(Color.parseColor(if (selected) "#1A0E2A" else Glass.TEXT))
+            setTextColor(Color.parseColor(if (selected) "#FFFFFF" else Glass.TEXT))
             background = if (selected) Glass.accentPill() else Glass.card(24, 0x22)
+            stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(context, R.animator.glass_lift)
             setPadding(dp(16), dp(8), dp(16), dp(8))
             setOnClickListener { onTap() }
         }

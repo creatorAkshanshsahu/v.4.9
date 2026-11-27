@@ -1,6 +1,7 @@
 <resources>
     <style name="Theme.AKTV" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowBackground">@color/abyss</item>
+        <item name="android:windowAnimationStyle">@style/STREAMR.WindowMotion</item>
         <item name="android:fontFamily">@font/manrope</item>
         <item name="colorAccent">@color/brand</item>
         <item name="android:statusBarColor">@color/abyss</item>
@@ -8,8 +9,15 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="alertDialogTheme">@style/Theme.AKTV.Dialog</item>
     </style>
+    <!-- Activities glide in with a soft fade-and-settle instead of the default slide. -->
+    <style name="STREAMR.WindowMotion" parent="@android:style/Animation.Activity">
+        <item name="android:activityOpenEnterAnimation">@anim/glass_enter</item>
+        <item name="android:activityOpenExitAnimation">@anim/glass_hold</item>
+        <item name="android:activityCloseEnterAnimation">@anim/glass_hold</item>
+        <item name="android:activityCloseExitAnimation">@anim/glass_exit</item>
+    </style>
     <style name="Theme.AKTV.Dialog" parent="Theme.AppCompat.Dialog.Alert">
-        <item name="android:windowBackground">@color/night</item>
+        <item name="android:windowBackground">@drawable/dialog_glass</item>
         <item name="android:colorBackground">@color/night</item>
         <item name="android:textColorPrimary">@color/text</item>
         <item name="android:textColorSecondary">@color/text_dim</item>
@@ -51,5 +59,6 @@
         <item name="android:textSize">10sp</item><item name="android:fontFamily">@font/sora_semibold</item>
         <item name="android:textColor">@color/text</item><item name="android:maxLines">1</item>
         <item name="android:background">@drawable/player_action</item>
+        <item name="android:stateListAnimator">@animator/glass_lift</item>
     </style>
 </resources>
