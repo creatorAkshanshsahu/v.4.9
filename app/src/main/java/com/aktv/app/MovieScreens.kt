@@ -86,16 +86,19 @@ class DetailActivity : Activity() {
 
     private fun build() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val root = FrameLayout(this); root.setBackgroundColor(Accent.ABYSS)
+        val root = FrameLayout(this); root.setBackgroundColor(Accent.INK)
+        // Living aurora under everything, so the page is alive before (or without) a backdrop.
+        root.addView(AuroraView(this).apply { intensity = 0.65f; tintTo(if (title.isSeries) Accent.IRIS else Accent.ROSE) },
+            FrameLayout.LayoutParams(-1, -1))
         backdrop = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; alpha = 0f }
         root.addView(backdrop, FrameLayout.LayoutParams(-1, -1))
         root.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(Color.argb(250, 5, 6, 13), Color.argb(200, 5, 6, 13), Color.argb(40, 5, 6, 13)))
+                intArrayOf(Color.argb(240, 6, 8, 18), Color.argb(170, 6, 8, 18), Color.argb(20, 6, 8, 18)))
         }, FrameLayout.LayoutParams(-1, -1))
         root.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
-                intArrayOf(Color.argb(255, 5, 6, 13), Color.argb(0, 5, 6, 13)))
+                intArrayOf(Color.argb(255, 6, 8, 18), Color.argb(0, 6, 8, 18)))
         }, FrameLayout.LayoutParams(-1, (300 * dp).toInt(), Gravity.BOTTOM))
 
         val compact = resources.configuration.screenHeightDp < 420
@@ -121,7 +124,7 @@ class DetailActivity : Activity() {
         buttons.addView(playBtn)
         trailerBtn = button("▶  Trailer", primary = false) { showTrailerPanel() }
         buttons.addView(trailerBtn, LinearLayout.LayoutParams(-2, -2).apply { marginStart = (12 * dp).toInt() })
-        loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(pageAccent) }
+        loading = ProgressBar(this).apply { indeterminateTintList = android.content.res.ColorStateList.valueOf(Accent.ROSE_BRIGHT) }
         buttons.addView(loading, LinearLayout.LayoutParams((28 * dp).toInt(), (28 * dp).toInt()).apply { marginStart = (16 * dp).toInt() })
         body.addView(buttons, LinearLayout.LayoutParams(-2, -2).apply { topMargin = (26 * dp).toInt() })
 
@@ -141,42 +144,44 @@ class DetailActivity : Activity() {
         val toolbar = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL; setPadding(inset.toInt(), (8 * dp).toInt(), inset.toInt(), (8 * dp).toInt())
             clipChildren = false; clipToPadding = false; minimumHeight = (72 * dp).toInt()
-            setBackgroundColor(0xFF080B14.toInt())
-            elevation = (8 * dp)
+            // Glass header: content scrolls beneath a soft ink fade instead of a solid bar.
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.argb(235, 6, 8, 18), Color.argb(0, 6, 8, 18)))
         }
         toolbar.addView(button("‹  Back", false) { finish() })
         toolbar.addView(ImageView(this).apply {
-            setImageResource(R.drawable.aktv_logo_cinematic); scaleType = ImageView.ScaleType.FIT_CENTER
+            setImageResource(R.drawable.aktv_logo); scaleType = ImageView.ScaleType.FIT_CENTER
             contentDescription = "AK TV"
-        }, LinearLayout.LayoutParams((64 * dp).toInt(), (52 * dp).toInt()).apply { marginStart = (18 * dp).toInt() })
+        }, LinearLayout.LayoutParams((40 * dp).toInt(), (40 * dp).toInt()).apply { marginStart = (18 * dp).toInt() })
         root.addView(toolbar, FrameLayout.LayoutParams(-1, (76 * dp).toInt(), Gravity.TOP))
         setContentView(root)
 
-        body.alpha = 0f; body.translationX = -30 * dp
-        body.animate().alpha(1f).translationX(0f).setDuration(420).setInterpolator(DecelerateInterpolator(2f)).start()
+        // Staggered entrance: each block of the page rises in a beat after the one above it.
+        for (i in 0 until body.childCount) Motion.rise(body.getChildAt(i), delay = 60L + i * 55L, distanceDp = 20f, duration = 480)
         playBtn.requestFocus()
     }
 
+    /** Primary = frosted white glass, secondary = clear glass; both melt into the aurora on focus. */
     private fun button(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 17f; typeface = fSemi; gravity = Gravity.CENTER; isFocusable = true; isClickable = true
-        setPadding((34 * dp).toInt(), (13 * dp).toInt(), (38 * dp).toInt(), (13 * dp).toInt())
-        val bg = GradientDrawable().apply { cornerRadius = 12 * dp }
-        background = bg
+        text = label; textSize = 16f; typeface = fSemi; gravity = Gravity.CENTER; isFocusable = true; isClickable = true
+        setPadding((30 * dp).toInt(), (13 * dp).toInt(), (34 * dp).toInt(), (13 * dp).toInt())
+        background = if (primary) Glass.primary(dp) else Glass.pill(dp, rest = 0.14f)
         val style = { f: Boolean ->
-            bg.setColor(if (f && !primary) Color.WHITE else if (primary) Color.WHITE else 0x991A2936.toInt())
-            bg.setStroke(if (f) (2 * dp).toInt().coerceAtLeast(1) else 0, pageAccent)
-            setTextColor(if (primary || f) Accent.ABYSS else Accent.TEXT)
-            animate().scaleX(if (f) 1.045f else 1f).scaleY(if (f) 1.045f else 1f).translationZ(if (f) 8 * dp else 0f)
-                .setDuration(200).setInterpolator(DecelerateInterpolator(2f)).start()
+            setTextColor(if (primary && !f) Accent.INK else Accent.TEXT)
+            Motion.focus(this, f, scale = 1.07f, liftDp = 10f, glow = pageAccent)
         }
-        style(false)
+        setTextColor(if (primary) Accent.INK else Accent.TEXT)
         setOnFocusChangeListener { _, f -> style(f) }
         setOnClickListener { onClick() }
     }
 
     private fun bind() {
         if (title.background.isNotEmpty()) backdrop.load(title.background) {
-            crossfade(true); listener(onSuccess = { _, _ -> backdrop.animate().alpha(1f).setDuration(600).start() })
+            crossfade(true); listener(onSuccess = { _, _ ->
+                // Fade in, then a slow Ken Burns settle so the still feels alive.
+                if (backdrop.alpha < 1f && Motion.enabled) { backdrop.scaleX = 1.08f; backdrop.scaleY = 1.08f }
+                backdrop.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(if (Motion.enabled) 9000 else 0)
+                    .setInterpolator(DecelerateInterpolator(1.4f)).start()
+            })
         }
         nameTv.text = title.name
         if (title.logo.isNotEmpty()) logo.load(title.logo) {
@@ -202,9 +207,9 @@ class DetailActivity : Activity() {
     }
 
     private fun metadataChip(label: String) = TextView(this).apply {
-        text = label; textSize = 10f; typeface = fSemi; setTextColor(Accent.DIM)
-        setPadding((11 * dp).toInt(), (6 * dp).toInt(), (11 * dp).toInt(), (6 * dp).toInt())
-        background = Ui.pill(dp, 0x552D4652, 24f)
+        text = label; textSize = 10f; typeface = fSemi; setTextColor(Accent.TEXT)
+        setPadding((12 * dp).toInt(), (6 * dp).toInt(), (12 * dp).toInt(), (6 * dp).toInt())
+        background = GlassDrawable(dp, 100f, restAlpha = 0.12f, shine = false)
     }
 
     /** In-app VOD-only YouTube embed. A missing key, non-embeddable video or WebView error is explicit. */
@@ -275,10 +280,10 @@ class DetailActivity : Activity() {
             val chip = TextView(this).apply {
                 text = "Season $s"; textSize = 14f; typeface = fSemi; isFocusable = true; isClickable = true
                 setPadding((20 * dp).toInt(), (9 * dp).toInt(), (20 * dp).toInt(), (9 * dp).toInt())
-                val bg = GradientDrawable().apply { cornerRadius = 40 * dp }; background = bg
+                background = Glass.pill(dp, rest = 0.08f)
                 val style = { f: Boolean ->
-                    bg.setColor(when { f -> Color.WHITE; s == season -> Color.argb(70, 255, 255, 255); else -> Color.argb(22, 255, 255, 255) })
-                    setTextColor(if (f) Accent.ABYSS else if (s == season) Accent.TEXT else Accent.DIM)
+                    isActivated = s == season
+                    setTextColor(if (f || s == season) Accent.TEXT else Accent.DIM)
                 }
                 style(false); tag = style
                 setOnFocusChangeListener { _, f -> style(f); if (f && season != s) { season = s; refreshSeasonChips(); showSeason() } }
@@ -306,7 +311,8 @@ class DetailActivity : Activity() {
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
             val card = LinearLayout(p.context).apply { orientation = LinearLayout.VERTICAL; isFocusable = true; isClickable = true }
             val img = ImageView(p.context).apply { scaleType = ImageView.ScaleType.CENTER_CROP; id = 1; clipToOutline = true
-                background = GradientDrawable().apply { cornerRadius = 12 * dp; setColor(Color.argb(30, 255, 255, 255)) } }
+                background = GradientDrawable().apply { cornerRadius = 16 * dp; setColor(Color.argb(26, 255, 255, 255)) }
+                foreground = getDrawable(R.drawable.focus_ring); isDuplicateParentStateEnabled = true }
             card.addView(img, LinearLayout.LayoutParams((240 * dp).toInt(), (135 * dp).toInt()))
             val n = tv(14f, Accent.TEXT, fSemi).apply { id = 2; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
             card.addView(n, LinearLayout.LayoutParams((240 * dp).toInt(), -2).apply { topMargin = (10 * dp).toInt() })
@@ -320,8 +326,7 @@ class DetailActivity : Activity() {
             val img = v.findViewById<ImageView>(1); img.setImageDrawable(null); if (e.thumb.isNotEmpty()) img.load(e.thumb) { crossfade(true) }
             v.findViewById<TextView>(2).text = "${e.episode}. ${e.name}"
             v.setOnFocusChangeListener { x, f ->
-                x.animate().scaleX(if (f) 1.08f else 1f).scaleY(if (f) 1.08f else 1f).translationZ(if (f) 20 * dp else 0f)
-                    .setDuration(220).setInterpolator(DecelerateInterpolator(2f)).start()
+                Motion.focus(x, f, scale = 1.07f, liftDp = 16f, glow = pageAccent)
                 (x as LinearLayout).getChildAt(1).let { (it as TextView).setTextColor(if (f) Accent.TEXT else Accent.DIM) }
                 if (f) {
                     selectedEpisode = e.season to e.episode
@@ -353,7 +358,6 @@ class DetailActivity : Activity() {
         Movies.saveTitle(prefs, title)
         if (title.isSeries) prefs.edit().putInt("last_season_${title.imdb}", s).putInt("last_ep_${title.imdb}", e).apply()
         MoviePlayerActivity.open(this, title, s, e, episodes)
-        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -362,6 +366,6 @@ class DetailActivity : Activity() {
     }
 
     override fun onResume() { super.onResume(); if (::playBtn.isInitialized) bind() }
-    override fun onBackPressed() { finish(); overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out) }
+    override fun onBackPressed() { finish() }
     override fun onDestroy() { trailerDialog?.dismiss(); io.shutdownNow(); ui.removeCallbacksAndMessages(null); super.onDestroy() }
 }

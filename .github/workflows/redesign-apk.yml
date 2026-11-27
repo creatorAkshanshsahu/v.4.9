@@ -1,0 +1,69 @@
+name: Redesign APK
+# Builds installable debug APKs for the liquid-glass redesign. Runs ONLY for the
+# liquid-glass-redesign branch (and manually from the Actions tab); never for main.
+on:
+  push:
+    branches: [ liquid-glass-redesign ]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: redesign-apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    if: github.ref == 'refs/heads/liquid-glass-redesign'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: gradle/actions/setup-gradle@v3
+        with: { gradle-version: 8.9 }
+      # Reuse one debug signing key across runs, so each new APK installs over the previous one
+      # instead of failing with "App not installed" (a fresh runner would mint a new key every time).
+      - name: Restore the debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: aktv-redesign-debug-keystore-v1
+      - name: Unit tests (stream resolution, playback policy, UI layout and identity)
+        run: gradle testArm64DebugUnitTest --console=plain --stacktrace
+      - name: Build debug APKs (arm64 + arm32)
+        run: gradle assembleArm64Debug assembleArm32Debug --console=plain --stacktrace
+      - name: Collect APKs
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/arm64/debug/*.apk out/AK-TV-Redesign-arm64.apk
+          cp app/build/outputs/apk/arm32/debug/*.apk out/AK-TV-Redesign-arm32.apk
+          ls -la out
+          {
+            echo "### AK TV redesign APKs"
+            echo "- **AK-TV-Redesign-arm64.apk**: most Android TVs, Google TV / Chromecast, Fire TV Stick 4K Max, modern phones"
+            echo "- **AK-TV-Redesign-arm32.apk**: older or low-memory TV boxes and Fire TV sticks"
+            echo
+            echo "Download the **AK-TV-Redesign-APK** artifact at the bottom of this run's page."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-Redesign-APK
+          path: out/*.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload UI previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-Redesign-previews
+          path: app/build/reports/ui-preview/*.webp
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Upload test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AK-TV-Redesign-test-report
+          path: app/build/reports/tests/
+          if-no-files-found: ignore

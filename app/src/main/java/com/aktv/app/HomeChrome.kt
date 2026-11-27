@@ -34,21 +34,29 @@ internal object HomeChrome {
         val rail = root.findViewById<LinearLayout>(R.id.navRail)
         rail.visibility = if (m.phone) View.GONE else View.VISIBLE
         root.findViewById<View>(R.id.phoneNavScroll).visibility = if (m.phone) View.VISIBLE else View.GONE
-        rail.layoutParams.width = m.rail
-        rail.setPadding(px(if (m.compact) 7 else 10), px(if (m.compact) 10 else 20), px(if (m.compact) 7 else 10), px(10))
-        root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply {
-            width = px(if (m.compact) 76 else 100); height = px(if (m.compact) 66 else 86)
+        // Floating glass rail: inset from the screen edge so the hero and aurora show around it.
+        val gap = px(if (m.compact) 8 else 12)
+        (rail.layoutParams as FrameLayout.LayoutParams).apply {
+            width = (m.rail - gap * 2).coerceAtLeast(0); setMargins(gap, gap, gap, gap)
         }
-        root.findViewById<TextView>(R.id.akText).visibility = View.GONE
+        if (rail.background !is GlassDrawable) rail.background = Glass.panel(dp, if (m.compact) 22f else 28f, density = 0.0f)
+        rail.setPadding(px(if (m.compact) 6 else 8), px(if (m.compact) 10 else 18), px(if (m.compact) 6 else 8), px(10))
+        root.findViewById<ImageView>(R.id.brandMark).layoutParams.apply {
+            width = px(if (m.compact) 40 else 56); height = width
+        }
+        root.findViewById<TextView>(R.id.akText).apply {
+            visibility = if (m.compact && screenHeight / dp < 380) View.GONE else View.VISIBLE
+            textSize = if (m.compact) 10f else 12f
+        }
         root.findViewById<View>(R.id.navProfile).visibility = if (m.phone || screenHeight / dp < 400) View.GONE else View.VISIBLE
         root.findViewById<TextView>(R.id.railTagline).apply {
-            textSize = if (m.compact) 5.5f else 6.5f
+            textSize = if (m.compact) 7f else 8f
             visibility = if (m.compact && screenHeight / dp < 380) View.GONE else View.VISIBLE
         }
         for (id in listOf(R.id.segLive, R.id.segV2, R.id.segSites, R.id.segSeries, R.id.searchBtn)) {
             root.findViewById<TextView>(id).apply {
                 val shortScreen = screenHeight / dp < 350
-                layoutParams.height = px(if (shortScreen) 44 else if (m.compact) 48 else 58)
+                layoutParams.height = px(if (shortScreen) 42 else if (m.compact) 46 else 56)
                 includeFontPadding = false
                 setPadding(0, px(if (shortScreen) 3 else 5), 0, px(if (shortScreen) 3 else 5))
                 compoundDrawablePadding = px(3)
@@ -72,7 +80,8 @@ internal object HomeChrome {
             (layoutParams as FrameLayout.LayoutParams).apply {
                 val backdropFraction = when { m.phone && !m.compact -> 0.72f; m.compact -> 0.82f; else -> 0.94f }
                 height = maxOf((screenHeight * backdropFraction).toInt(), m.header + m.hero)
-                topMargin = 0; marginStart = m.rail; marginEnd = 0
+                // Full bleed: the artwork runs underneath the glass rail.
+                topMargin = 0; marginStart = 0; marginEnd = 0
             }
             background = null
             clipToOutline = false
@@ -147,7 +156,16 @@ internal object HomeChrome {
         } else if (!poster) {
             lp.width = ((if (compact) 148 else 176) * dp).toInt()
             lp.height = ((if (compact) 82 else 98) * dp).toInt()
-            tile.findViewById<ImageView>(R.id.logo)?.layoutParams?.apply { width = ((if (compact) 44 else 62) * dp).toInt(); height = width }
+            // Keep the logo / monogram clear of the name line: smaller and lifted on compact tiles (was overlapping on phones).
+            (tile.findViewById<ImageView>(R.id.logo)?.layoutParams as? FrameLayout.LayoutParams)?.apply {
+                width = ((if (compact) 34 else 62) * dp).toInt(); height = width; bottomMargin = ((if (compact) 26 else 14) * dp).toInt()
+            }
+            tile.findViewById<TextView>(R.id.mono)?.apply {
+                (layoutParams as? FrameLayout.LayoutParams)?.apply {
+                    width = ((if (compact) 34 else 56) * dp).toInt(); height = width; bottomMargin = ((if (compact) 26 else 14) * dp).toInt()
+                }
+                textSize = if (compact) 13f else 19f
+            }
             tile.findViewById<TextView>(R.id.name)?.textSize = if (compact) 11f else 14f
         } else {
             val width = ((if (compact) 112 else 164) * dp).toInt()

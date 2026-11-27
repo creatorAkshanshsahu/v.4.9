@@ -19,16 +19,15 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 
-/** Short, skippable AK TV brand reveal with an original sound mark; no copied music or loading delay. */
+/** Short, skippable AK TV "Aurora Glass" reveal with an original sound mark; no copied music or loading delay. */
 class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
     var onReveal: (() -> Unit)? = null
     var onDone: (() -> Unit)? = null
     private val dp get() = resources.displayMetrics.density
-    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.aktv_logo_cinematic) }.getOrNull()
-    private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 13 * dp }
+    private val mark: Drawable? = runCatching { context.getDrawable(R.drawable.aktv_logo) }.getOrNull()
+        private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.FAINT; textAlign = Paint.Align.CENTER; textSize = 11 * dp }
     private val bylinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFFC4B4BA.toInt(); textAlign = Paint.Align.CENTER; textSize = 11 * dp
+        color = Accent.DIM; textAlign = Paint.Align.CENTER; textSize = 11 * dp; letterSpacing = 0.08f
     }
     private val destination = RectF()
     private val soundTarget = RectF()
@@ -147,32 +146,101 @@ class AkIntroView @JvmOverloads constructor(context: Context, attrs: AttributeSe
         super.onDetachedFromWindow()
     }
 
+    // ---- Aurora Glass entrance: aurora bloom -> glass tile springs in -> light sweep -> wordmark tracks in ----
+    private val ink = Paint()
+    private val bloomRose = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val bloomIris = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val sweepPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val wordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Accent.TEXT; textAlign = Paint.Align.CENTER
+        typeface = runCatching { androidx.core.content.res.ResourcesCompat.getFont(context, R.font.sora_bold) }.getOrNull()
+    }
+    private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x26FFFFFF }
+    private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val atop = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_ATOP)
+    private val spring = android.view.animation.OvershootInterpolator(1.7f)
+    private val ease = DecelerateInterpolator(1.6f)
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        val r = maxOf(w, h) * 0.55f
+        bloomRose.shader = android.graphics.RadialGradient(0f, 0f, r, intArrayOf(0x99FF4F7B.toInt(), 0x33B65CFF, 0x00000000), floatArrayOf(0f, 0.5f, 1f), android.graphics.Shader.TileMode.CLAMP)
+        bloomIris.shader = android.graphics.RadialGradient(0f, 0f, r, intArrayOf(0x996366FF.toInt(), 0x22B65CFF, 0x00000000), floatArrayOf(0f, 0.5f, 1f), android.graphics.Shader.TileMode.CLAMP)
+        barPaint.shader = android.graphics.LinearGradient(0f, 0f, 120 * dp, 0f, intArrayOf(Accent.ROSE, Accent.ORCHID, Accent.IRIS), null, android.graphics.Shader.TileMode.MIRROR)
+    }
+
+    private fun window(p: Float, from: Float, to: Float) = ((p - from) / (to - from)).coerceIn(0f, 1f)
+
     override fun onDraw(canvas: Canvas) {
-        val exit = ((progress - 0.90f) / 0.10f).coerceIn(0f, 1f)
-        val alpha = (255 * (1f - exit)).toInt()
-        backgroundPaint.color = Color.argb(alpha, 7, 10, 18)
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backgroundPaint)
+        val exit = window(progress, 0.90f, 1f)
+        val alpha = 1f - exit
+        ink.color = Color.argb((255 * alpha).toInt(), 6, 8, 18)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), ink)
 
         val centerX = width / 2f
         val shortScreen = height < 420 * dp
-        val appear = (progress / 0.30f).coerceIn(0f, 1f)
-        val settle = (progress / 0.46f).coerceIn(0f, 1f)
-        val logoY = height * if (shortScreen) 0.37f else 0.38f
-        val scale = 0.96f + 0.04f * settle
-        val markWidth = minOf(width * (if (shortScreen) 0.68f else 0.58f), height * 0.76f) * scale
-        val markHeight = markWidth * ((mark?.intrinsicHeight ?: 1).toFloat() / (mark?.intrinsicWidth ?: 1).coerceAtLeast(1))
-        destination.set(centerX - markWidth / 2, logoY - markHeight / 2, centerX + markWidth / 2, logoY + markHeight / 2)
+        val markY = height * if (shortScreen) 0.38f else 0.40f
+
+        // 1. Aurora bloom: two colour fields swell and drift apart behind the mark.
+        val bloom = ease.getInterpolation(window(progress, 0f, 0.55f))
+        val drift = 40 * dp * bloom
+        bloomRose.alpha = (255 * bloom * alpha).toInt(); bloomIris.alpha = (255 * bloom * alpha).toInt()
+        canvas.save(); canvas.translate(centerX - drift * 2.2f, markY - drift); canvas.scale(0.6f + 0.4f * bloom, 0.6f + 0.4f * bloom)
+        canvas.drawCircle(0f, 0f, maxOf(width, height) * 0.55f, bloomRose); canvas.restore()
+        canvas.save(); canvas.translate(centerX + drift * 2.2f, markY + drift); canvas.scale(0.6f + 0.4f * bloom, 0.6f + 0.4f * bloom)
+        canvas.drawCircle(0f, 0f, maxOf(width, height) * 0.55f, bloomIris); canvas.restore()
+
+        // 2. Glass tile springs in.
+        val appear = window(progress, 0.04f, 0.40f)
+        val scale = 0.55f + 0.45f * spring.getInterpolation(appear)
+        val side = minOf(width, height) * (if (shortScreen) 0.34f else 0.30f) * scale
+        destination.set(centerX - side / 2, markY - side / 2, centerX + side / 2, markY + side / 2)
+        // 3. A light sweep crosses the glass once, composited only onto the mark's own pixels.
+        val sweep = window(progress, 0.36f, 0.68f)
+        val sweeping = sweep in 0.001f..0.999f && mark != null
+        val layer = if (sweeping) canvas.saveLayer(destination, null) else -1
         mark?.let {
-            it.alpha = (alpha * appear).toInt()
+            it.alpha = (255 * alpha * minOf(1f, appear * 2.5f)).toInt()
             it.setBounds(destination.left.toInt(), destination.top.toInt(), destination.right.toInt(), destination.bottom.toInt())
             it.draw(canvas)
         }
+        if (sweeping) {
+            val band = side * 0.45f
+            sweepPaint.shader = android.graphics.LinearGradient(0f, 0f, band, 0f,
+                intArrayOf(0x00FFFFFF, 0x80FFFFFF.toInt(), 0x00FFFFFF), null, android.graphics.Shader.TileMode.CLAMP)
+            sweepPaint.alpha = (255 * alpha).toInt()
+            sweepPaint.xfermode = atop
+            canvas.save()
+            canvas.translate(destination.left - band * 1.5f + (side + band * 2.5f) * sweep, destination.top - side * 0.2f)
+            canvas.skew(-0.4f, 0f)
+            canvas.drawRect(0f, 0f, band, side * 1.4f, sweepPaint)
+            canvas.restore()
+            canvas.restoreToCount(layer)
+        }
 
-        bylinePaint.alpha = (alpha * appear * 0.86f).toInt()
-        val bylineY = minOf(destination.bottom + 25 * dp, height * 0.84f)
+        // 4. Wordmark tracks in: letters start wide and settle.
+        val word = ease.getInterpolation(window(progress, 0.28f, 0.62f))
+        wordPaint.textSize = (if (shortScreen) 22 else 28) * dp
+        wordPaint.letterSpacing = 0.18f + 0.55f * (1f - word)
+        wordPaint.alpha = (255 * word * alpha).toInt()
+        val wordY = destination.bottom + (if (shortScreen) 40 else 54) * dp
+        canvas.drawText("AK TV", centerX, wordY, wordPaint)
+
+        bylinePaint.alpha = (255 * window(progress, 0.45f, 0.70f) * alpha * 0.86f).toInt()
+        val bylineY = minOf(wordY + 24 * dp, height * 0.86f)
         canvas.drawText("by Akshansh Sahu", centerX, bylineY, bylinePaint)
-        hintPaint.alpha = (alpha * 0.74f).toInt()
-        canvas.drawText("Loading...", centerX, height * 0.93f, hintPaint)
+
+        // 5. Aurora loading bar shimmering along a frosted track.
+        val barW = minOf(width * 0.22f, 220 * dp); val barH = 3 * dp; val barY = height * 0.92f
+        trackPaint.alpha = (38 * alpha).toInt()
+        canvas.drawRoundRect(centerX - barW / 2, barY, centerX + barW / 2, barY + barH, barH, barH, trackPaint)
+        val fill = ease.getInterpolation(window(progress, 0.05f, 0.90f))
+        barPaint.alpha = (255 * alpha).toInt()
+        canvas.save(); canvas.translate(progress * 240 * dp, 0f)
+        canvas.drawRoundRect(centerX - barW / 2 - progress * 240 * dp, barY, centerX - barW / 2 + barW * fill - progress * 240 * dp, barY + barH, barH, barH, barPaint)
+        canvas.restore()
+        hintPaint.alpha = (180 * alpha).toInt()
+        canvas.drawText("Loading…", centerX, barY - 10 * dp, hintPaint)
         val half = 100 * dp
         soundTarget.set(centerX - half, height - 40 * dp, centerX + half, height.toFloat())
     }

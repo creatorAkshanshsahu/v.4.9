@@ -1,19 +1,13 @@
-# AK TV visual refresh
+# AK TV identity — 4.10 "Aurora Glass"
 
-The user selected **option 2** of the generated AK monogram, retained as `ak-tv-logo.png`.
-The transparent mark and TV banner are deterministic derivatives of that selected artwork,
-not newly generated alternatives. `tools/build-brand-assets.py` creates the Android-size assets.
+- `ak-tv-logo.png`: the mark (liquid-glass squircle, rose → orchid → iris aurora, AK ligature with a ▶ counter).
+- `ak-tv-banner.png`: TV banner artwork (the shipped 320×180 `banner_img.png` is rendered from the same code).
+- `ak-tv-mark-transparent.png`: the AK ligature alone, transparent background.
 
-- Palette: midnight `#080D14`, aqua `#32E5CE`, ice-white `#EFF6FA`.
-- Native UI: compact left rail, generous featured panel, restrained cards, readable focused state.
-- Entrance: 1.6-second reveal, any-key/tap skip, reduced-animation support, no audio/flash/particle burst.
-- Playback baseline: the working **4.9.18** network/source/DRM flow; new work is UI and stable rendition selection.
+All three, plus the vector drawables in the APK, come from `tools/brand_mark.py`:
 
-## Preview evidence
+    python3 tools/brand_mark.py emit     # vector drawables (aktv_logo, aktv_icon_fg/bg/mono)
+    python3 tools/brand_mark.py raster   # PNGs (requires Pillow)
 
-`previews/home-tv.webp`, `previews/home-phone.webp` and `previews/home-movies.webp`
-are rendered from the native Android layouts in Robolectric, using clearly labelled static
-sample content (including fictional poster titles). No network or decoded playback is involved.
-
-`entrance-preview.gif` is a motion illustration of the implemented reveal timing/selected mark,
-composited over the native TV layout preview; it is not a recording from a physical TV.
+`previews/4.10.0/` holds screens rendered from the production Android views in Robolectric, with
+labelled sample content; they are not recordings from a TV. See `docs/ui-liquid-glass-4.10.0.md`.

@@ -169,8 +169,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var segLive: TextView; private lateinit var segV2: TextView; private lateinit var segSites: TextView; private lateinit var segSeries: TextView
     private val segs by lazy { listOf(segLive, segV2, segSites, segSeries) }   // TV rail: Live, Always on, Movies, Series
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
-    private val segBgs by lazy { List(4) { Ui.pill(dp, Color.TRANSPARENT, 12f) } }
-    private val phoneSegBgs by lazy { List(5) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
+    private val segBgs by lazy { List(4) { Glass.pill(dp, 18f, rest = 0f).apply { shine = false; restRim = 0f } } }
+    private val phoneSegBgs by lazy { List(5) { Glass.pill(dp, 100f, rest = 0.06f) } }
+    private lateinit var aurora: AuroraView
+    /** Tiles bound before this instant play the staggered entrance (set on tab switch / first load). */
+    private var entranceUntil = 0L
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
@@ -179,7 +182,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heroOrb: View; private lateinit var heroLogo: ImageView; private lateinit var heroMono: TextView
     private lateinit var heroProg: TextView; private lateinit var heroProgress: ProgressBar
     private lateinit var heroDesc: TextView; private lateinit var heroNext: TextView
-    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0xFF140812.toInt(), 0xFF1A0D15.toInt(), 0xFF0C0710.toInt())) }
+    private val orbBg by lazy { GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(0x00060812, 0x22060812, 0x66060812)) }
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View; private lateinit var playerBrand: View
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
@@ -243,17 +246,9 @@ class MainActivity : AppCompatActivity() {
         infoQualityAction.setOnClickListener { showPictureMenu() }
         infoRetryAction.setOnClickListener { reloadStream() }
         infoGuideAction.setOnClickListener { showProgrammeGuide() }
+        // Player actions are liquid-glass pills from XML (player_action + glass_lift); only the glow colour is set here.
         listOf(infoGuideAction, infoSourceAction, infoQualityAction, infoRetryAction).forEach { action ->
-            action.background = Ui.pill(dp, 0xB31C0D16.toInt(), 18f)
-            action.setOnFocusChangeListener { v, focused ->
-                val text = v as TextView
-                text.background = Ui.pill(dp, if (focused) Accent.ION else 0xB30C0710.toInt(), 18f).apply {
-                    setStroke((if (focused) 2 * dp else 1 * dp).toInt().coerceAtLeast(1), if (focused) Accent.TEXT else 0x55FFFFFF)
-                }
-                text.setTextColor(if (focused) Accent.ABYSS else Accent.TEXT)
-                v.animate().scaleX(if (focused) 1.045f else 1f).scaleY(if (focused) 1.045f else 1f)
-                    .translationZ(if (focused) 8 * dp else 0f).setDuration(180).start()
-            }
+            action.outlineSpotShadowColor = Accent.ORCHID; action.outlineAmbientShadowColor = Ui.alpha(Accent.ROSE, 0.5f)
         }
         programmeGuidePanel = findViewById(R.id.programmeGuidePanel)
         programmeGuideScrim = findViewById(R.id.programmeGuideScrim)
@@ -282,14 +277,17 @@ class MainActivity : AppCompatActivity() {
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        infoCard.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
-            cornerRadius = 16 * dp
-            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x59FF3448)
-        }
+        aurora = findViewById(R.id.aurora)
+        infoCard.background = Glass.panel(dp, 26f)
         infoCard.elevation = 10 * dp
-        findViewById<View>(R.id.infoLogoBox).background = Ui.pill(dp, Accent.SURFACE, 13f).apply {
-            setStroke((1 * dp).toInt().coerceAtLeast(1), 0x44FFFFFF)
+        findViewById<View>(R.id.infoLogoBox).background = Glass.card(dp, 16f).apply { shine = false }
+        findViewById<TextView>(R.id.infoLive).apply {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(PulseDotDrawable(dp, Color.WHITE, 9f), null, null, null)
+            compoundDrawablePadding = (4 * dp).toInt()
+        }
+        heroDot.let { it as TextView }.setCompoundDrawablesRelativeWithIntrinsicBounds(PulseDotDrawable(dp, Accent.LIVE, 12f), null, null, null)
+        findViewById<TextView>(R.id.profileGreeting).text = when (java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) {
+            in 5..11 -> "Good morning"; in 12..16 -> "Good afternoon"; else -> "Good evening"
         }
         val playerDock = findViewById<View>(R.id.playerInfoDock)
         val phoneWidth = resources.configuration.screenWidthDp < 600
@@ -328,10 +326,10 @@ class MainActivity : AppCompatActivity() {
             key(this, "GUIDE", "Schedule"); append("     "); key(this, "Hold OK", "Reload"); append("     ")
             key(this, "◀", "Next server"); append("     "); key(this, "Back", "Exit")
         }
-        val track = ColorStateList.valueOf(Color.argb(52, 255, 52, 72))
+        val track = ColorStateList.valueOf(Color.argb(46, 255, 255, 255))
         heroProgress.progressBackgroundTintList = track; infoProgress.progressBackgroundTintList = track
-        // Programme progress reads as a lacquered crimson bar, not the old mint.
-        val played = ColorStateList.valueOf(Accent.CRIMSON_BRIGHT)
+        // Programme progress reads as a bright rose bar on a frosted track.
+        val played = ColorStateList.valueOf(Accent.ROSE_BRIGHT)
         heroProgress.progressTintList = played; infoProgress.progressTintList = played
 
         // search pill in the top bar
@@ -351,7 +349,7 @@ class MainActivity : AppCompatActivity() {
         guide = findViewById(R.id.guide); guideScrim = findViewById(R.id.guideScrim); guideDivider = findViewById(R.id.guideDivider)
         catList = findViewById(R.id.catList); chList = findViewById(R.id.chList)
         chCol = findViewById(R.id.chCol); chHeader = findViewById(R.id.chHeader); channelSearch = findViewById(R.id.channelSearch)
-        guide.background = Ui.pill(dp, 0xF2100713.toInt(), 22f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x556687FF) }
+        guide.background = Glass.panel(dp, 28f, density = 0.25f)
         guide.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         listOf(catList to catAdapter, chList to chAdapter).forEach { (rv, ad) ->
             rv.layoutManager = LinearLayoutManager(this); rv.adapter = ad; rv.itemAnimator = null
@@ -359,7 +357,7 @@ class MainActivity : AppCompatActivity() {
         }
         searchResults.layoutManager = LinearLayoutManager(this); searchResults.adapter = searchAdapter
         searchResults.itemAnimator = null; searchResults.overScrollMode = View.OVER_SCROLL_NEVER
-        searchQuery.background = Ui.pill(dp, Accent.SURFACE, 14f)
+        searchQuery.background = getDrawable(R.drawable.search_field)
         buildKeys(); renderQuery()
 
         favs = prefs.getStringSet("favs", emptySet())!!.toSet()
@@ -432,7 +430,7 @@ class MainActivity : AppCompatActivity() {
     private fun heroMetaChip(text: String) = TextView(this).apply {
         this.text = text; textSize = if (compact) 9f else 10f; typeface = fSemi; setTextColor(Accent.TEXT)
         isFocusable = false; setPadding((10 * dp).toInt(), (6 * dp).toInt(), (10 * dp).toInt(), (6 * dp).toInt())
-        background = Ui.pill(dp, 0x777E4050, 18f)
+        background = GlassDrawable(dp, 100f, restAlpha = 0.14f, shine = false)
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (7 * dp).toInt() }
     }
 
@@ -448,18 +446,16 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this).setTitle(channel.name).setMessage(text).setPositiveButton("Done", null).show()
     }
 
+    /** Hero action: [primary] is frosted white glass (Play / More info), the rest clear glass; both turn aurora on focus. */
     private fun chip(text: CharSequence, primary: Boolean = false) = TextView(this).apply {
         this.text = text; textSize = if (compact) 11f else 13f; typeface = fSemi
         isFocusable = true; isClickable = true
-        setPadding((16 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt(), (18 * dp).toInt(), ((if (compact) 7 else 10) * dp).toInt())
-        val accent = sectionAccent()
-        val bg = Ui.pill(dp, if (primary) Color.WHITE else 0xB30C0710.toInt(), 12f)
-        background = bg
-        setTextColor(if (primary) Accent.ABYSS else Accent.TEXT)
-        setOnFocusChangeListener { _, focused ->
-            bg.setColor(if (primary) Color.WHITE else if (focused) Ui.mix(Accent.ABYSS, accent, 0.32f) else 0xB30C0710.toInt())
-            bg.setStroke(if (focused) (2 * dp).toInt().coerceAtLeast(1) else 0, accent)
-            setTextColor(if (primary || focused) Accent.ABYSS else Accent.TEXT)
+        setPadding((20 * dp).toInt(), ((if (compact) 8 else 11) * dp).toInt(), (22 * dp).toInt(), ((if (compact) 8 else 11) * dp).toInt())
+        background = if (primary) Glass.primary(dp) else Glass.pill(dp, rest = 0.14f)
+        setTextColor(if (primary) Accent.INK else Accent.TEXT)
+        setOnFocusChangeListener { v, focused ->
+            setTextColor(if (primary && !focused) Accent.INK else Accent.TEXT)
+            Motion.focus(v, focused, scale = 1.07f, liftDp = 10f, glow = Accent.ORCHID)
         }
         nextFocusDownId = R.id.rows; nextFocusLeftId = segs[tab].id
         layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginEnd = (8 * dp).toInt() }
@@ -475,14 +471,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun sectionAccent() = when (tab) { 0 -> Accent.SIGNAL; 1 -> Accent.ION; 2 -> Accent.SIGNAL; else -> Accent.INDIGO }
 
-    private fun navStyle(tv: TextView, bg: GradientDrawable, focused: Boolean, active: Boolean) {
-        val accent = sectionAccent()
-        bg.setColor(when { focused -> Ui.mix(Accent.ABYSS, accent, 0.23f); active -> Ui.mix(Accent.ABYSS, accent, 0.12f); else -> Color.TRANSPARENT })
-        val fg = when { focused -> Accent.TEXT; active -> accent; else -> Accent.DIM }
-        tv.setTextColor(fg); tv.compoundDrawableTintList = ColorStateList.valueOf(fg)
-        bg.setStroke((if (focused) 2 * dp else if (active) 1 * dp else 0f).toInt(), if (focused || active) accent else Color.TRANSPARENT)
+    /** Rail / phone tab look: aurora glass when focused, lit glass with a rose icon when it's the open tab. */
+    private fun navStyle(tv: TextView, bg: GlassDrawable, focused: Boolean, active: Boolean) {
+        if (tv.background !== bg) tv.background = bg
+        tv.isActivated = active
+        val fg = when { focused -> Accent.TEXT; active -> Accent.TEXT; else -> Accent.DIM }
+        tv.setTextColor(fg)
+        tv.compoundDrawableTintList = ColorStateList.valueOf(when { focused -> Accent.TEXT; active -> Accent.ROSE_BRIGHT; else -> Accent.DIM })
     }
-    private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 12f) }
+    private val searchBg by lazy { Glass.pill(dp, 18f, rest = 0f).apply { shine = false; restRim = 0f } }
 
     private fun styleSegs() {
         searchBtn.text = "Search"
@@ -506,13 +503,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.librarySummary).text = if (count > 0) "$count ${if (tab < 2) "channels" else "titles"}  ·  Native playback" else "LIVE + ON DEMAND"
     }
 
-    /** A restrained scale lift and bright focus ring, with no blur pass on low-memory TV hardware. */
-    private fun focusAnim(x: View, f: Boolean, color: Int = 0) {
-        val s = if (f) 1.045f else 1f
-        x.animate().cancel()
-        x.animate().setStartDelay(0).scaleX(s).scaleY(s).translationZ(if (f) 12 * dp else 0f)
-            .setDuration(180).setInterpolator(DecelerateInterpolator(1.6f)).start()
-    }
+    /** Springy lift with a glow in the item's own colour; still no blur pass on low-memory TV hardware. */
+    private fun focusAnim(x: View, f: Boolean, color: Int = Accent.ROSE, scale: Float = 1.06f) =
+        Motion.focus(x, f, scale = if (lowEnd) 1.04f else scale, liftDp = if (lowEnd) 8f else 14f, glow = color)
     /**
      * Rows without focus step back so the active row reads first. Only the row's title steps back:
      * fading the whole row put it in an offscreen layer that clipped the tiles' glow into a hard dark band over the channels.
@@ -832,6 +825,7 @@ class MainActivity : AppCompatActivity() {
         }
         setHeroCollapsed(false)
         inner.clear()
+        entranceUntil = SystemClock.uptimeMillis() + 900
         rowAdapter.notifyDataSetChanged()
         val first: Tile? = when (tab) {
             0, 1 -> featuredChannels(pool()).firstOrNull()?.let { Tile.Ch(it) }
@@ -861,6 +855,8 @@ class MainActivity : AppCompatActivity() {
         }
         val dir = if (t > tab) 1 else -1
         tab = t; layoutHero(); styleSegs(); stopPreview()
+        aurora.tintTo(when (t) { 2 -> Accent.EMBER; 3 -> Accent.IRIS; else -> null })
+        entranceUntil = SystemClock.uptimeMillis() + 900
         val shift = 28 * dp * dir
         rowsView.animate().cancel()
         rowsView.animate().alpha(0f).translationY(-shift).setDuration(150).withEndAction {
@@ -907,7 +903,8 @@ class MainActivity : AppCompatActivity() {
     }
     /** Tints the dark hero treatment with the selected section's accent. */
     private fun glowHero(c: Int, partner: Int) {
-        orbBg.colors = intArrayOf(Ui.mix(0xFF140812.toInt(), partner, 0.12f), Ui.mix(0xFF1A0D15.toInt(), c, 0.16f), 0xFF0C0710.toInt())
+        // The living aurora leans toward the focused item's colour, so the whole screen reacts to selection.
+        if (::aurora.isInitialized) aurora.tintTo(Ui.mix(c, partner, 0.25f))
         heroProgress.progressTintList = ColorStateList.valueOf(c)
     }
     /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
@@ -957,9 +954,7 @@ class MainActivity : AppCompatActivity() {
         heroChips.removeAllViews()
         heroBadge.setPadding((9 * dp).toInt(), (3 * dp).toInt(), (9 * dp).toInt(), (3 * dp).toInt())
         heroBadge.setTextColor(Accent.TEXT)
-        heroBadge.background = Ui.pill(dp, 0x2424D3D0, 16f).apply {
-            setStroke((1 * dp).toInt().coerceAtLeast(1), androidx.core.graphics.ColorUtils.setAlphaComponent(sectionAccent(), 150))
-        }
+        heroBadge.background = GlassDrawable(dp, 100f, restAlpha = 0.14f, shine = false)
         showCinematicFallback(t)
         heroTagline.visibility = if (tab < 2 && resources.configuration.screenWidthDp >= 600) View.VISIBLE else View.GONE
         heroSubheading.text = if (tab < 2) "A clearer view of what’s next." else "Find your next story."
@@ -967,9 +962,13 @@ class MainActivity : AppCompatActivity() {
             is Tile.Ch -> {
                 heroLogo.alpha = 1f
                 heroDot.visibility = View.VISIBLE
-                (heroDot as? TextView)?.text = if (t.c.v2) "●  ALWAYS ON" else "●  LIVE NOW"
-                heroDot.backgroundTintList = ColorStateList.valueOf(if (t.c.v2) Accent.ION else Accent.LIVE)
-                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ION else Accent.LIVE)
+                (heroDot as? TextView)?.let { dot ->
+                    if (dot.compoundDrawablesRelative[0] == null)
+                        dot.setCompoundDrawablesRelativeWithIntrinsicBounds(PulseDotDrawable(dp, Accent.LIVE, 12f), null, null, null)
+                }
+                (heroDot as? TextView)?.text = if (t.c.v2) "ALWAYS ON" else "LIVE NOW"
+                (heroDot as? TextView)?.setTextColor(if (t.c.v2) Accent.ORCHID else Accent.LIVE)
+                ((heroDot as? TextView)?.compoundDrawablesRelative?.get(0) as? PulseDotDrawable)?.color = if (t.c.v2) Accent.ORCHID else Accent.LIVE
                 heroBadge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
                 heroTitle.text = t.c.name
                 heroChips.addView(chip("▶   Play Live", true).apply { setOnClickListener {
@@ -998,7 +997,8 @@ class MainActivity : AppCompatActivity() {
                 heroDot.visibility = View.VISIBLE
                 (heroDot as? TextView)?.apply {
                     text = if (t.m.isSeries) "SERIES SPOTLIGHT" else "FEATURED MOVIE"
-                    setTextColor(accent); backgroundTintList = ColorStateList.valueOf(accent)
+                    setTextColor(Accent.ROSE_BRIGHT)
+                    setCompoundDrawablesRelativeWithIntrinsicBounds(null, null, null, null)
                 }
                 heroTitle.text = t.m.name
                 showHeroArtwork(t.m)
@@ -1020,12 +1020,12 @@ class MainActivity : AppCompatActivity() {
                 heroDesc.text = t.m.description
                 heroDesc.visibility = if (!compact && t.m.description.isNotBlank()) View.VISIBLE else View.GONE
                 ui.removeCallbacks(heroGuideRunnable)
-                glowHero(accent, if (t.m.isSeries) 0xFF493A8A.toInt() else 0xFF815331.toInt())
+                glowHero(if (t.m.isSeries) Accent.IRIS else Accent.EMBER, if (t.m.isSeries) Accent.ORCHID else Accent.ROSE)
             }
             else -> {
                 heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "AK News"
                 heroSubheading.text = "A clearer view of what’s next."
-                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.aktv_logo_cinematic)
+                heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.aktv_logo)
                 glowHero(Accent.SIGNAL, Accent.INDIGO); scheduleHeroGuide(null)
             }
         }
@@ -1157,7 +1157,7 @@ class MainActivity : AppCompatActivity() {
             infoNow.text = progLine("NOW", n); infoNow.visibility = View.VISIBLE
             infoProgress.progress = (Epg.progress(n) * 1000).toInt(); infoProgress.visibility = View.VISIBLE
             infoDesc.text = n.desc; infoDesc.visibility = if (n.desc.isEmpty()) View.GONE else View.VISIBLE
-            val next = g?.next
+            val next = g.next
             infoScheduleNext.visibility = if (next == null) View.GONE else View.VISIBLE
             if (next != null) infoScheduleNext.text = progLine("NEXT", next)
         }
@@ -1211,12 +1211,12 @@ class MainActivity : AppCompatActivity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
-            background = Ui.pill(dp, 0x6612090F, 14f).apply { setStroke((1 * dp).toInt().coerceAtLeast(1), 0x2AFFFFFF) }
+            background = GlassDrawable(dp, 18f, restAlpha = if (currentProgramme) 0.14f else 0.07f, shine = false)
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = (10 * dp).toInt() }
         }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val badge = TextView(this).apply {
-            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.ION else Accent.SIGNAL)
+            text = label; textSize = 9f; typeface = fSemi; setTextColor(if (currentProgramme) Accent.ROSE_BRIGHT else Accent.ORCHID)
             letterSpacing = 0.08f
         }
         val time = TextView(this).apply {
@@ -1234,7 +1234,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, (5 * dp).toInt(), 0, 0)
         })
         if (currentProgramme) card.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 1000; progress = (Epg.progress(p) * 1000).toInt(); progressTintList = ColorStateList.valueOf(Accent.ION)
+            max = 1000; progress = (Epg.progress(p) * 1000).toInt(); progressTintList = ColorStateList.valueOf(Accent.ROSE_BRIGHT)
             progressBackgroundTintList = ColorStateList.valueOf(0x55FFFFFF); minimumHeight = (3 * dp).toInt()
         }, LinearLayout.LayoutParams(-1, (3 * dp).toInt()).apply { topMargin = (10 * dp).toInt() })
         return card
@@ -2448,9 +2448,9 @@ class MainActivity : AppCompatActivity() {
     private fun keyView(label: String, w: Int, h: Int, m: Int, onClick: () -> Unit) = TextView(this).apply {
         text = label; gravity = Gravity.CENTER; textSize = if (compact) 12f else 15f; typeface = fSemi; setTextColor(Accent.DIM)
         isFocusable = true; isClickable = true
-        background = Ui.focusBg(dp, 12f, rest = Accent.SURFACE)
+        background = Glass.pill(dp, 14f, rest = 0.08f)
         layoutParams = LinearLayout.LayoutParams(w, h).apply { setMargins(m, m, m, m) }
-        setOnFocusChangeListener { v, f -> setTextColor(if (f) Accent.ABYSS else Accent.DIM); focusAnim(v, f) }
+        setOnFocusChangeListener { v, f -> setTextColor(if (f) Accent.TEXT else Accent.DIM); focusAnim(v, f, Accent.ORCHID, 1.10f) }
         setOnClickListener { onClick() }
     }
     private fun typeChar(c: Char) { if (searchBuf.length < 40) { searchBuf.append(c); renderQuery(); updateResults() } }
@@ -2576,7 +2576,7 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
             val v = LayoutInflater.from(p.context).inflate(R.layout.item_guide_ch, p, false)
             v.background = Ui.focusBg(dp, 14f)
-            v.findViewById<View>(R.id.chLogoBox).background = Ui.pill(dp, Accent.SURFACE, 12f)
+            v.findViewById<View>(R.id.chLogoBox).background = GlassDrawable(dp, 12f, restAlpha = 0.10f, shine = false)
             return VH(v)
         }
         override fun onBindViewHolder(h: VH, i: Int) {
@@ -2588,7 +2588,7 @@ class MainActivity : AppCompatActivity() {
             val sub = v.findViewById<TextView>(R.id.chNow)
             sub.text = if (ch.v2) "V2 · 24/7" else ch.category; sub.setTextColor(Accent.FAINT); sub.visibility = View.VISIBLE
             v.findViewById<View>(R.id.chFav).visibility = if (ch.key in favs) View.VISIBLE else View.GONE
-            val style = { f: Boolean -> name.setTextColor(if (f) Accent.ABYSS else Accent.DIM); sub.setTextColor(if (f) 0xFF5F6368.toInt() else Accent.FAINT) }
+            val style = { f: Boolean -> name.setTextColor(if (f) Accent.TEXT else Accent.DIM); sub.setTextColor(if (f) Ui.alpha(Accent.TEXT, 0.8f) else Accent.FAINT) }
             style(v.isFocused)
             v.setOnFocusChangeListener { _, f -> style(f) }
             v.setOnClickListener { playFromSearch(i) }
@@ -2740,7 +2740,7 @@ class MainActivity : AppCompatActivity() {
             v.findViewById<View>(R.id.catMark).visibility = if (cat == shownCat) View.VISIBLE else View.INVISIBLE
             val open = cat == guideCat
             v.isActivated = open
-            val style = { f: Boolean -> name.setTextColor(if (f) Accent.ABYSS else if (open) Accent.TEXT else Accent.DIM) }
+            val style = { f: Boolean -> name.setTextColor(if (f || open) Accent.TEXT else Accent.DIM) }
             style(v.isFocused)
             v.setOnFocusChangeListener { _, f -> style(f) }
             v.setOnClickListener { openCategory(i) }
@@ -2752,7 +2752,7 @@ class MainActivity : AppCompatActivity() {
         override fun onCreateViewHolder(p: ViewGroup, t: Int): VH {
             val v = LayoutInflater.from(p.context).inflate(R.layout.item_guide_ch, p, false)
             v.background = Ui.focusBg(dp, 14f)
-            v.findViewById<View>(R.id.chLogoBox).background = Ui.pill(dp, Accent.SURFACE, 12f)
+            v.findViewById<View>(R.id.chLogoBox).background = GlassDrawable(dp, 12f, restAlpha = 0.10f, shine = false)
             return VH(v)
         }
         override fun onBindViewHolder(h: VH, i: Int) {
@@ -2765,7 +2765,7 @@ class MainActivity : AppCompatActivity() {
             v.findViewById<View>(R.id.chNow).visibility = if (playing) View.VISIBLE else View.GONE
             v.findViewById<View>(R.id.chFav).visibility = if (ch.key in favs) View.VISIBLE else View.GONE
             v.isActivated = playing
-            val style = { f: Boolean -> name.setTextColor(if (f) Accent.ABYSS else if (playing) Accent.TEXT else Accent.DIM) }
+            val style = { f: Boolean -> name.setTextColor(if (f || playing) Accent.TEXT else Accent.DIM) }
             style(v.isFocused)
             v.setOnFocusChangeListener { _, f -> style(f) }
             v.setOnClickListener { playFromGuide(i) }
@@ -2939,7 +2939,8 @@ class MainActivity : AppCompatActivity() {
             val l = when (t) { 0 -> R.layout.item_tile; 1 -> R.layout.item_poster; 3 -> R.layout.item_trending; else -> R.layout.item_hint }
             val v = LayoutInflater.from(p.context).inflate(l, p, false)
             HomeChrome.styleTile(v, poster = t == 1, landscape = t == 3, compact = compact, dp = dp)
-            if (t != 1 && t != 3) { v.background = Ui.pill(dp, Accent.SURFACE, 14f); v.clipToOutline = true }
+            if (t == 0) { v.background = Glass.card(dp, 18f, Accent.ROSE).apply { restAlpha = 0.16f; activeAlpha = 0.22f; focusAlpha = 0.30f }; v.clipToOutline = true }
+            else if (t == 2) { v.background = GlassDrawable(dp, 18f, restAlpha = 0.06f, shine = false) }
             return VH(v)
         }
         override fun onBindViewHolder(h: VH, i: Int, payloads: MutableList<Any>) {
@@ -2949,22 +2950,24 @@ class MainActivity : AppCompatActivity() {
         }
         override fun onBindViewHolder(h: VH, i: Int) {
             val v = h.itemView
+            if (i < 8 && SystemClock.uptimeMillis() < entranceUntil) Motion.rise(v, delay = (rows.indexOf(row).coerceIn(0, 3) * 70L + i * 45L), distanceDp = 22f)
+            else if (v.alpha < 1f && !v.hasFocus()) { v.alpha = 1f; v.translationY = 0f }
             when (val t = row.tiles[i]) {
                 is Tile.Ch -> {
-                    val bg = v.background as GradientDrawable
-                    v.tag = t.c.key; bg.setColor(Ui.mix(Accent.SURFACE, accentOf(t.c.key), 0.12f))
+                    val bg = v.background as GlassDrawable
+                    v.tag = t.c.key; bg.glassTint = accentOf(t.c.key); bg.accent = accentOf(t.c.key)
                     v.findViewById<TextView>(R.id.name).text = t.c.name
                     val playingNow = layer.visibility == View.VISIBLE && renderedFrame && shown.getOrNull(current)?.key == t.c.key
                     val result = channelPlaybackResults[t.c.key]
                     val (badgeText, badgeColor) = when {
-                        playingNow -> "PLAYING" to 0xFF16885D.toInt()
-                        result?.outcome == ChannelPlaybackOutcome.WORKING -> "WORKING" to 0xFF16885D.toInt()
-                        result?.outcome == ChannelPlaybackOutcome.FAILED -> "FAILED" to 0xFF9F3339.toInt()
-                        result?.outcome == ChannelPlaybackOutcome.NO_FRAME -> "NO FRAME" to 0xFF987126.toInt()
-                        else -> "NOT CHECKED" to 0xFF8E7781.toInt()
+                        playingNow -> "PLAYING" to 0xFF19A877.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.WORKING -> "WORKING" to 0xFF19A877.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.FAILED -> "FAILED" to 0xFFE0405E.toInt()
+                        result?.outcome == ChannelPlaybackOutcome.NO_FRAME -> "NO FRAME" to 0xFFD08A1E.toInt()
+                        else -> "NOT CHECKED" to 0x66FFFFFF
                     }
                     v.findViewById<TextView>(R.id.liveBadge).apply {
-                        text = badgeText; background = Ui.pill(dp, badgeColor, 7f)
+                        text = badgeText; background = Ui.pill(dp, badgeColor, 100f)
                     }
                     v.findViewById<View>(R.id.healthDot).backgroundTintList = ColorStateList.valueOf(badgeColor)
                     val nowCaption = v.findViewById<TextView>(R.id.nowCaption)
@@ -2975,21 +2978,23 @@ class MainActivity : AppCompatActivity() {
                         logo.setImageDrawable(null); logo.visibility = View.GONE
                         val ac = accentOf(t.c.key)
                         mono.visibility = View.VISIBLE; mono.text = initials(t.c.name)
-                        mono.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(androidx.core.graphics.ColorUtils.setAlphaComponent(ac, 150)) }
+                        mono.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(Ui.mix(ac, Color.WHITE, 0.25f), Accent.partner(ac))).apply {
+                            shape = GradientDrawable.OVAL; setStroke((1 * dp).toInt().coerceAtLeast(1), Ui.alpha(Color.WHITE, 0.45f))
+                        }
                     } else {
                         mono.visibility = View.GONE; logo.visibility = View.VISIBLE
                         logo.load(t.c.logo) {
                             allowHardware(false)
                             listener(onSuccess = { _, r ->
                                 extractAccent(t.c.key, r.drawable) { c ->
-                                    if (v.tag == t.c.key) bg.setColor(Ui.mix(Accent.SURFACE, c, 0.12f))
+                                    if (v.tag == t.c.key) { bg.glassTint = c; bg.accent = c }
                                 }
                             })
                         }
                     }
                     v.findViewById<View>(R.id.fav).visibility = if (t.c.key in favs) View.VISIBLE else View.GONE
                     v.setOnFocusChangeListener { x, f ->
-                        focusAnim(x, f)
+                        focusAnim(x, f, accentOf(t.c.key))
                         if (f) {
                             setHero(t)
                             if (tab < 2) scheduleSourceWarmup(t.c)
@@ -3028,7 +3033,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     v.setOnFocusChangeListener { x, f ->
-                        focusAnim(x, f)
+                        focusAnim(x, f, if (t.m.isSeries) Accent.IRIS else Accent.ROSE, 1.07f)
                         if (f) {
                             setHero(t)
                             val p = h.bindingAdapterPosition
@@ -3037,7 +3042,6 @@ class MainActivity : AppCompatActivity() {
                     }
                     v.setOnClickListener {
                         stopPreview(); DetailActivity.open(this@MainActivity, t.m)
-                        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
                     }
                 }
                 else -> {

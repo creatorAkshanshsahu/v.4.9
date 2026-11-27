@@ -1,7 +1,10 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/home" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/abyss">
+    <!-- living aurora: slow colour fields drifting behind every glass surface -->
+    <com.aktv.app.AuroraView android:id="@+id/aurora" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:importantForAccessibility="no"/>
     <FrameLayout android:id="@+id/heroMedia" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:layout_gravity="top" android:layout_marginStart="144dp">
+        android:layout_gravity="top">
         <FrameLayout android:id="@+id/heroOrb" android:layout_width="match_parent" android:layout_height="match_parent"/>
         <View android:id="@+id/heroGlow" android:layout_width="480dp" android:layout_height="480dp"
             android:layout_gravity="top|end" android:layout_marginTop="-150dp" android:layout_marginEnd="100dp"
@@ -55,7 +58,7 @@
             <LinearLayout android:id="@+id/phoneNav" android:layout_width="wrap_content" android:layout_height="match_parent"
                 android:orientation="horizontal" android:gravity="center_vertical">
                 <ImageView android:id="@+id/phoneBrand" android:layout_width="48dp" android:layout_height="42dp"
-                    android:layout_marginEnd="8dp" android:src="@drawable/aktv_logo_cinematic" android:scaleType="fitCenter"
+                    android:layout_marginEnd="8dp" android:src="@drawable/aktv_logo" android:scaleType="fitCenter"
                     android:contentDescription="AK TV logo"/>
                 <TextView android:id="@+id/phoneLive" style="@style/Widget.AKTV.PhonePill" android:text="Live"/>
                 <TextView android:id="@+id/phoneV2" style="@style/Widget.AKTV.PhonePill" android:text="Always on"/>
@@ -69,7 +72,8 @@
                 android:layout_marginStart="52dp" android:layout_marginBottom="24dp" android:layout_gravity="start|bottom" android:orientation="vertical">
                 <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
                     <TextView android:id="@+id/heroDot" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="●  LIVE" android:textColor="@color/signal" android:textSize="10sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.09"/>
+                        android:drawablePadding="7dp" android:gravity="center_vertical"
+                        android:text="LIVE" android:textColor="@color/signal" android:textSize="10sp" android:fontFamily="@font/sora_bold" android:letterSpacing="0.09"/>
                     <TextView android:id="@+id/heroBadge" android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:layout_marginStart="12dp" android:textColor="@color/text_dim" android:textSize="10sp" android:fontFamily="@font/sora_regular"/>
                 </LinearLayout>
@@ -97,16 +101,18 @@
             android:layout_weight="1" android:paddingTop="16dp" android:paddingBottom="30dp" android:clipToPadding="false" android:clipChildren="false"
             android:overScrollMode="never" android:requiresFadingEdge="none" android:fadeScrollbars="false"/>
     </LinearLayout>
-    <LinearLayout android:id="@+id/navRail" android:layout_width="144dp" android:layout_height="match_parent"
+    <!-- floating liquid-glass rail; the hero artwork and aurora run underneath it -->
+    <LinearLayout android:id="@+id/navRail" android:layout_width="120dp" android:layout_height="match_parent"
+        android:layout_margin="12dp" android:elevation="6dp"
         android:orientation="vertical" android:gravity="center_horizontal" android:paddingStart="10dp" android:paddingEnd="10dp"
-        android:paddingTop="18dp" android:paddingBottom="14dp" android:background="@color/night">
-        <ImageView android:id="@+id/brandMark" android:layout_width="96dp" android:layout_height="82dp" android:src="@drawable/aktv_logo_cinematic"
+        android:paddingTop="18dp" android:paddingBottom="14dp">
+        <ImageView android:id="@+id/brandMark" android:layout_width="56dp" android:layout_height="56dp" android:src="@drawable/aktv_logo"
             android:scaleType="fitCenter" android:contentDescription="AK TV logo"/>
         <TextView android:id="@+id/akText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AK TV"
-            android:visibility="gone" android:layout_marginTop="0dp" android:layout_marginBottom="0dp" android:textSize="11sp" android:letterSpacing="0.11"
+            android:layout_marginTop="8dp" android:layout_marginBottom="2dp" android:textSize="12sp" android:letterSpacing="0.16"
             android:textColor="@color/text" android:fontFamily="@font/sora_bold"/>
         <TextView android:id="@+id/railTagline" android:layout_width="match_parent" android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp" android:gravity="center" android:text="BIGGER STORIES\nBRIGHTER YOU"
+            android:layout_marginBottom="18dp" android:gravity="center" android:text="LIVE · FILMS · SERIES"
             android:textColor="@color/text_faint" android:textSize="6.5sp" android:letterSpacing="0.14"
             android:lineSpacingExtra="1dp" android:fontFamily="@font/sora_regular" android:includeFontPadding="false"/>
         <TextView android:id="@+id/segLive" style="@style/Widget.AKTV.RailItem" android:text="Live" android:drawableTop="@drawable/ic_nav_live"
@@ -127,7 +133,7 @@
                 android:textSize="14sp" android:fontFamily="@font/sora_bold"/>
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
                 android:layout_marginStart="8dp" android:orientation="vertical">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Good evening"
+                <TextView android:id="@+id/profileGreeting" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Good evening"
                     android:textColor="@color/text_faint" android:textSize="8sp" android:maxLines="1" android:ellipsize="end"/>
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Guest"
                     android:textColor="@color/text" android:textSize="11sp" android:fontFamily="@font/sora_semibold"/>

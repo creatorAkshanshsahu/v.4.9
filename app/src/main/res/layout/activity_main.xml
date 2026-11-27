@@ -6,7 +6,9 @@
 
     <!-- search: on-screen keyboard on the left, live results on the right -->
     <FrameLayout android:id="@+id/searchLayer" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#FA0A0512" android:visibility="gone" android:clickable="true">
+        android:background="#EB060812" android:visibility="gone" android:clickable="true">
+        <com.aktv.app.AuroraView android:id="@+id/searchAurora" android:layout_width="match_parent" android:layout_height="match_parent"
+            android:alpha="0.55" android:importantForAccessibility="no"/>
         <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
             android:id="@+id/searchBody" android:layout_marginStart="28dp" android:layout_marginEnd="28dp" android:layout_marginTop="24dp"
             android:layout_marginBottom="36dp" android:orientation="horizontal">
@@ -36,17 +38,17 @@
 
     <!-- player -->
     <FrameLayout android:id="@+id/playerLayer" android:layout_width="match_parent" android:layout_height="match_parent"
-        android:background="#050208" android:visibility="gone">
+        android:background="#000000" android:visibility="gone">
         <androidx.media3.ui.PlayerView android:id="@+id/playerView" android:layout_width="match_parent"
             android:layout_height="match_parent" app:use_controller="false" app:resize_mode="fit"
             app:surface_type="surface_view" app:use_artwork="false"
             app:shutter_background_color="@android:color/transparent"/>
         <View android:id="@+id/playerScrim" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="@drawable/scrim_player" android:alpha="0"/>
-        <LinearLayout android:id="@+id/playerBrand" android:layout_width="104dp" android:layout_height="90dp"
+        <LinearLayout android:id="@+id/playerBrand" android:layout_width="64dp" android:layout_height="64dp"
             android:layout_gravity="top|start" android:layout_marginStart="40dp" android:layout_marginTop="22dp"
             android:orientation="vertical" android:gravity="center" android:alpha="0" android:contentDescription="AK TV">
-            <ImageView android:layout_width="100dp" android:layout_height="86dp" android:src="@drawable/aktv_logo_cinematic" android:scaleType="fitCenter"/>
+            <ImageView android:layout_width="56dp" android:layout_height="56dp" android:src="@drawable/aktv_logo" android:scaleType="fitCenter"/>
         </LinearLayout>
         <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"
@@ -72,7 +74,7 @@
                 android:layout_marginStart="18dp" android:orientation="vertical">
                 <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:orientation="horizontal" android:gravity="center_vertical">
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="LIVE"
+                    <TextView android:id="@+id/infoLive" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="LIVE"
                         android:background="@drawable/live_pill" android:textColor="#FFFFFF" android:textSize="10sp"
                         android:fontFamily="@font/sora_bold" android:letterSpacing="0.08" android:paddingStart="8dp"
                         android:paddingEnd="8dp" android:paddingTop="2dp" android:paddingBottom="2dp"/>
@@ -108,7 +110,7 @@
             android:shadowColor="#99000000" android:shadowRadius="12"/>
         <!-- programme guide: dedicated EPG panel, separate from the channel-zap drawer -->
         <View android:id="@+id/programmeGuideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
-            android:background="#C20A0512" android:visibility="gone" android:clickable="true" android:focusable="false"/>
+            android:background="#B3060812" android:visibility="gone" android:clickable="true" android:focusable="false"/>
         <LinearLayout android:id="@+id/programmeGuidePanel" android:layout_width="440dp" android:layout_height="match_parent"
             android:layout_gravity="end" android:layout_margin="16dp" android:orientation="vertical" android:padding="24dp"
             android:background="@drawable/guide_panel" android:visibility="gone" android:clickable="true" android:focusable="true">
@@ -167,14 +169,14 @@
                     android:paddingStart="14dp" android:paddingEnd="14dp" android:singleLine="true"
                     android:hint="Search channels…" android:textColor="@color/text" android:textColorHint="@color/text_faint"
                     android:textSize="13sp" android:fontFamily="@font/sora_regular" android:imeOptions="actionSearch"
-                    android:background="@drawable/live_pill" android:focusable="true" android:focusableInTouchMode="true"/>
+                    android:background="@drawable/search_field" android:focusable="true" android:focusableInTouchMode="true"/>
                 <androidx.recyclerview.widget.RecyclerView android:id="@+id/chList" android:layout_width="match_parent"
                     android:layout_height="0dp" android:layout_weight="1" android:clipToPadding="false"
                     android:paddingBottom="24dp" android:overScrollMode="never" android:requiresFadingEdge="none"/>
             </LinearLayout>
         </LinearLayout>
         <ProgressBar android:id="@+id/spinner" android:layout_width="56dp" android:layout_height="56dp"
-            android:layout_gravity="center" android:indeterminateTint="@color/ion" android:visibility="gone"/>
+            android:layout_gravity="center" android:indeterminateTint="@color/rose" android:visibility="gone"/>
         <TextView android:id="@+id/playStatus" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="center" android:layout_marginStart="28dp" android:layout_marginEnd="28dp"
             android:background="@drawable/guide_panel" android:textColor="@color/text"

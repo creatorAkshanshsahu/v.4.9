@@ -1,0 +1,17 @@
+<!-- Springy lift for glass controls declared in XML: scale + elevation on focus. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <set>
+            <objectAnimator android:propertyName="scaleX" android:valueTo="1.06" android:duration="300" android:interpolator="@android:interpolator/overshoot"/>
+            <objectAnimator android:propertyName="scaleY" android:valueTo="1.06" android:duration="300" android:interpolator="@android:interpolator/overshoot"/>
+            <objectAnimator android:propertyName="translationZ" android:valueTo="8dp" android:duration="220"/>
+        </set>
+    </item>
+    <item>
+        <set>
+            <objectAnimator android:propertyName="scaleX" android:valueTo="1" android:duration="200" android:interpolator="@android:interpolator/decelerate_quad"/>
+            <objectAnimator android:propertyName="scaleY" android:valueTo="1" android:duration="200" android:interpolator="@android:interpolator/decelerate_quad"/>
+            <objectAnimator android:propertyName="translationZ" android:valueTo="0dp" android:duration="200"/>
+        </set>
+    </item>
+</selector>

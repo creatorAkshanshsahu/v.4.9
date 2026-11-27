@@ -1,206 +1,299 @@
 #!/usr/bin/env python3
-"""Single source of truth for the AK TV mark geometry.
+"""Single source of truth for the AK TV "Aurora Glass" identity (4.10).
 
-The same coordinates produce (a) the shipped Android vector drawable and (b) the PNG previews and
-launcher bitmaps, so the two can never drift. Run:
+One set of coordinates produces every logo surface, so the vector drawables shipped in the APK and
+the raster banner/previews can never drift apart:
 
-    python3 tools/brand_mark.py preview   # PNGs in design/previews/4.9.45/
-    python3 tools/brand_mark.py emit      # rewrite the two vector drawables
+    python3 tools/brand_mark.py emit      # rewrite the vector drawables in app/src/main/res/drawable
+    python3 tools/brand_mark.py raster    # TV banner + design/ PNGs (needs Pillow)
+    python3 tools/brand_mark.py all
 
-Geometry lives in a 480x280 viewport. Polygons are (points, is_hole).
+The mark: a liquid-glass squircle washed in the rose -> orchid -> iris aurora, carrying a bold
+white AK ligature. The A has no crossbar hole; its counter is a play triangle, so the aurora glows
+through the letter as a "play" cue. Geometry lives in a 120 x 80 glyph box.
 """
 import sys
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
-VIEW = (480, 280)
-OUT_PREVIEW = ROOT / 'design/previews/4.9.45'
 DRAWABLE = ROOT / 'app/src/main/res/drawable'
+NODPI = ROOT / 'app/src/main/res/drawable-nodpi'
+DESIGN = ROOT / 'design'
+FONT_BOLD = ROOT / 'app/src/main/res/font/sora_bold.ttf'
 
-INK = (7, 4, 10)
-CRIMSON_BRIGHT = (255, 90, 107)
-CRIMSON = (225, 29, 46)
-CRIMSON_DEEP = (140, 15, 28)
-GLOSS_HI = (255, 235, 238)
+# ---- palette (mirrors Accent in UiKit.kt) ---------------------------------------------------
+INK = '#060812'
+ROSE = '#FF4F7B'
+ORCHID = '#B65CFF'
+IRIS = '#6366FF'
+AURORA = [(0.0, ROSE), (0.52, ORCHID), (1.0, IRIS)]
 
-# Plate inset inside the viewport.
-PLATE = (8, 8, 472, 272)
-PLATE_RADIUS = 44
-
-# --- The monogram -------------------------------------------------------------------------
-# A: apex at 150, legs spread to the baseline. The counter runs all the way down so the two legs
-# stay separate, then a crossbar reconnects them.
-A_OUTER = [(150, 40), (44, 244), (256, 244)]
-A_COUNTER = [(150, 122), (100, 244), (200, 244)]
-A_BAR = [(101, 176), (199, 176), (199, 208), (101, 208)]
-
-# K: ONE polygon. The stem starts at x=250 so it overlaps the A's right leg; the arms are cut
-# from the same outline, which is why there is no seam where they meet the stem.
-K = [
-    (250, 40), (306, 40), (306, 120), (372, 40), (448, 40),
-    (340, 148),
-    (448, 244), (372, 244), (306, 166), (306, 244), (250, 244),
-]
-
-SHAPES = [
-    (A_OUTER, False),
-    (A_COUNTER, True),
-    (A_BAR, False),
-    (K, False),
-]
-
-# Sheen wedge down the leading edge of the A.
-SHEEN = [(56, 232), (144, 54), (162, 54), (76, 232)]
+# ---- glyph geometry (120 x 80 box) ----------------------------------------------------------
+A_OUTER = [(4, 76), (24, 4), (40, 4), (60, 76), (46, 76), (42, 62), (22, 62), (18, 76)]
+A_PLAY = [(25, 30), (25, 52), (39.5, 41)]           # counter: a play triangle, cut out of the A
+K_STEM = [(66, 4), (80, 4), (80, 76), (66, 76)]
+K_ARMS = [(80, 34), (96, 4), (112, 4), (91, 41), (112, 76), (96, 76), (80, 49)]
+GLYPH_BOX = (4, 4, 112, 76)
 
 
-def lerp(a, b, t):
-    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+def _n(v):
+    s = f'{v:.2f}'.rstrip('0').rstrip('.')
+    return s if s != '-0' else '0'
 
 
-def gradient(size, stops):
-    width, height = size
-    strip = Image.new('RGB', (1, height))
-    load = strip.load()
-    for y in range(height):
-        t = y / max(1, height - 1)
-        if t < 0.5:
-            load[0, y] = lerp(stops[0], stops[1], t / 0.5)
-        else:
-            load[0, y] = lerp(stops[1], stops[2], (t - 0.5) / 0.5)
-    return strip.resize((width, height))
+def _path(points, sx, sy, ox, oy):
+    pts = [(_n(x * sx + ox), _n(y * sy + oy)) for x, y in points]
+    return 'M' + ' L'.join(f'{x},{y}' for x, y in pts) + ' Z'
 
 
-def monogram_mask(size, scale, offset, supersample=1):
-    """Draw at supersample x on a matching canvas, then downscale: sharp edges, no clipping."""
-    work = (size[0] * supersample, size[1] * supersample)
-    mask = Image.new('L', work, 0)
-    draw = ImageDraw.Draw(mask)
-    for points, hole in SHAPES:
-        scaled = [((offset[0] + x * scale) * supersample, (offset[1] + y * scale) * supersample)
-                  for x, y in points]
-        draw.polygon(scaled, fill=0 if hole else 255)
-    return mask if supersample == 1 else mask.resize(size, Image.Resampling.LANCZOS)
+def glyph_paths(width, cx, cy):
+    """Returns (letters_path, counter_path) with the glyph box scaled to [width], centred on cx, cy."""
+    x0, y0, x1, y1 = GLYPH_BOX
+    s = width / (x1 - x0)
+    ox = cx - (x0 + x1) / 2 * s
+    oy = cy - (y0 + y1) / 2 * s
+    letters = ' '.join(_path(p, s, s, ox, oy) for p in (A_OUTER, A_PLAY, K_STEM, K_ARMS))
+    return letters, s, ox, oy
 
 
-def render_mark(size=(960, 560), plate=True, glow=True):
-    """Render the mark on (or without) the lacquered plate."""
-    width, height = size
-    scale = min(width / VIEW[0], height / VIEW[1])
-    offset = ((width - VIEW[0] * scale) / 2, (height - VIEW[1] * scale) / 2)
-    canvas = Image.new('RGBA', size, (0, 0, 0, 0))
-
-    if plate:
-        plate_box = (offset[0] + PLATE[0] * scale, offset[1] + PLATE[1] * scale,
-                     offset[0] + PLATE[2] * scale, offset[1] + PLATE[3] * scale)
-        radius = PLATE_RADIUS * scale
-        body = gradient(size, ((34, 10, 19), (12, 7, 16), (28, 8, 18)))
-        plate_mask = Image.new('L', size, 0)
-        ImageDraw.Draw(plate_mask).rounded_rectangle(plate_box, radius=radius, fill=255)
-        canvas.paste(body, (0, 0), plate_mask)
-        # Specular band, confined to the top third and heavily feathered.
-        sheen = Image.new('L', size, 0)
-        ImageDraw.Draw(sheen).rounded_rectangle((plate_box[0], plate_box[1], plate_box[2],
-                                                 plate_box[1] + (plate_box[3] - plate_box[1]) * 0.42),
-                                                radius=radius, fill=34)
-        sheen = sheen.filter(ImageFilter.GaussianBlur(22 * scale / 2.2))
-        canvas = Image.composite(Image.new('RGBA', size, (255, 214, 219, 255)), canvas, sheen)
-        rim = Image.new('RGBA', size, (0, 0, 0, 0))
-        ImageDraw.Draw(rim).rounded_rectangle(plate_box, radius=radius,
-                                              outline=(255, 52, 72, 150), width=max(2, round(3 * scale)))
-        canvas = Image.alpha_composite(canvas, rim)
-
-    if glow:
-        bloom = Image.new('RGBA', size, (0, 0, 0, 0))
-        ImageDraw.Draw(bloom).polygon([(offset[0] + x * scale, offset[1] + y * scale) for x, y in A_OUTER],
-                                      fill=(255, 52, 72, 110))
-        bloom = bloom.filter(ImageFilter.GaussianBlur(26 * scale))
-        canvas = Image.alpha_composite(canvas, bloom)
-
-    mask = monogram_mask(size, scale, offset, supersample=2)
-    paint = gradient(size, (CRIMSON_BRIGHT, CRIMSON, CRIMSON_DEEP)).convert('RGBA')
-    paint.putalpha(mask)
-    canvas = Image.alpha_composite(canvas, paint)
-
-    specular = Image.new('L', size, 0)
-    ImageDraw.Draw(specular).polygon([(offset[0] + x * scale, offset[1] + y * scale) for x, y in SHEEN], fill=150)
-    specular = Image.composite(specular, Image.new('L', size, 0), mask.point(lambda v: 255 if v > 128 else 0))
-    canvas = Image.composite(Image.new('RGBA', size, GLOSS_HI + (235,)), canvas, specular.point(lambda v: v * 2 // 3))
-    return canvas
+def _gradient(x0, y0, x1, y1, stops, kind='linear', extra=''):
+    items = ''.join(f'\n                <item android:offset="{o}" android:color="{c}"/>' for o, c in stops)
+    return (f'<aapt:attr name="android:fillColor">\n            <gradient android:type="{kind}" '
+            f'android:startX="{_n(x0)}" android:startY="{_n(y0)}" android:endX="{_n(x1)}" android:endY="{_n(y1)}"{extra}>'
+            f'{items}\n            </gradient>\n        </aapt:attr>')
 
 
-def emit_vector():
-    def path_of(polygon):
-        head, *tail = polygon
-        return f'M{head[0]},{head[1]} ' + ' '.join(f'L{x},{y}' for x, y in tail) + ' Z'
+def _radial(cx, cy, r, stops):
+    items = ''.join(f'\n                <item android:offset="{o}" android:color="{c}"/>' for o, c in stops)
+    return (f'<aapt:attr name="android:fillColor">\n            <gradient android:type="radial" '
+            f'android:centerX="{_n(cx)}" android:centerY="{_n(cy)}" android:gradientRadius="{_n(r)}">'
+            f'{items}\n            </gradient>\n        </aapt:attr>')
 
-    def group(polys, gradient_span):
-        # One path per letter so the gradient flows across the whole glyph.
-        d = ' '.join(path_of(p) for p, _ in polys)
-        x0, y0, x1, y1 = gradient_span
-        return f'''    <path android:fillType="evenOdd" android:pathData="{d}">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="{x0}" android:startY="{y0}" android:endX="{x1}" android:endY="{y1}">
-                <item android:color="#FFFF5A6B" android:offset="0"/>
-                <item android:color="#FFE11D2E" android:offset="0.5"/>
-                <item android:color="#FF8C0F1C" android:offset="1"/>
-            </gradient>
-        </aapt:attr>
-    </path>'''
 
-    body = group([(A_OUTER, False), (A_COUNTER, True), (A_BAR, False)], (44, 40, 256, 244))
-    arms = group([(K, False)], (250, 40, 448, 244))
+def _rrect(x, y, w, h, r):
+    return (f'M{_n(x + r)},{_n(y)} H{_n(x + w - r)} A{_n(r)},{_n(r)} 0 0 1 {_n(x + w)},{_n(y + r)} '
+            f'V{_n(y + h - r)} A{_n(r)},{_n(r)} 0 0 1 {_n(x + w - r)},{_n(y + h)} H{_n(x + r)} '
+            f'A{_n(r)},{_n(r)} 0 0 1 {_n(x)},{_n(y + h - r)} V{_n(y + r)} A{_n(r)},{_n(r)} 0 0 1 {_n(x + r)},{_n(y)} Z')
 
-    xml = f'''<!--
-  AK TV 4.9.45 glossy-crimson mark. Generated by tools/brand_mark.py - edit the geometry there.
-  One monogram: the K stem bites into the A's right leg, so the mark reads as a single shape.
--->
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="240dp" android:height="140dp"
-    android:viewportWidth="480" android:viewportHeight="280">
 
-    <path android:pathData="M52,8 H428 Q472,8 472,52 V228 Q472,272 428,272 H52 Q8,272 8,228 V52 Q8,8 52,8 Z">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="0" android:startY="8" android:endX="0" android:endY="272">
-                <item android:color="#220A13" android:offset="0"/>
-                <item android:color="#0C0710" android:offset="0.58"/>
-                <item android:color="#1C0812" android:offset="1"/>
+def _top_half(x, y, w, h, r):
+    """Upper specular lens of a rounded rect: follows the top corners, ends in a soft arc."""
+    mid = y + h * 0.48
+    return (f'M{_n(x + r)},{_n(y)} H{_n(x + w - r)} A{_n(r)},{_n(r)} 0 0 1 {_n(x + w)},{_n(y + r)} '
+            f'V{_n(mid - h * 0.10)} Q{_n(x + w / 2)},{_n(mid + h * 0.06)} {_n(x)},{_n(mid - h * 0.10)} '
+            f'V{_n(y + r)} A{_n(r)},{_n(r)} 0 0 1 {_n(x + r)},{_n(y)} Z')
+
+
+HEADER = '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n    xmlns:aapt="http://schemas.android.com/aapt"\n'
+
+
+def glass_tile(size, inset, radius, glyph_width, comment):
+    """The full mark: aurora squircle, glass sheen, rim light, glyph with a soft drop and play counter."""
+    t = inset; w = size - 2 * inset
+    letters, *_ = glyph_paths(glyph_width, size / 2, size / 2 + size * 0.01)
+    shadow, *_ = glyph_paths(glyph_width, size / 2, size / 2 + size * 0.035)
+    tile = _rrect(t, t, w, w, radius)
+    return f'''{HEADER}    android:width="{size}dp" android:height="{size}dp"
+    android:viewportWidth="{size}" android:viewportHeight="{size}">
+    <!-- {comment}
+         Generated by tools/brand_mark.py: edit the geometry there, not here. -->
+    <path android:pathData="{tile}">
+        {_gradient(t, t, t + w, t + w, AURORA)}
+    </path>
+    <!-- warm bloom low-left and cool depth top-right: the aurora "breathes" across the glass -->
+    <path android:pathData="{tile}">
+        {_radial(t + w * 0.18, t + w * 0.92, w * 0.62, [(0, '#80FF9A6B'), (1, '#00FF9A6B')])}
+    </path>
+    <path android:pathData="{tile}">
+        {_radial(t + w * 0.92, t + w * 0.06, w * 0.55, [(0, '#663A2BFF'), (1, '#003A2BFF')])}
+    </path>
+    <!-- liquid-glass sheen: a bright lens over the upper half -->
+    <path android:pathData="{_top_half(t, t, w, w, radius)}">
+        {_gradient(0, t, 0, t + w * 0.5, [(0, '#73FFFFFF'), (1, '#08FFFFFF')])}
+    </path>
+    <!-- rim light: bright at the top edge, fading round the sides -->
+    <path android:pathData="{_rrect(t + 1, t + 1, w - 2, w - 2, radius - 1)}" android:fillColor="#00000000"
+        android:strokeWidth="{_n(size / 80)}">
+        <aapt:attr name="android:strokeColor">
+            <gradient android:type="linear" android:startX="0" android:startY="{_n(t)}" android:endX="0" android:endY="{_n(t + w)}">
+                <item android:offset="0" android:color="#CCFFFFFF"/>
+                <item android:offset="0.45" android:color="#33FFFFFF"/>
+                <item android:offset="1" android:color="#59FFFFFF"/>
             </gradient>
         </aapt:attr>
     </path>
-    <path android:strokeWidth="3" android:strokeColor="#8CFF3448"
-        android:pathData="M52,8 H428 Q472,8 472,52 V228 Q472,272 428,272 H52 Q8,272 8,228 V52 Q8,8 52,8 Z"/>
-
-    {body}
-
-    {arms}
-
-    <path android:fillAlpha="0.7" android:pathData="{path_of(SHEEN)}">
-        <aapt:attr name="android:fillColor">
-            <gradient android:type="linear" android:startX="46" android:startY="46" android:endX="64" android:endY="236">
-                <item android:color="#CCFFEBEE" android:offset="0"/>
-                <item android:color="#00FFEBEE" android:offset="1"/>
-            </gradient>
-        </aapt:attr>
+    <!-- glyph: soft drop, then frosted-white letters; even-odd cuts the play counter -->
+    <path android:fillType="evenOdd" android:fillColor="#33140A3C" android:pathData="{shadow}"
+        android:strokeColor="#33140A3C" android:strokeWidth="{_n(size / 50)}" android:strokeLineJoin="round"/>
+    <path android:fillType="evenOdd" android:pathData="{letters}"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="{_n(size / 64)}" android:strokeLineJoin="round">
+        {_gradient(0, size * 0.30, 0, size * 0.72, [(0, '#FFFFFFFF'), (1, '#FFF1E9FF')])}
     </path>
 </vector>
 '''
-    (DRAWABLE / 'aktv_mark_cinematic.xml').write_text(xml)
-    return DRAWABLE / 'aktv_mark_cinematic.xml'
 
 
-def main():
-    command = sys.argv[1] if len(sys.argv) > 1 else 'preview'
-    if command == 'emit':
-        print(emit_vector())
-        return
-    OUT_PREVIEW.mkdir(parents=True, exist_ok=True)
-    render_mark().save(OUT_PREVIEW / 'mark-plate.png')
-    render_mark((512, 512), plate=False, glow=False).save(OUT_PREVIEW / 'mark-bare.png')
-    render_mark((1200, 700)).resize((600, 350), Image.Resampling.LANCZOS).save(OUT_PREVIEW / 'mark-small.png')
-    print(OUT_PREVIEW)
+def adaptive_foreground():
+    # 108dp canvas, 66dp safe circle: keep the glyph inside ~58dp.
+    letters, *_ = glyph_paths(58, 54, 55)
+    shadow, *_ = glyph_paths(58, 54, 57)
+    return f'''{HEADER}    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- AK TV adaptive-icon foreground. Generated by tools/brand_mark.py. -->
+    <path android:fillType="evenOdd" android:fillColor="#3A140A3C" android:pathData="{shadow}"
+        android:strokeColor="#3A140A3C" android:strokeWidth="2" android:strokeLineJoin="round"/>
+    <path android:fillType="evenOdd" android:pathData="{letters}"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineJoin="round">
+        {_gradient(0, 33, 0, 77, [(0, '#FFFFFFFF'), (1, '#FFF1E9FF')])}
+    </path>
+</vector>
+'''
+
+
+def adaptive_monochrome():
+    letters, *_ = glyph_paths(58, 54, 55)
+    return f'''<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Themed-icon (Android 13+) silhouette. Generated by tools/brand_mark.py. -->
+    <path android:fillType="evenOdd" android:fillColor="#FFFFFFFF" android:pathData="{letters}"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="1.6" android:strokeLineJoin="round"/>
+</vector>
+'''
+
+
+def adaptive_background():
+    return f'''{HEADER}    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- AK TV adaptive-icon background: aurora glass. Generated by tools/brand_mark.py. -->
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        {_gradient(0, 0, 108, 108, AURORA)}
+    </path>
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        {_radial(18, 100, 70, [(0, '#80FF9A6B'), (1, '#00FF9A6B')])}
+    </path>
+    <path android:pathData="M0,0 H108 V108 H0 Z">
+        {_radial(100, 6, 60, [(0, '#663A2BFF'), (1, '#003A2BFF')])}
+    </path>
+    <path android:pathData="M0,0 H108 V50 Q54,62 0,50 Z">
+        {_gradient(0, 0, 0, 56, [(0, '#59FFFFFF'), (1, '#05FFFFFF')])}
+    </path>
+</vector>
+'''
+
+
+def emit():
+    DRAWABLE.mkdir(parents=True, exist_ok=True)
+    files = {
+        'aktv_logo.xml': glass_tile(160, 6, 40, 92, 'AK TV 4.10 "Aurora Glass" mark: liquid-glass squircle with the AK play ligature.'),
+        'aktv_icon_fg.xml': adaptive_foreground(),
+        'aktv_icon_bg.xml': adaptive_background(),
+        'aktv_icon_mono.xml': adaptive_monochrome(),
+    }
+    for name, body in files.items():
+        (DRAWABLE / name).write_text(body)
+        print('wrote', DRAWABLE / name)
+
+
+# ---- raster (Pillow) -------------------------------------------------------------------------
+def _hex(c):
+    c = c.lstrip('#')
+    return tuple(int(c[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _lerp_stops(stops, t):
+    for (o0, c0), (o1, c1) in zip(stops, stops[1:]):
+        if t <= o1:
+            f = 0 if o1 == o0 else (t - o0) / (o1 - o0)
+            a, b = _hex(c0), _hex(c1)
+            return tuple(round(a[i] + (b[i] - a[i]) * f) for i in range(3))
+    return _hex(stops[-1][1])
+
+
+def raster():
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+    def aurora(w, h):
+        # Small gradient, upscaled: smooth and fast without numpy.
+        g = Image.new('RGB', (64, 64))
+        g.putdata([_lerp_stops(AURORA, min(1.0, (x + y) / 126)) for y in range(64) for x in range(64)])
+        g = g.resize((w, h), Image.Resampling.BICUBIC)
+        bloom = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+        d = ImageDraw.Draw(bloom)
+        d.ellipse((-w * 0.4, h * 0.55, w * 0.6, h * 1.5), fill=(255, 120, 90, 70))
+        d.ellipse((w * 0.55, -h * 0.5, w * 1.4, h * 0.45), fill=(58, 43, 255, 90))
+        bloom = bloom.filter(ImageFilter.GaussianBlur(min(w, h) * 0.18))
+        out = g.convert('RGBA'); out.alpha_composite(bloom)
+        return out
+
+    def poly(points, s, ox, oy):
+        return [(x * s + ox, y * s + oy) for x, y in points]
+
+    def draw_glyph(img, width, cx, cy, drop=True):
+        x0, y0, x1, y1 = GLYPH_BOX
+        s = width / (x1 - x0); ox = cx - (x0 + x1) / 2 * s; oy = cy - (y0 + y1) / 2 * s
+        mask = Image.new('L', img.size, 0); d = ImageDraw.Draw(mask)
+        for p in (A_OUTER, K_STEM, K_ARMS):
+            d.polygon(poly(p, s, ox, oy), fill=255)
+        d.polygon(poly(A_PLAY, s, ox, oy), fill=0)
+        # Soften every corner the way the vector's round stroke join does: blur, then re-threshold.
+        mask = mask.filter(ImageFilter.GaussianBlur(s * 0.9)).point(lambda v: 0 if v < 100 else (255 if v > 156 else (v - 100) * 255 // 56))
+        if drop:
+            shadow = Image.new('RGBA', img.size, (20, 10, 60, 0))
+            shadow.putalpha(mask.point(lambda v: v * 70 // 255))
+            shadow = shadow.transform(img.size, Image.Transform.AFFINE, (1, 0, 0, 0, 1, -width * 0.025))
+            img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(width * 0.02)))
+        white = Image.new('RGBA', img.size, (255, 255, 255, 255)); white.putalpha(mask)
+        img.alpha_composite(white)
+
+    def tile(size):
+        ss = 2; S = size * ss
+        inset = round(S * 6 / 160); r = round(S * 40 / 160); w = S - 2 * inset
+        img = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+        body = aurora(w, w)
+        m = Image.new('L', (w, w), 0); ImageDraw.Draw(m).rounded_rectangle((0, 0, w - 1, w - 1), r, fill=255)
+        sheen = Image.new('RGBA', (w, w), (255, 255, 255, 0)); sd = ImageDraw.Draw(sheen)
+        for yy in range(int(w * 0.5)):
+            sd.line((0, yy, w, yy), fill=(255, 255, 255, int(78 * (1 - yy / (w * 0.5)) + 6)))
+        lens = Image.new('L', (w, w), 0); ImageDraw.Draw(lens).ellipse((-w * 0.3, -w * 0.62, w * 1.3, w * 0.52), fill=255)
+        sheen.putalpha(Image.composite(sheen.getchannel('A'), Image.new('L', (w, w), 0), lens))
+        body.alpha_composite(sheen)
+        rim = Image.new('RGBA', (w, w), (0, 0, 0, 0))
+        ImageDraw.Draw(rim).rounded_rectangle((1, 1, w - 2, w - 2), r, outline=(255, 255, 255, 120), width=max(2, S // 80))
+        body.alpha_composite(rim)
+        body.putalpha(Image.composite(body.getchannel('A'), Image.new('L', (w, w), 0), m))
+        img.alpha_composite(body, (inset, inset))
+        draw_glyph(img, S * 92 / 160, S / 2, S / 2 + S * 0.01)
+        return img.resize((size, size), Image.Resampling.LANCZOS)
+
+    def banner(w, h):
+        ss = 3; W, H = w * ss, h * ss
+        img = Image.new('RGBA', (W, H), _hex(INK) + (255,))
+        glow = aurora(W, H); glow.putalpha(70); img.alpha_composite(glow)
+        side = round(H * 0.54)
+        font = ImageFont.truetype(str(FONT_BOLD), round(H * 0.25))
+        d = ImageDraw.Draw(img)
+        gap = W * 0.05; track = H * 0.012
+        words = [('AK', (255, 255, 255, 255)), (' ', None), ('TV', _hex('#D9C9FF') + (255,))]
+        text_w = sum(d.textlength(ch, font=font) + track for word, _ in words for ch in word)
+        x = round((W - side - gap - text_w) / 2)
+        img.alpha_composite(tile(side), (x, round((H - side) / 2)))
+        x += side + gap; y = round(H * 0.51)
+        for word, colour in words:
+            for ch in word:
+                if colour: d.text((x, y), ch, font=font, fill=colour, anchor='lm')
+                x += d.textlength(ch, font=font) + track
+        return img.resize((w, h), Image.Resampling.LANCZOS)
+
+    NODPI.mkdir(parents=True, exist_ok=True); DESIGN.mkdir(parents=True, exist_ok=True)
+    banner(320, 180).convert('RGB').save(NODPI / 'banner_img.png', optimize=True)
+    tile(1024).save(DESIGN / 'ak-tv-logo.png', optimize=True)
+    banner(1280, 720).convert('RGB').save(DESIGN / 'ak-tv-banner.png', optimize=True)
+    mark = Image.new('RGBA', (1024, 1024), (0, 0, 0, 0)); draw_glyph(mark, 860, 512, 512, drop=False)
+    mark.save(DESIGN / 'ak-tv-mark-transparent.png', optimize=True)
+    print('wrote banner_img.png and design/ak-tv-{logo,banner,mark-transparent}.png')
 
 
 if __name__ == '__main__':
-    main()
+    cmd = sys.argv[1] if len(sys.argv) > 1 else 'all'
+    if cmd in ('emit', 'all'):
+        emit()
+    if cmd in ('raster', 'all'):
+        raster()

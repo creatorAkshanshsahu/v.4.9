@@ -1,4 +1,4 @@
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_focused="true"><shape><solid android:color="#00000000"/><corners android:radius="14dp"/><stroke android:width="2dp" android:color="#F8F9FC"/></shape></item>
-    <item><shape><solid android:color="#00000000"/><corners android:radius="14dp"/></shape></item>
+<selector xmlns:android="http://schemas.android.com/apk/res/android" android:enterFadeDuration="180" android:exitFadeDuration="240">
+    <item android:state_focused="true"><shape><solid android:color="#00000000"/><corners android:radius="20dp"/><stroke android:width="2dp" android:color="#FFFFFFFF"/></shape></item>
+    <item><shape><solid android:color="#00000000"/><corners android:radius="20dp"/></shape></item>
 </selector>

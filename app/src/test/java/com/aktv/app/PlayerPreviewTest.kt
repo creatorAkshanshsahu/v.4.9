@@ -82,14 +82,11 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
-            // Same wine gradient the player uses in production (0xF0120810 / 0xE00C0710).
-            // The earlier 0xE5080B11 / 0xD90D121A decoded to RGB (8,11,17)/(13,18,26) - dark
-            // cyan, not wine - which is where the live-player preview's teal came from.
-            card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
-                cornerRadius = 16f; setStroke(1, 0x59FF3448)
-            }
-            layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.aktv_logo_cinematic)
+            // Same frosted glass panel the live player uses in production.
+            card.background = Glass.panel(1f, 26f)
+            layer.findViewById<View>(R.id.infoLogoBox).background = Glass.card(1f, 16f).apply { shine = false }
+            layer.findViewById<TextView>(R.id.infoLive).setCompoundDrawablesRelativeWithIntrinsicBounds(PulseDotDrawable(1f, Color.WHITE, 9f), null, null, null)
+            layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.aktv_logo)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
             layer.findViewById<TextView>(R.id.infoName).text = "AK Sport HD"
             layer.findViewById<TextView>(R.id.infoNow).apply {
@@ -103,8 +100,9 @@ class PlayerPreviewTest {
             }
             layer.findViewById<View>(R.id.infoHint).visibility = View.GONE
             val primary = layer.findViewById<TextView>(R.id.infoGuideAction)
-            primary.background = Ui.pill(1f, Color.WHITE, 16f)
-            primary.setTextColor(Color.BLACK)
+            // Show the focused look of the real player_action selector on the first action.
+            primary.background.state = intArrayOf(android.R.attr.state_focused); primary.background.jumpToCurrentState()
+            primary.scaleX = 1.06f; primary.scaleY = 1.06f
             capture(root, 960, 540, file)
         } finally { controller.destroy() }
     }

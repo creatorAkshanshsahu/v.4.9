@@ -4,7 +4,7 @@
     android:background="@drawable/poster_card_bg" android:foreground="@drawable/focus_ring_poster">
     <TextView android:id="@+id/posterRank" android:layout_width="54dp" android:layout_height="184dp"
         android:layout_gravity="start|top" android:gravity="center_vertical|start" android:includeFontPadding="false"
-        android:textColor="#5598B7B5" android:textSize="62sp" android:fontFamily="@font/sora_bold"
+        android:textColor="#59D9C9FF" android:textSize="62sp" android:fontFamily="@font/sora_bold"
         android:visibility="gone"/>
     <LinearLayout android:id="@+id/posterContent" android:layout_width="124dp" android:layout_height="wrap_content"
         android:layout_gravity="end|top" android:orientation="vertical" android:padding="4dp">
