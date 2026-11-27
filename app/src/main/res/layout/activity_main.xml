@@ -56,14 +56,15 @@
                 android:scaleType="center" android:focusable="true" android:clickable="true"
                 android:contentDescription="Back"/>
             <TextView android:id="@+id/playerLive" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:layout_marginStart="14dp" android:text="LIVE" android:background="@drawable/live_chip"
-                android:textColor="@color/abyss" android:textSize="10sp" android:fontFamily="@font/sora_bold"
+                android:layout_marginStart="14dp" android:text="LIVE" android:background="@drawable/live_chip_acid"
+                android:textColor="@color/abyss" android:textSize="11sp" android:fontFamily="@font/rajdhani_bold"
+                android:gravity="center_vertical"
                 android:letterSpacing="0.1" android:paddingStart="8dp" android:paddingEnd="8dp"
                 android:paddingTop="3dp" android:paddingBottom="3dp" android:includeFontPadding="false"/>
             <TextView android:id="@+id/playerTopTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
                 android:layout_marginStart="12dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="560dp"
-                android:textColor="@color/text" android:textSize="22sp" android:fontFamily="@font/sora_bold"
-                android:includeFontPadding="false"/>
+                android:textColor="@color/text" android:textSize="25sp" android:fontFamily="@font/rajdhani_bold"
+                android:letterSpacing="0.04" android:includeFontPadding="false"/>
         </LinearLayout>
         <LinearLayout android:id="@+id/playerInfoDock" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:layout_gravity="bottom|start" android:layout_marginStart="40dp" android:layout_marginEnd="40dp"
@@ -93,16 +94,16 @@
                     android:orientation="horizontal" android:gravity="center_vertical">
                     <!-- The site's eyebrow: "Now playing", brand crimson, bold, widely tracked. No badge. -->
                     <TextView android:id="@+id/infoKicker" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="NOW PLAYING" android:textColor="@color/brand_light" android:textSize="11sp"
-                        android:fontFamily="@font/sora_bold" android:letterSpacing="0.24" android:includeFontPadding="false"/>
+                        android:text="//  NOW PLAYING" android:textColor="#FFFCEE0A" android:textSize="13sp"
+                        android:fontFamily="@font/rajdhani_bold" android:letterSpacing="0.26" android:includeFontPadding="false"/>
                     <TextView android:id="@+id/infoCat" android:layout_width="wrap_content" android:layout_height="wrap_content"
                         android:layout_marginStart="10dp" android:textColor="@color/text_dim" android:textSize="13sp"
                         android:visibility="gone"/>
                 </LinearLayout>
                 <TextView android:id="@+id/infoName" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="6dp" android:maxLines="2" android:ellipsize="end" android:maxWidth="1100dp"
-                    android:textColor="@color/text" android:textSize="36sp" android:fontFamily="@font/sora_bold"
-                    android:includeFontPadding="false"/>
+                    android:textColor="@color/text" android:textSize="40sp" android:fontFamily="@font/rajdhani_bold"
+                    android:letterSpacing="0.02" android:includeFontPadding="false"/>
                 <TextView android:id="@+id/infoNow" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_marginTop="8dp" android:maxLines="1" android:ellipsize="end" android:maxWidth="1100dp"
                     android:textColor="@color/text" android:textSize="15sp" android:visibility="gone"/>
@@ -137,8 +138,13 @@
         </LinearLayout>
         <TextClock android:id="@+id/playerClock" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_gravity="top|end" android:layout_margin="36dp" android:format12Hour="h:mm" android:format24Hour="HH:mm"
-            android:textColor="@color/text" android:textSize="20sp" android:fontFamily="@font/sora_regular" android:alpha="0"
+            android:textColor="@color/text" android:textSize="26sp" android:fontFamily="@font/rajdhani_bold" android:alpha="0"
             android:shadowColor="#99000000" android:shadowRadius="12"/>
+        <!-- Cyber HUD telemetry under the clock: resolution, frame rate, codec, server, dropped frames. -->
+        <TextView android:id="@+id/playerHud" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:layout_gravity="top|end" android:layout_marginTop="74dp" android:layout_marginEnd="36dp"
+            android:alpha="0" android:textColor="#FFFCEE0A" android:textSize="12sp" android:fontFamily="@font/rajdhani_bold"
+            android:letterSpacing="0.14" android:shadowColor="#CC000000" android:shadowRadius="8" android:text="LINKING…"/>
         <!-- programme guide: dedicated EPG panel, separate from the channel-zap drawer -->
         <View android:id="@+id/programmeGuideScrim" android:layout_width="match_parent" android:layout_height="match_parent"
             android:background="#CC04020C" android:visibility="gone" android:clickable="true" android:focusable="false"/>

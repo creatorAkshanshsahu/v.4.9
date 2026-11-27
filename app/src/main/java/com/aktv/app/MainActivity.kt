@@ -350,8 +350,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var phoneSegs: List<TextView>; private lateinit var phoneSearchBtn: TextView
     /** Tiles bound before this instant play the staggered entrance (set when the shelves are rebuilt). */
     private var entranceUntil = 0L
-    private val segBgs by lazy { List(segs.size) { Ui.pill(dp, Color.TRANSPARENT, 22f) } }
-    private val phoneSegBgs by lazy { List(phoneSegs.size + 1) { Ui.pill(dp, Color.TRANSPARENT, 20f) } }
+    private val segBgs by lazy { List(segs.size) { Ui.pill(dp, Color.TRANSPARENT, 4f) } }
+    private val phoneSegBgs by lazy { List(phoneSegs.size + 1) { Ui.pill(dp, Color.TRANSPARENT, 4f) } }
     private var lastRowsFocus: View? = null
     private val compact by lazy { resources.configuration.screenHeightDp < 420 }
     private lateinit var searchBtn: TextView; private lateinit var intro: AkIntroView
@@ -375,6 +375,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var infoCard: View; private lateinit var infoLogo: ImageView; private lateinit var infoName: TextView
     private lateinit var infoCat: TextView; private lateinit var playerScrim: View; private lateinit var playerClock: View
     private lateinit var playerTopBar: View; private lateinit var playerTopTitle: TextView
+    private lateinit var playerHud: TextView
     private lateinit var infoMono: TextView; private lateinit var infoNow: TextView; private lateinit var infoProgress: ProgressBar
     private lateinit var infoProgressRow: View; private lateinit var infoStart: TextView; private lateinit var infoEnd: TextView
     private lateinit var infoDesc: TextView; private lateinit var infoScheduleNext: TextView; private lateinit var infoNext: TextView
@@ -480,6 +481,7 @@ class MainActivity : AppCompatActivity() {
         infoCard = findViewById(R.id.infoCard); infoLogo = findViewById(R.id.infoLogo); infoName = findViewById(R.id.infoName)
         infoCat = findViewById(R.id.infoCat); playerScrim = findViewById(R.id.playerScrim); playerClock = findViewById(R.id.playerClock)
         playerTopBar = findViewById(R.id.playerTopBar); playerTopTitle = findViewById(R.id.playerTopTitle)
+        playerHud = findViewById(R.id.playerHud)
         findViewById<View>(R.id.playerBack).apply {
             setOnClickListener { closePlayer() }
             setOnFocusChangeListener { v, focused -> v.animate().scaleX(if (focused) 1.08f else 1f).scaleY(if (focused) 1.08f else 1f).setDuration(160).start() }
@@ -529,10 +531,19 @@ class MainActivity : AppCompatActivity() {
         layoutHero()
         segs.forEachIndexed { i, tv -> tv.background = segBgs[i] }
         heroOrb.background = orbBg
-        // Nothing sits behind the channel block: the site floats its now-playing text straight on the
-        // picture, and the scrim underneath is what keeps it readable. No panel, no border, no elevation.
-        infoCard.background = null
+        // CRT scanlines over the hero art, under its text.
+        findViewById<View>(R.id.heroTreatment)?.background = android.graphics.drawable.LayerDrawable(arrayOf(
+            getDrawable(R.drawable.flix_hero_scrim)!!, Cyber.scanlines(resources, 30)))
+        // Cyberpunk HUD: the channel block sits in a cut-corner ink slab with an acid signal stripe,
+        // and the scrim carries CRT scanlines.
+        infoCard.background = HudPanelDrawable(dp)
         infoCard.elevation = 0f
+        playerScrim.background = android.graphics.drawable.LayerDrawable(arrayOf(
+            getDrawable(R.drawable.scrim_player)!!, Cyber.scanlines(resources, 38)))
+        findViewById<TextView>(R.id.playerLive)?.apply {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(PulseDotDrawable(dp, Accent.ABYSS, 8f), null, null, null)
+            compoundDrawablePadding = (4 * dp).toInt()
+        }
         findViewById<View>(R.id.infoLogoBox).background = GlassKit.card(dp, 16f).apply { shine = false }
         val playerDock = findViewById<View>(R.id.playerInfoDock)
         val phoneWidth = resources.configuration.screenWidthDp < 600
@@ -576,6 +587,9 @@ class MainActivity : AppCompatActivity() {
         // Programme progress reads as a lacquered crimson bar, not the old mint.
         val played = ColorStateList.valueOf(Accent.BRAND)
         heroProgress.progressTintList = played; infoProgress.progressTintList = played
+        // The live programme bar is a segmented neon strip (its own gradient, so no tint).
+        infoProgress.progressDrawable = SegmentedBarDrawable(dp)
+        infoProgress.progressTintList = null; infoProgress.progressBackgroundTintList = null
 
         // search pill in the top bar
         searchBtn.background = searchBg
@@ -1087,7 +1101,7 @@ class MainActivity : AppCompatActivity() {
         else if (!Motion.enabled) { tv.scaleX = scale; tv.scaleY = scale }
     }
 
-    private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 19f) }
+    private val searchBg by lazy { Ui.pill(dp, Color.TRANSPARENT, 4f) }
 
     /** The search glyph sits in the dark pill: invisible at rest, ringed white on focus. */
     private fun roundStyle(tv: TextView, bg: GradientDrawable) {
@@ -3236,6 +3250,8 @@ class MainActivity : AppCompatActivity() {
                     ui.postDelayed({ if (!isFinishing && !isDestroyed && tab == 9 && !xtreamAccount().isConfigured) showStarShareDialog() }, 240)
                 }
             }
+            // Cyberpunk: the section title glitches as the new tab lands.
+            findViewById<TextView>(R.id.sectionTitle)?.let { title -> title.post { Motion.glitch(title, 420) } }
             val dir = if (t > tab) 1 else -1
             ui.removeCallbacks(heroRotate)
             tab = t; layoutHero(); stopPreview()
@@ -3873,6 +3889,7 @@ class MainActivity : AppCompatActivity() {
         playerScrim.animate().alpha(0f).setDuration(450).start()
         playerClock.animate().alpha(0f).setDuration(450).start()
         playerTopBar.animate().alpha(0f).setDuration(450).start()
+        playerHud.animate().alpha(0f).setDuration(450).start()
     }
     private fun showInfo() {
         ui.removeCallbacks(hideInfo)
@@ -3881,6 +3898,7 @@ class MainActivity : AppCompatActivity() {
         playerScrim.animate().alpha(1f).setDuration(260).start()
         playerClock.animate().alpha(1f).setDuration(260).start()
         playerTopBar.animate().alpha(1f).setDuration(260).start()
+        playerHud.text = hudTelemetry(); playerHud.animate().alpha(1f).setDuration(260).start()
         ui.removeCallbacks(guideProgressTick); ui.postDelayed(guideProgressTick, 60_000)
         if (!healthScanActive) ui.postDelayed(hideInfo, 5000)
     }
@@ -3889,11 +3907,13 @@ class MainActivity : AppCompatActivity() {
         infoCat.text = "${if (ch.v2) "V2 · 24/7" else ch.category}   ${current + 1} of ${shown.size}"
         // The site's top bar names the channel the same way its guide numbers it.
         playerTopTitle.text = "${current + 1} · ${ch.name}"
+        // Zapping glitches the channel name into place.
+        Motion.glitch(infoName); Motion.glitch(playerTopTitle)
+        playerHud.text = "LINKING…"
         bindLogo(infoLogo, infoMono, ch)
         val ac = accentOf(ch.key)
         spinner.indeterminateTintList = ColorStateList.valueOf(ac)
-        // The site's progress is live red, whatever the channel's accent is.
-        infoProgress.progressTintList = ColorStateList.valueOf(Accent.LIVE)
+        // The segmented HUD bar carries its own acid -> magenta -> cyan gradient.
         currentGuideNow = null; currentGuideData = null; programmeGuideCurrentChannel = ch.key
         infoNow.visibility = View.GONE; infoProgressRow.visibility = View.GONE; infoDesc.visibility = View.GONE
         infoScheduleNext.visibility = View.GONE; infoNext.visibility = View.GONE
@@ -4576,6 +4596,23 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
+    /** HUD readout: what the decoder is really doing, including dropped frames (the tell for a struggling decoder). */
+    private fun hudTelemetry(): String {
+        val p = player ?: return "LINKING…"
+        val f = p.videoFormat
+        val parts = ArrayList<String>()
+        if (f != null && f.height > 0) parts += "${f.height}P"
+        if (f != null && f.frameRate > 0f) parts += "${kotlin.math.round(f.frameRate).toInt()} FPS"
+        f?.sampleMimeType?.let { mime ->
+            parts += when (mime) { MimeTypes.VIDEO_H264 -> "H.264"; MimeTypes.VIDEO_H265 -> "HEVC"; MimeTypes.VIDEO_MPEG2 -> "MPEG-2"
+                else -> mime.substringAfter('/').uppercase(java.util.Locale.ROOT) }
+        }
+        parts += "SRV ${serverIdx + 1}"
+        val dropped = p.videoDecoderCounters?.droppedBufferCount ?: 0
+        if (dropped > 0) parts += "DROP $dropped"
+        return parts.joinToString("  ·  ")
+    }
+
     private var edgeResyncIdx = -1
     private var edgeResyncs = 0
 
@@ -4739,6 +4776,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             if (diagnosticsText != null) refreshPlaybackDetails()
+            if (playerHud.alpha > 0.01f) playerHud.text = hudTelemetry()
             if (playbackActive) ui.postDelayed(this, 500)
         }
     }

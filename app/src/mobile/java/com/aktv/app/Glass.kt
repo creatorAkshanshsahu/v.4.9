@@ -43,8 +43,9 @@ internal object Glass {
             Color.argb((fillAlpha * 3 / 4).coerceAtLeast(0), 0xC9, 0xB8, 0xFF)
         )).apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(radiusDp).toFloat()
-            setStroke(dp(1).coerceAtLeast(1), Color.argb(0x55, 0xFF, 0xFF, 0xFF))
+            // Cyberpunk: tight, technical corners and a neon-cyan hairline instead of soft rounded glass.
+            cornerRadius = dp(minOf(radiusDp, 6)).toFloat()
+            setStroke(dp(1).coerceAtLeast(1), Color.argb(0x66, 0x00, 0xEC, 0xF7))
         }
 
     /** A filled accent pill in the STREAMR aurora (magenta -> violet -> cyan), for primary actions. */
@@ -52,7 +53,8 @@ internal object Glass {
         GradientDrawable.Orientation.LEFT_RIGHT, Accent.aurora()
     ).apply {
         shape = GradientDrawable.RECTANGLE
-        cornerRadius = dp(24).toFloat()
+        cornerRadius = dp(4).toFloat()
+        setStroke(dp(1).coerceAtLeast(1), Accent.ACID)
     }
 
     /** Bottom-up scrim so text sits readable over artwork. */

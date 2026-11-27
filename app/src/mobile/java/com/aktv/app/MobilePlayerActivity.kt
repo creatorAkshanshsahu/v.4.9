@@ -260,6 +260,9 @@ class MobilePlayerActivity : AppCompatActivity() {
         }
         frame.addView(status)
 
+        // CRT scanlines over the video, under the chrome (cyberpunk HUD).
+        frame.addView(View(this).apply { background = Cyber.scanlines(resources, 26); isClickable = false },
+            FrameLayout.LayoutParams(-1, -1))
         // The TV watch header, touched-sized: back, title + context line, source chip.
         Glass.density = resources.displayMetrics.density
         val topInner = LinearLayout(this).apply {
@@ -279,8 +282,9 @@ class MobilePlayerActivity : AppCompatActivity() {
         }
         titleCol.addView(TextView(this).apply {
             text = titleName
-            setTextColor(Color.parseColor(Glass.TEXT)); textSize = 16f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor(Glass.TEXT)); textSize = 19f; letterSpacing = 0.03f
+            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MobilePlayerActivity, R.font.rajdhani_bold)
+                ?: android.graphics.Typeface.DEFAULT_BOLD
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
         })
         subLine = TextView(this).apply {
@@ -384,6 +388,7 @@ class MobilePlayerActivity : AppCompatActivity() {
             this.text = text
             textSize = 15f
             setTextColor(Color.parseColor(Glass.ACCENT))
+            stateListAnimator = android.animation.AnimatorInflater.loadStateListAnimator(context, R.animator.glass_lift)
             setOnClickListener { onTap() }
         }
 

@@ -1,18 +1,18 @@
-<!-- Aurora Glass focus: a bright white glass rim inside a cyan halo, with a specular sheen across the top. -->
+<!-- Cyberpunk focus: an acid-yellow lock inside a neon cyan halo, sheen across the top, sharp corners. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android" android:enterFadeDuration="160" android:exitFadeDuration="220">
     <item android:state_focused="true">
         <layer-list>
             <item android:left="3dp" android:top="3dp" android:right="3dp" android:bottom="3dp">
-                <shape><gradient android:angle="270" android:startColor="#33FFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" android:centerY="0.45"/><corners android:radius="17dp"/></shape>
+                <shape><gradient android:angle="270" android:startColor="#33FFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" android:centerY="0.45"/><corners android:radius="3dp"/></shape>
             </item>
             <item android:left="3dp" android:top="3dp" android:right="3dp" android:bottom="3dp">
-                <shape><solid android:color="#00000000"/><corners android:radius="17dp"/><stroke android:width="2.5dp" android:color="#F2FFFFFF"/></shape>
+                <shape><solid android:color="#00000000"/><corners android:radius="3dp"/><stroke android:width="2.5dp" android:color="#FFFCEE0A"/></shape>
             </item>
-            <item><shape><solid android:color="#00000000"/><corners android:radius="20dp"/><stroke android:width="3dp" android:color="@color/brand_light"/></shape></item>
+            <item><shape><solid android:color="#00000000"/><corners android:radius="5dp"/><stroke android:width="3dp" android:color="@color/brand_light"/></shape></item>
         </layer-list>
     </item>
     <item android:state_activated="true">
-        <shape><solid android:color="#00000000"/><corners android:radius="20dp"/><stroke android:width="1.5dp" android:color="#99FF00D0"/></shape>
+        <shape><solid android:color="#00000000"/><corners android:radius="5dp"/><stroke android:width="1.5dp" android:color="#99FF00D0"/></shape>
     </item>
-    <item><shape><solid android:color="#00000000"/><corners android:radius="20dp"/><stroke android:width="1dp" android:color="#24FFFFFF"/></shape></item>
+    <item><shape><solid android:color="#00000000"/><corners android:radius="5dp"/><stroke android:width="1dp" android:color="#24FFFFFF"/></shape></item>
 </selector>

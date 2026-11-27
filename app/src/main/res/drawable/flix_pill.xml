@@ -1,6 +1,6 @@
 <!-- Glass pill bar (tabs, sort/filter): ink glass, sheen on the upper half, soft white rim. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item><shape><solid android:color="#B3141B31"/><corners android:radius="22dp"/></shape></item>
-    <item><shape><gradient android:angle="270" android:startColor="#24FFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" android:centerY="0.5"/><corners android:radius="22dp"/></shape></item>
-    <item><shape><solid android:color="#00000000"/><stroke android:width="1dp" android:color="#38FFFFFF"/><corners android:radius="22dp"/></shape></item>
+    <item><shape><solid android:color="#B3141B31"/><corners android:radius="5dp"/></shape></item>
+    <item><shape><gradient android:angle="270" android:startColor="#24FFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" android:centerY="0.5"/><corners android:radius="5dp"/></shape></item>
+    <item><shape><solid android:color="#00000000"/><stroke android:width="1dp" android:color="#38FFFFFF"/><corners android:radius="5dp"/></shape></item>
 </layer-list>

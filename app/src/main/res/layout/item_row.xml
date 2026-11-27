@@ -5,7 +5,7 @@
         android:layout_marginStart="48dp" android:layout_marginTop="6dp" android:orientation="horizontal"
         android:baselineAligned="true">
         <TextView android:id="@+id/rowTitle" android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:textColor="@color/text" android:textSize="20sp" android:fontFamily="@font/sora_bold"/>
+            android:textColor="@color/text" android:textSize="20sp" android:fontFamily="@font/rajdhani_bold" android:letterSpacing="0.04"/>
         <TextView android:id="@+id/rowCount" android:layout_width="wrap_content" android:layout_height="wrap_content"
             android:layout_marginStart="10dp" android:textColor="@color/flix_faint" android:textSize="12sp"
             android:visibility="gone"/>

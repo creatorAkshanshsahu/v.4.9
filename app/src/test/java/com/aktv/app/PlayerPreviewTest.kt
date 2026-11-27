@@ -70,7 +70,17 @@ class PlayerPreviewTest {
                 contentDescription = "Sample sports still"
             }, 0, FrameLayout.LayoutParams(-1, -1))
             layer.findViewById<PlayerView>(R.id.playerView).visibility = View.INVISIBLE
-            layer.findViewById<View>(R.id.playerScrim).alpha = 0.72f
+            // Same scrim + CRT scanlines production installs.
+            layer.findViewById<View>(R.id.playerScrim).apply {
+                alpha = 0.72f
+                background = android.graphics.drawable.LayerDrawable(arrayOf(
+                    activity.getDrawable(R.drawable.scrim_player)!!, Cyber.scanlines(activity.resources, 38)))
+            }
+            layer.findViewById<TextView>(R.id.playerHud).apply { alpha = 1f; text = "1080P  ·  50 FPS  ·  H.264  ·  SRV 1" }
+            layer.findViewById<TextView>(R.id.playerLive).apply {
+                setCompoundDrawablesRelativeWithIntrinsicBounds(PulseDotDrawable(1f, Accent.ABYSS, 8f), null, null, null)
+                compoundDrawablePadding = 4
+            }
             layer.findViewById<View>(R.id.playerTopBar).alpha = 1f
             layer.findViewById<TextView>(R.id.playerTopTitle).text = "1 · AK Sport HD"
             layer.findViewById<View>(R.id.playerClock).alpha = 1f
@@ -82,9 +92,8 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
-            // Production floats the channel text straight on the picture — no panel, no border, no card.
-            // The preview paints exactly that, so the render cannot promise a box the app never draws.
-            card.background = null
+            // The cyberpunk HUD slab production installs behind the channel block.
+            card.background = HudPanelDrawable(1f)
             layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.streamr_mark)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
             layer.findViewById<TextView>(R.id.infoName).text = "AK Sport HD"
@@ -92,10 +101,15 @@ class PlayerPreviewTest {
                 text = "India v Australia   14:00 – 18:00"
                 visibility = View.VISIBLE
             }
-            layer.findViewById<View>(R.id.infoProgress).apply { visibility = View.VISIBLE }
-            // Production tints the live progress line with the electric cyan LIVE accent.
-            layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress)
-                .progressTintList = android.content.res.ColorStateList.valueOf(Accent.LIVE)
+            // Production's segmented neon programme bar, part-way through the show.
+            layer.findViewById<View>(R.id.infoProgressRow).visibility = View.VISIBLE
+            layer.findViewById<TextView>(R.id.infoStart).text = "14:00"
+            layer.findViewById<TextView>(R.id.infoEnd).text = "18:00"
+            layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress).apply {
+                visibility = View.VISIBLE
+                progressDrawable = SegmentedBarDrawable(1f); progressTintList = null; progressBackgroundTintList = null
+                progress = 430
+            }
             layer.findViewById<TextView>(R.id.infoScheduleNext).apply {
                 text = "Up next:  Post-match coverage"
                 visibility = View.VISIBLE

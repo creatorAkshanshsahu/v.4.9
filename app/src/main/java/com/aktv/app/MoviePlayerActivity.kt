@@ -155,6 +155,8 @@ class MoviePlayerActivity : Activity() {
     private lateinit var heading: TextView
     private lateinit var episodeLine: TextView
     private lateinit var timeLine: TextView
+    /** Cyber HUD telemetry under the clock: resolution, frame rate, codec, dropped frames. */
+    private lateinit var hud: TextView
     /** One container correction per address: a mislabelled source is retried once, never in a loop. */
     private val containerRetried = HashSet<String>()
     private val subtitleRetried = HashSet<String>()
@@ -240,11 +242,14 @@ class MoviePlayerActivity : Activity() {
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         view.findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
-            setPlayedColor(Accent.LIVE); setScrubberColor(Accent.BRAND)
-            setBufferedColor(0x4D98AFD5); setUnplayedColor(0x29FFFFFF)
+            // Cyberpunk time bar: acid progress, cyan scrubber, magenta-tinted buffer.
+            setPlayedColor(Accent.ACID); setScrubberColor(Accent.BRAND_LIGHT)
+            setBufferedColor(0x55FF00D0); setUnplayedColor(0x29FFFFFF)
         }
 
         overlay = FrameLayout(this)
+        // CRT scanlines under the HUD.
+        overlay.addView(View(this).apply { background = Cyber.scanlines(resources, 30) }, FrameLayout.LayoutParams(-1, -1))
         overlay.addView(View(this).apply {
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(0xF2020107.toInt(), 0xB3060410.toInt(), 0x33060410, Color.TRANSPARENT))
@@ -267,8 +272,7 @@ class MoviePlayerActivity : Activity() {
             contentDescription = "Back"; isFocusable = true; isClickable = true
             setOnClickListener { finish() }
             setOnFocusChangeListener { v, focused ->
-                v.animate().scaleX(if (focused) 1.1f else 1f).scaleY(if (focused) 1.1f else 1f)
-                    .setDuration(150).start()
+                Motion.focus(v, focused, scale = 1.12f, liftDp = 8f, glow = Accent.ACID)
                 if (focused) { setOverlayVisible(true); if (!failed) view.showController() }
             }
         }
@@ -279,19 +283,32 @@ class MoviePlayerActivity : Activity() {
             setPadding(px(14), 0, 0, 0)
         }
         topBar.addView(titles, LinearLayout.LayoutParams(-2, -2))
+        val rajdhani = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.rajdhani_bold)
         val clock = android.widget.TextClock(this).apply {
             format12Hour = "h:mm"; format24Hour = "HH:mm"
-            textSize = 16f; setTextColor(Accent.TEXT)
+            textSize = 24f; setTextColor(Accent.TEXT); typeface = rajdhani
             setShadowLayer(px(10).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
         }
         overlay.addView(clock, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-            rightMargin = px(40); topMargin = px(34)
+            rightMargin = px(40); topMargin = px(30)
+        })
+        hud = TextView(this).apply {
+            textSize = 12f; setTextColor(Accent.ACID); typeface = rajdhani; letterSpacing = 0.14f
+            setShadowLayer(px(8).toFloat(), 0f, 0f, 0xCC000000.toInt()); text = "LINKING…"
+        }
+        overlay.addView(hud, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+            rightMargin = px(40); topMargin = px(66)
         })
 
+        titles.addView(TextView(this).apply {
+            text = if (title.isSeries) "//  NOW PLAYING · SERIES" else "//  NOW PLAYING · MOVIE"
+            textSize = 11f; letterSpacing = 0.24f; setTextColor(Accent.ACID); typeface = rajdhani
+            setShadowLayer(px(6).toFloat(), 0f, 0f, 0xCC000000.toInt())
+        }, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = px(2) })
         heading = TextView(this).apply {
-            textSize = 24f; setTextColor(Accent.TEXT); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-            maxWidth = px(680)
-            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_bold)
+            textSize = 30f; setTextColor(Accent.TEXT); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = px(680); letterSpacing = 0.02f
+            typeface = rajdhani
             includeFontPadding = false
             setShadowLayer(px(12).toFloat(), 0f, px(2).toFloat(), 0xAA000000.toInt())
         }
@@ -312,18 +329,16 @@ class MoviePlayerActivity : Activity() {
         }
         // Elapsed over duration, the one piece of state the site keeps at the bottom of the watch screen.
         timeLine = TextView(this).apply {
-            textSize = 14f; letterSpacing = 0.04f; setTextColor(Accent.TEXT); maxLines = 1
-            typeface = androidx.core.content.res.ResourcesCompat.getFont(this@MoviePlayerActivity, R.font.sora_semibold)
+            textSize = 17f; letterSpacing = 0.08f; setTextColor(Accent.TEXT); maxLines = 1
+            typeface = rajdhani
             setShadowLayer(px(6).toFloat(), 0f, px(1).toFloat(), 0xAA000000.toInt())
         }
         info.addView(timeLine, LinearLayout.LayoutParams(-1, -2))
         status = TextView(this).apply {
             textSize = 11f; setTextColor(Accent.TEXT); maxLines = 2
             setPadding(px(12), px(7), px(12), px(7))
-            background = GradientDrawable().apply {
-                cornerRadius = px(14).toFloat(); setColor(0xCC020107.toInt())
-                setStroke(px(1), 0x5500ECF7)
-            }
+            background = HudPanelDrawable(dp, 8f, 0.72f)
+            setPadding(px(16), px(8), px(16), px(8))
         }
         info.addView(status, LinearLayout.LayoutParams(-2, -2).apply { topMargin = px(12) })
         val maxInfoWidth = (resources.displayMetrics.widthPixels - px(90)).coerceAtLeast(px(260)).coerceAtMost(px(860))
@@ -434,6 +449,16 @@ class MoviePlayerActivity : Activity() {
         val position = owner?.currentPosition?.coerceAtLeast(0) ?: 0L
         timeLine.text = if (duration > 0) watchTime(position, duration) else watchTime(position, lastDuration)
         timeLine.visibility = if (failed || title.isSeries) View.GONE else View.VISIBLE
+        if (::hud.isInitialized) hud.text = owner?.let { p ->
+            val f = p.videoFormat
+            listOfNotNull(
+                f?.height?.takeIf { it > 0 }?.let { "${it}P" },
+                f?.frameRate?.takeIf { it > 0f }?.let { "${kotlin.math.round(it).toInt()} FPS" },
+                f?.sampleMimeType?.let { if (it == androidx.media3.common.MimeTypes.VIDEO_H264) "H.264"
+                    else if (it == androidx.media3.common.MimeTypes.VIDEO_H265) "HEVC" else it.substringAfter('/').uppercase(java.util.Locale.ROOT) },
+                p.videoDecoderCounters?.droppedBufferCount?.takeIf { it > 0 }?.let { "DROP $it" }
+            ).joinToString("  ·  ").ifBlank { "LINKING…" }
+        } ?: "LINKING…"
     }
 
     private fun updateTitle() {

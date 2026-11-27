@@ -93,6 +93,8 @@ object Accent {
     val DIM = 0xFF98AFD5.toInt()
     val FAINT = 0xFF687AA0.toInt()
 
+    /** Cyberpunk signal yellow: HUD brackets, focus locks, the play cut in the logo. */
+    val ACID = 0xFFFCEE0A.toInt()
     /** Neon violet between the wordmark's magenta and cyan: the middle of the Aurora Glass gradient. */
     val VIOLET = 0xFF7B5CFF.toInt()
     /** A deep indigo bloom that keeps the aurora from washing out the dark ground. */
@@ -213,7 +215,13 @@ class GlassDrawable(
     var rimAlpha: Float = 1f,
     /** Rim strength at rest (0 = invisible until focused/active, for quiet nav items). */
     var restRim: Float = 1f,
+    /** Cyberpunk cut corners (top-left and bottom-right), in dp. 0 keeps the rounded [radius]. */
+    chamferDp: Float = Cyber.CHAMFER_DP,
+    /** Acid-yellow HUD brackets that lock onto the two uncut corners on focus. */
+    var brackets: Boolean = true,
 ) : Drawable(), Animatable {
+    var chamfer = chamferDp * dp
+        set(value) { field = value; rebuild(); invalidateSelf() }
     var radius = radiusDp * dp
         set(value) { field = value; rebuild(); invalidateSelf() }
     var glassTint: Int = glassTint
@@ -221,7 +229,10 @@ class GlassDrawable(
 
     private val rect = RectF()
     private val clip = Path()
+    private val rimPath = Path()
     private val lens = Path()
+    private val rimRect = RectF()
+    private val bracketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Accent.ACID; strokeCap = Paint.Cap.SQUARE }
     private val body = Paint(Paint.ANTI_ALIAS_FLAG)
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val specular = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -298,8 +309,11 @@ class GlassDrawable(
     private fun rebuild() {
         val b = bounds
         if (b.isEmpty) return
-        rect.set(b); clip.reset(); clip.addRoundRect(rect, radius, radius, Path.Direction.CW)
+        rect.set(b)
         val h = rect.height(); val w = rect.width()
+        shape(clip, rect)
+        val stroke = max(1f, dp)
+        rimRect.set(rect); rimRect.inset(stroke / 2, stroke / 2); shape(rimPath, rimRect)
         body.shader = LinearGradient(0f, rect.top, 0f, rect.bottom,
             intArrayOf(Ui.alpha(Ui.mix(glassTint, Color.WHITE, 0.35f), 1f), glassTint), null, Shader.TileMode.CLAMP)
         focusFill?.let { fill.shader = LinearGradient(rect.left, rect.top, rect.right, rect.bottom, it, null, Shader.TileMode.CLAMP) }
@@ -322,32 +336,51 @@ class GlassDrawable(
             intArrayOf(Color.TRANSPARENT, Ui.alpha(Color.WHITE, 0.30f), Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
     }
 
+    /** Effective cut size: never more than a third of the short side, so small pills stay legible. */
+    private fun cut(r: RectF) = if (chamfer <= 0f) 0f else minOf(chamfer, minOf(r.width(), r.height()) * 0.34f)
+
+    private fun shape(out: Path, r: RectF) {
+        out.reset()
+        val c = cut(r)
+        if (c <= 0f) { out.addRoundRect(r, minOf(radius, minOf(r.width(), r.height()) / 2), minOf(radius, minOf(r.width(), r.height()) / 2), Path.Direction.CW); return }
+        out.moveTo(r.left + c, r.top); out.lineTo(r.right, r.top); out.lineTo(r.right, r.bottom - c)
+        out.lineTo(r.right - c, r.bottom); out.lineTo(r.left, r.bottom); out.lineTo(r.left, r.top + c); out.close()
+    }
+
     override fun draw(canvas: Canvas) {
         if (bounds.isEmpty) return
         val m = alphaMul / 255f
         val bodyAlpha = restAlpha + (activeAlpha - restAlpha) * activeLevel + (focusAlpha - restAlpha) * level
         body.alpha = (255 * bodyAlpha.coerceIn(0f, 1f) * m).toInt()
-        canvas.drawRoundRect(rect, radius, radius, body)
+        canvas.drawPath(clip, body)
         if (focusFill != null && level > 0f) {
             fill.alpha = (255 * level * m).toInt()
-            canvas.drawRoundRect(rect, radius, radius, fill)
+            canvas.drawPath(clip, fill)
         }
         specular.alpha = (255 * (0.55f + 0.45f * level) * (restRim + (1f - restRim) * max(level, activeLevel)) * m).toInt()
         canvas.drawPath(lens, specular)
         val stroke = max(1f, dp * (1f + 0.6f * level))
         rim.strokeWidth = stroke; accentRim.strokeWidth = stroke
-        val inset = stroke / 2
-        rect.inset(inset, inset)
-        val r = max(0f, radius - inset)
         val lit = max(level, activeLevel)
         rim.alpha = (255 * rimAlpha * (restRim + (1f - restRim) * lit) * (0.75f + 0.25f * level) * m).toInt()
-        canvas.drawRoundRect(rect, r, r, rim)
+        canvas.drawPath(rimPath, rim)
         val accentLevel = max(level, activeLevel * 0.55f)
         if (accentLevel > 0f && focusFill == null) {
             accentRim.alpha = (255 * accentLevel * m).toInt()
-            canvas.drawRoundRect(rect, r, r, accentRim)
+            canvas.drawPath(rimPath, accentRim)
         }
-        rect.inset(-inset, -inset)
+        // HUD lock: acid brackets slide onto the two uncut corners as focus arrives.
+        if (brackets && level > 0.01f) {
+            val bw = max(2f, 2f * dp)
+            val len = minOf(14f * dp, rect.width() * 0.22f, rect.height() * 0.32f) * (0.55f + 0.45f * level)
+            val o = bw / 2 + (1f - level) * 4f * dp
+            bracketPaint.strokeWidth = bw
+            bracketPaint.alpha = (255 * level * m).toInt()
+            canvas.drawLine(rect.right - o - len, rect.top + o, rect.right - o, rect.top + o, bracketPaint)
+            canvas.drawLine(rect.right - o, rect.top + o, rect.right - o, rect.top + o + len, bracketPaint)
+            canvas.drawLine(rect.left + o, rect.bottom - o - len, rect.left + o, rect.bottom - o, bracketPaint)
+            canvas.drawLine(rect.left + o, rect.bottom - o, rect.left + o + len, rect.bottom - o, bracketPaint)
+        }
         if (sweepAt >= 0f) {
             val save = canvas.save()
             canvas.clipPath(clip)
@@ -361,7 +394,10 @@ class GlassDrawable(
     }
 
     override fun getOutline(outline: Outline) {
-        outline.setRoundRect(bounds, radius)
+        if (cut(rect) > 0f && !clip.isEmpty) {
+            // The cut-corner silhouette is convex, so it can carry the shadow on every supported API level.
+            if (android.os.Build.VERSION.SDK_INT >= 30) outline.setPath(clip) else @Suppress("DEPRECATION") outline.setConvexPath(clip)
+        } else outline.setRoundRect(bounds, radius)
         // Glass casts a soft shadow, not a hard one.
         outline.alpha = 0.35f + 0.45f * level
     }
@@ -388,7 +424,7 @@ object GlassKit {
 
     /** Pill control: clear at rest, aurora-filled with a white rim on focus. */
     fun pill(dp: Float, radiusDp: Float = 100f, rest: Float = 0.08f) = GlassDrawable(dp, radiusDp,
-        restAlpha = rest, activeAlpha = 0.16f, focusAlpha = 0.20f, focusFill = Accent.aurora())
+        restAlpha = rest, activeAlpha = 0.16f, focusAlpha = 0.20f, focusFill = Accent.aurora(), chamferDp = 8f)
 
     /** Primary action: bright frosted white that turns into the aurora on focus. */
     fun primary(dp: Float, radiusDp: Float = 100f) = GlassDrawable(dp, radiusDp,
@@ -413,6 +449,34 @@ object Motion {
             .setInterpolator(if (focused) OvershootInterpolator(1.3f) else settle).start()
     }
 
+    /**
+     * Cyberpunk glitch: a quick RGB-split jitter (cyan / magenta shadow offsets, sideways twitch) that
+     * settles in ~0.35 s. The view's own shadow is restored afterwards. Off when animations are off.
+     */
+    fun glitch(v: android.widget.TextView, durationMs: Long = 360) {
+        if (!enabled) return
+        val dp = v.resources.displayMetrics.density
+        (v.getTag(R.id.glitch_anim) as? ValueAnimator)?.cancel()
+        val radius = v.shadowRadius; val dx = v.shadowDx; val dy = v.shadowDy; val color = v.shadowColor
+        val rnd = java.util.Random()
+        val anim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = durationMs
+            addUpdateListener { a ->
+                val amp = (1f - a.animatedFraction) * 3.5f * dp
+                val right = rnd.nextBoolean()
+                v.setShadowLayer(1f, if (right) amp else -amp, 0f, if (right) Accent.BRAND_LIGHT else Accent.BRAND)
+                v.translationX = (rnd.nextFloat() - 0.5f) * amp
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    v.setShadowLayer(radius, dx, dy, color); v.translationX = 0f
+                }
+            })
+        }
+        v.setTag(R.id.glitch_anim, anim)
+        anim.start()
+    }
+
     /** Fade + rise for content arriving on screen. */
     fun rise(v: View, delay: Long = 0, distanceDp: Float = 18f, duration: Long = 420) {
         if (!enabled) { v.alpha = 1f; v.translationY = 0f; return }
@@ -420,6 +484,20 @@ object Motion {
         v.animate().cancel()
         v.alpha = 0f; v.translationY = distanceDp * dp
         v.animate().alpha(1f).translationY(0f).setStartDelay(delay).setDuration(duration).setInterpolator(settle).start()
+    }
+}
+
+/** Cyberpunk constants and textures shared by every screen. */
+object Cyber {
+    /** Default cut-corner size for glass surfaces, in dp. */
+    const val CHAMFER_DP = 10f
+
+    /** A tiled CRT scanline texture (one dark line every 3 dp) for heroes and the player HUD. */
+    fun scanlines(res: android.content.res.Resources, alpha: Int = 34): Drawable {
+        val step = max(2, (3 * res.displayMetrics.density).toInt())
+        val bmp = Bitmap.createBitmap(1, step, Bitmap.Config.ARGB_8888)
+        bmp.setPixel(0, 0, Color.argb(alpha, 0, 0, 0))
+        return BitmapDrawable(res, bmp).apply { setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT) }
     }
 }
 
@@ -461,6 +539,12 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
     var paused = false
         set(value) { field = value; updateRunning() }
     private var tintAnim: ValueAnimator? = null
+    /** Synthwave perspective grid rolling toward the viewer under the aurora (cyberpunk). */
+    var grid = true
+        set(value) { field = value; invalidate() }
+    var gridColor = Accent.BRAND
+    private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private val sweepPaint = Paint()
 
     private val frame = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -510,6 +594,39 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         }
         dst.set(0f, 0f, width.toFloat(), height.toFloat())
         canvas.drawBitmap(buf, null, dst, upscale)
+        if (grid) drawGrid(canvas, t)
+    }
+
+    /** ~40 lines per frame: a vanishing-point grid in the lower half, plus a slow cyan scan sweep. */
+    private fun drawGrid(canvas: Canvas, t: Float) {
+        val w = width.toFloat(); val h = height.toFloat()
+        val d = resources.displayMetrics.density
+        val horizon = h * 0.60f
+        val cx = w / 2f
+        gridPaint.strokeWidth = max(1f, 1.1f * d)
+        val strength = (0.45f + intensity) * 0.5f
+        // Rays toward the vanishing point.
+        gridPaint.color = Ui.alpha(gridColor, 0.20f * strength)
+        for (i in -14..14) canvas.drawLine(cx + i * w * 0.010f, horizon, cx + i * w * 0.115f, h, gridPaint)
+        // Cross lines advancing toward the viewer; brighter as they come near.
+        val phase = (t * 0.35f) % 1f
+        for (k in 0 until 18) {
+            val z = 1f + k - phase
+            if (z <= 0.2f) continue
+            val y = horizon + (h - horizon) / z
+            if (y > h) continue
+            val near = ((y - horizon) / (h - horizon)).coerceIn(0f, 1f)
+            gridPaint.color = Ui.alpha(gridColor, (0.06f + 0.30f * near) * strength)
+            canvas.drawLine(0f, y, w, y, gridPaint)
+        }
+        // Horizon glow line.
+        gridPaint.color = Ui.alpha(Accent.BRAND_LIGHT, 0.30f * strength)
+        canvas.drawLine(0f, horizon, w, horizon, gridPaint)
+        // Scan sweep: a faint band rolls down the screen every eight seconds.
+        val sy = ((t % 8f) / 8f) * h
+        sweepPaint.shader = LinearGradient(0f, sy - 40f * d, 0f, sy, intArrayOf(Color.TRANSPARENT, Ui.alpha(Accent.BRAND_LIGHT, 0.06f)),
+            null, Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, sy - 40f * d, w, sy, sweepPaint)
     }
 
     private fun updateRunning() {
@@ -559,6 +676,73 @@ class PulseDotDrawable(private val dp: Float, color: Int = Accent.LIVE_DOT, size
     override fun isRunning() = anim.isRunning
     override fun setAlpha(alpha: Int) { core.alpha = alpha; invalidateSelf() }
     override fun setColorFilter(colorFilter: ColorFilter?) { core.colorFilter = colorFilter; ring.colorFilter = colorFilter }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * Cyberpunk HUD panel for the player: a cut-corner ink glass slab with a thin cyan edge, an acid
+ * signal stripe down the left side and tick marks on the top-right corner.
+ */
+class HudPanelDrawable(private val dp: Float, private val cutDp: Float = 16f, private val fillAlpha: Float = 0.62f) : Drawable() {
+    private val path = Path()
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Ui.alpha(Accent.BRAND_LIGHT, 0.45f) }
+    private val acid = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Accent.ACID }
+    private var alphaMul = 255
+
+    override fun onBoundsChange(b: Rect) {
+        val r = RectF(b); val c = minOf(cutDp * dp, r.height() * 0.3f)
+        path.reset()
+        path.moveTo(r.left + c, r.top); path.lineTo(r.right, r.top); path.lineTo(r.right, r.bottom - c)
+        path.lineTo(r.right - c, r.bottom); path.lineTo(r.left, r.bottom); path.lineTo(r.left, r.top + c); path.close()
+        fill.shader = LinearGradient(r.left, 0f, r.right, 0f,
+            intArrayOf(Ui.alpha(Accent.ABYSS, fillAlpha + 0.18f), Ui.alpha(Accent.ABYSS, fillAlpha), Ui.alpha(Accent.ABYSS, fillAlpha * 0.35f)),
+            floatArrayOf(0f, 0.55f, 1f), Shader.TileMode.CLAMP)
+    }
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds; if (b.isEmpty) return
+        val m = alphaMul / 255f
+        fill.alpha = alphaMul; canvas.drawPath(path, fill)
+        edge.strokeWidth = max(1f, dp); edge.alpha = (115 * m).toInt(); canvas.drawPath(path, edge)
+        val c = minOf(cutDp * dp, b.height() * 0.3f)
+        acid.alpha = alphaMul
+        canvas.drawRect(b.left.toFloat(), b.top + c + 6 * dp, b.left + 3 * dp, b.top + b.height() * 0.62f, acid)
+        // Corner ticks: three short marks on the top-right, like a sensor readout.
+        for (i in 0 until 3) canvas.drawRect(b.right - (10 + i * 7) * dp, b.top + 4 * dp, b.right - (6 + i * 7) * dp, b.top + 6 * dp, acid)
+    }
+
+    override fun setAlpha(alpha: Int) { alphaMul = alpha; invalidateSelf() }
+    override fun setColorFilter(colorFilter: ColorFilter?) { fill.colorFilter = colorFilter }
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * Segmented neon progress bar (programme progress): filled segments run acid -> magenta, the rest are
+ * dim. Driven by the drawable level, so it works as a ProgressBar's progressDrawable.
+ */
+class SegmentedBarDrawable(private val dp: Float, private val segments: Int = 40) : Drawable() {
+    private val on = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val off = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Ui.alpha(Color.WHITE, 0.16f) }
+
+    override fun onBoundsChange(b: Rect) {
+        on.shader = LinearGradient(b.left.toFloat(), 0f, b.right.toFloat(), 0f, intArrayOf(Accent.ACID, Accent.BRAND, Accent.BRAND_LIGHT), null, Shader.TileMode.CLAMP)
+    }
+    override fun onLevelChange(level: Int): Boolean { invalidateSelf(); return true }
+    override fun draw(canvas: Canvas) {
+        val b = bounds; if (b.isEmpty) return
+        val gap = max(1f, 2 * dp)
+        val segW = (b.width() - gap * (segments - 1)) / segments
+        val filled = (level / 10_000f * segments)
+        for (i in 0 until segments) {
+            val x = b.left + i * (segW + gap)
+            canvas.drawRect(x, b.top.toFloat(), x + segW, b.bottom.toFloat(), if (i < filled) on else off)
+        }
+    }
+    override fun setAlpha(alpha: Int) { on.alpha = alpha; off.alpha = (alpha * 0.16f).toInt(); invalidateSelf() }
+    override fun setColorFilter(colorFilter: ColorFilter?) { on.colorFilter = colorFilter }
     @Deprecated("Deprecated in Java")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }

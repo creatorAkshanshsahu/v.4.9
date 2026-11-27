@@ -51,14 +51,15 @@ class AkIntroTest {
         assertEquals(beforeDetach, done)
     }
 
-    @Test fun `cyber motion entrance video is bundled as a valid H264 MP4 asset`() {
-        val bytes = RuntimeEnvironment.getApplication().resources.openRawResource(R.raw.streamr_intro_video).use { it.readBytes() }
-        assertTrue("Expected credit motion MP4 (> 2 MB), got ${bytes.size}", bytes.size > 2_000_000)
-        val header = String(bytes, 4, 4, Charsets.US_ASCII)
-        assertEquals("ftyp", header)
-        val ascii = String(bytes, Charsets.ISO_8859_1)
-        assertTrue("Expected H.264 avc1 track inside streamr_intro_video.mp4", ascii.contains("avc1"))
-        assertTrue("Expected AAC mp4a audio track inside streamr_intro_video.mp4", ascii.contains("mp4a"))
+    @Test fun `the boot sequence credits the operator and types every line before the reveal`() {
+        assertTrue("the entrance must keep the creator's name", CyberBoot.LINES.any { "AKSHANSH SAHU" in it })
+        assertTrue(CyberBoot.LINES.first().contains("STREAMR"))
+        CyberBoot.LINES.indices.forEach { i ->
+            assertEquals("line $i hidden at the start", 0, CyberBoot.typed(i, 0f))
+            // The home is revealed at 3.6 s of 4.4 s; every line has finished typing by then.
+            assertEquals("line $i fully typed before the reveal", CyberBoot.LINES[i].length, CyberBoot.typed(i, 3_600f / 4_400f))
+        }
+        assertEquals(0, CyberBoot.typed(99, 0.5f))
     }
 
     @Test fun `entrance plays on cold starts and skips on warm returns`() {

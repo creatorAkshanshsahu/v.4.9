@@ -57,7 +57,7 @@ jobs:
           (cd out && sha256sum *.apk > SHA256SUMS)
           ls -la out
           {
-            echo "### STREAMR 5.4.61-aurora (code 180)"
+            echo "### STREAMR 5.4.61-cyber (code 180)"
             echo "| APK | For |"
             echo "| --- | --- |"
             echo "| STREAMR-Aurora-arm64.apk | Android TV / Google TV / Fire TV (most devices) |"
