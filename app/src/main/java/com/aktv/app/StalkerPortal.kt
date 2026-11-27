@@ -40,6 +40,7 @@ internal data class StalkerAccount(
         const val FUSION_DEFAULT_PORTAL = "http://tv.fusion4k.cc/stalker_portal/c/"
         const val FUSION_DEFAULT_MAC = "00:1A:79:F5:8F:95"
         const val FUSION_DEFAULT_SERIAL = "99EB2A8128098"
+        const val FUSION_DEFAULT_DEVICE = "01F71B517FE629CE5FB7158273354EDF361793DC5BB6C481C4957C3356040ABA"
     }
 }
 

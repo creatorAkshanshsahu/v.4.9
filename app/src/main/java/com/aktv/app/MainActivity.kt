@@ -2748,7 +2748,7 @@ class MainActivity : AppCompatActivity() {
             portal = stored("portal2_url", StalkerAccount.FUSION_DEFAULT_PORTAL),
             mac = stored("portal2_mac", StalkerAccount.FUSION_DEFAULT_MAC),
             serial = stored("portal2_serial", StalkerAccount.FUSION_DEFAULT_SERIAL),
-            deviceId = stored("portal2_device", "")
+            deviceId = stored("portal2_device", StalkerAccount.FUSION_DEFAULT_DEVICE)
         )
     }
 
@@ -2848,10 +2848,11 @@ class MainActivity : AppCompatActivity() {
             val newUrl2 = url2Input.text?.toString()?.trim().orEmpty().ifBlank { StalkerAccount.FUSION_DEFAULT_PORTAL }
             val newMac2 = mac2Input.text?.toString()?.trim().orEmpty().uppercase(Locale.ROOT).ifBlank { StalkerAccount.FUSION_DEFAULT_MAC }
             val newSerial2 = serial2Input.text?.toString()?.trim().orEmpty().ifBlank { StalkerAccount.FUSION_DEFAULT_SERIAL }
+            val newDevice2 = device2Input.text?.toString()?.trim().orEmpty().ifBlank { StalkerAccount.FUSION_DEFAULT_DEVICE }
             edit.putString("portal2_url", newUrl2)
                 .putString("portal2_mac", newMac2)
                 .putString("portal2_serial", newSerial2)
-                .putString("portal2_device", device2Input.text?.toString()?.trim().orEmpty())
+                .putString("portal2_device", newDevice2)
                 .remove("portal2_endpoint")
             edit.apply()
             allPortal = emptyList(); portalVisibleCached = emptyList(); portalFeaturedCached = emptyList(); portalCategoryRowsCached = emptyList()
@@ -3250,8 +3251,6 @@ class MainActivity : AppCompatActivity() {
                     ui.postDelayed({ if (!isFinishing && !isDestroyed && tab == 9 && !xtreamAccount().isConfigured) showStarShareDialog() }, 240)
                 }
             }
-            // Cyberpunk: the section title glitches as the new tab lands.
-            findViewById<TextView>(R.id.sectionTitle)?.let { title -> title.post { Motion.glitch(title, 420) } }
             val dir = if (t > tab) 1 else -1
             ui.removeCallbacks(heroRotate)
             tab = t; layoutHero(); stopPreview()
@@ -3425,7 +3424,10 @@ class MainActivity : AppCompatActivity() {
             else -> "brand"
         }
         hero2Key = key
-        if (t !is Tile.Mv) hero2Backdrop.setImageResource(R.drawable.home_hero_cinematic)
+        if (t !is Tile.Mv) {
+            hero2Backdrop.setImageDrawable(null)
+            hero2Backdrop.visibility = View.GONE
+        }
         when (t) {
             is Tile.Ch -> {
                 hero2Badge.text = (if (t.c.v2) "24/7   ·   " else "") + t.c.category
@@ -3442,20 +3444,37 @@ class MainActivity : AppCompatActivity() {
                 hero2Play.text = if (t.m.imdb.startsWith("xtream_series:")) "▶   Episodes" else "▶   Play"
                 val artwork = t.m.background.ifBlank { t.m.poster }
                 if (artwork.isBlank()) {
-                    hero2Backdrop.setImageResource(R.drawable.home_hero_cinematic)
+                    hero2Backdrop.setImageDrawable(null)
+                    hero2Backdrop.visibility = View.GONE
                 } else {
+                    hero2Backdrop.visibility = View.VISIBLE
                     hero2Backdrop.load(artwork) {
                         crossfade(360)
                         listener(onError = { _, _ ->
-                            if (hero2Key == key) hero2Backdrop.setImageResource(R.drawable.home_hero_cinematic)
+                            if (hero2Key == key) {
+                                hero2Backdrop.setImageDrawable(null)
+                                hero2Backdrop.visibility = View.GONE
+                            }
                         })
                     }
                 }
             }
             else -> {
-                hero2Badge.text = "LIVE · FILMS · SERIES"
-                hero2Title.text = "STREAMR"
-                hero2Play.text = if (tab == 9) "▶   Sign in to StarShare" else ""
+                hero2Badge.text = when (tab) {
+                    2 -> jioMsg.ifBlank { "JIOTV" }
+                    6 -> portalMsg.ifBlank { "MAXTV" }
+                    10 -> portal2Msg.ifBlank { "FUSION" }
+                    9 -> xtreamMsg.ifBlank { "STARSHARE" }
+                    else -> "LIVE · FILMS · SERIES"
+                }
+                hero2Title.text = when (tab) {
+                    2 -> "JioTV"
+                    6 -> "maxTV"
+                    10 -> "Fusion"
+                    9 -> "StarShare"
+                    else -> "STREAMR"
+                }
+                hero2Play.text = if (tab == 9 && !xtreamAccount().isConfigured) "▶   Sign in to StarShare" else ""
             }
         }
     }
@@ -3499,15 +3518,17 @@ class MainActivity : AppCompatActivity() {
     /** The cards hold the title, one facts line and the play row; everything else stays off them. */
     private fun applyFlixHeroTrim() {
         for (id in intArrayOf(R.id.heroDot, R.id.heroSubheading, R.id.heroProg, R.id.heroProgress,
-                R.id.heroDesc, R.id.heroNext, R.id.heroMono, R.id.heroChips)) {
+                R.id.heroDesc, R.id.heroNext, R.id.heroChips)) {
             findViewById<View>(id)?.visibility = View.GONE
         }
+        val showMono = (heroTile as? Tile.Ch)?.c?.logo?.isBlank() == true
+        heroMono.visibility = if (showMono) View.VISIBLE else View.GONE
         heroBadge.setTextColor(FlixColors.CAPTION)
         heroPulse?.cancel(); heroPulse = null
         heroPlayLabel.text = when (val t = heroTile) {
             is Tile.Ch -> "▶   Play Live"
             is Tile.Mv -> if (t.m.imdb.startsWith("xtream_series:")) "▶   Episodes" else "▶   Play"
-            else -> if (tab == 9) "▶   Sign in to StarShare" else "▶   Play"
+            else -> if (tab == 9 && !xtreamAccount().isConfigured) "▶   Sign in to StarShare" else "▶   Play"
         }
     }
 
@@ -3585,14 +3606,13 @@ class MainActivity : AppCompatActivity() {
         findViewById<AuroraView>(R.id.aurora)?.tintTo(Ui.mix(c, partner, 0.25f))
         heroProgress.progressTintList = ColorStateList.valueOf(Accent.LIVE)
     }
-    /** Keep a low-cost cinematic still behind all sections; no live video or background blur is needed here. */
+    /** Keep the hero card ground clean (no pre-artwork) until real artwork loads. */
     private fun showCinematicFallback(forTile: Tile?) {
         heroBackdrop.animate().cancel(); heroOrb.animate().cancel()
         if (forTile !is Tile.Mv) {
-            heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
-            heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+            heroBackdrop.setImageDrawable(null)
+            heroBackdrop.visibility = View.GONE
         }
-        heroBackdrop.visibility = View.VISIBLE
         heroOrb.alpha = if (forTile is Tile.Mv) 0.30f else 0.72f
         heroPreview.visibility = View.GONE
         stopPreview()
@@ -3604,8 +3624,8 @@ class MainActivity : AppCompatActivity() {
             if (lowEnd || television) it.replace("/w1280/", "/w780/") else it
         }
         if (artwork.isBlank()) {
-            heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
-            heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+            heroBackdrop.setImageDrawable(null)
+            heroBackdrop.visibility = View.GONE
             return
         }
         heroBackdrop.animate().cancel()
@@ -3621,8 +3641,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }, onError = { _, _ ->
                 if ((heroTile as? Tile.Mv)?.m?.imdb == title.imdb) {
-                    heroBackdrop.setImageResource(R.drawable.home_hero_cinematic)
-                    heroBackdrop.alpha = 1f; heroBackdrop.scaleX = 1f; heroBackdrop.scaleY = 1f
+                    heroBackdrop.setImageDrawable(null)
+                    heroBackdrop.visibility = View.GONE
                 }
             })
         }
@@ -3734,7 +3754,19 @@ class MainActivity : AppCompatActivity() {
                     heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.streamr_mark)
                     glowHero(Accent.BRAND, Accent.SIGNAL); scheduleHeroGuide(null)
                 } else {
-                    heroDot.visibility = View.GONE; heroBadge.text = "LIVE · FILMS · SERIES"; heroTitle.text = "STREAMR"
+                    heroDot.visibility = View.GONE
+                    heroBadge.text = when (tab) {
+                        2 -> jioMsg.ifBlank { "JIOTV" }
+                        6 -> portalMsg.ifBlank { "MAXTV" }
+                        10 -> portal2Msg.ifBlank { "FUSION" }
+                        else -> "LIVE · FILMS · SERIES"
+                    }
+                    heroTitle.text = when (tab) {
+                        2 -> "JioTV"
+                        6 -> "maxTV"
+                        10 -> "Fusion"
+                        else -> "STREAMR"
+                    }
                     heroSubheading.text = "A clearer view of what’s next."
                     heroMono.visibility = View.GONE; heroLogo.visibility = View.VISIBLE; heroLogo.setImageResource(R.drawable.streamr_mark)
                     glowHero(Accent.BRAND, Accent.BRAND_DEEP); scheduleHeroGuide(null)

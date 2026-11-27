@@ -216,9 +216,9 @@ class GlassDrawable(
     /** Rim strength at rest (0 = invisible until focused/active, for quiet nav items). */
     var restRim: Float = 1f,
     /** Cyberpunk cut corners (top-left and bottom-right), in dp. 0 keeps the rounded [radius]. */
-    chamferDp: Float = Cyber.CHAMFER_DP,
+    chamferDp: Float = 0f,
     /** Acid-yellow HUD brackets that lock onto the two uncut corners on focus. */
-    var brackets: Boolean = true,
+    var brackets: Boolean = false,
 ) : Drawable(), Animatable {
     var chamfer = chamferDp * dp
         set(value) { field = value; rebuild(); invalidateSelf() }
@@ -539,8 +539,8 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
     var paused = false
         set(value) { field = value; updateRunning() }
     private var tintAnim: ValueAnimator? = null
-    /** Synthwave perspective grid rolling toward the viewer under the aurora (cyberpunk). */
-    var grid = true
+    /** Synthwave perspective grid rolling toward the viewer under the aurora (off by default to keep TVs smooth). */
+    var grid = false
         set(value) { field = value; invalidate() }
     var gridColor = Accent.BRAND
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
@@ -629,8 +629,12 @@ class AuroraView @JvmOverloads constructor(context: Context, attrs: AttributeSet
         canvas.drawRect(0f, sy - 40f * d, w, sy, sweepPaint)
     }
 
+    /** Continuous 25fps background drift is off by default so low-RAM TVs stay smooth. */
+    var animate = false
+        set(value) { field = value; updateRunning() }
+
     private fun updateRunning() {
-        val should = isAttachedToWindow && windowVisibility == VISIBLE && isShown && !paused && Motion.enabled
+        val should = animate && isAttachedToWindow && windowVisibility == VISIBLE && isShown && !paused && Motion.enabled
         if (should == running) return
         running = should
         if (running) Choreographer.getInstance().postFrameCallback(frame)

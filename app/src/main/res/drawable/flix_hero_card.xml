@@ -1,5 +1,5 @@
 <!-- Hero card ground (seen before artwork loads): violet glass washed with the aurora. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item><shape><gradient android:angle="315" android:startColor="#FF3A1B5C" android:centerColor="#FF231A4A" android:endColor="#FF0E2A44"/><corners android:radius="6dp"/></shape></item>
-    <item><shape><gradient android:angle="270" android:startColor="#22FFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" android:centerY="0.4"/><corners android:radius="6dp"/></shape></item>
+    <item><shape><gradient android:angle="315" android:startColor="#FF3A1B5C" android:centerColor="#FF231A4A" android:endColor="#FF0E2A44"/><corners android:radius="22dp"/></shape></item>
+    <item><shape><gradient android:angle="270" android:startColor="#22FFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" android:centerY="0.4"/><corners android:radius="22dp"/></shape></item>
 </layer-list>
