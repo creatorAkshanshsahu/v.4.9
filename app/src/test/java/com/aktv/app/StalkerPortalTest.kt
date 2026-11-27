@@ -218,4 +218,26 @@ class StalkerPortalTest {
         assertTrue(first.cacheKey != second.cacheKey)
         assertEquals(first.cacheKey, first.copy().cacheKey)
     }
+
+    @Test
+    fun `the watchdog keeps the same session that issued the link alive`() {
+        val http = FakeHttp { url ->
+            when {
+                "action=handshake" in url -> 200 to """{"js":{"token":"T1"}}"""
+                "action=get_profile" in url -> 200 to """{"js":{"id":"1"}}"""
+                "action=create_link" in url -> 200 to """{"js":{"cmd":"ffmpeg http://cdn/101?play_token=abc"}}"""
+                "action=get_events" in url -> 200 to """{"js":{"data":{"msgs":0}}}"""
+                else -> 404 to ""
+            }
+        }
+        val portal = StalkerPortal(account, http)
+        portal.link("ffmpeg http://cdn/101")
+        portal.watchdog()
+
+        // One handshake for both calls: the keep-alive is tied to the token that issued the playing link.
+        assertEquals(listOf("handshake", "get_profile", "create_link", "get_events"), http.actions())
+        val watchdog = http.urls.last()
+        assertTrue(watchdog, "type=watchdog" in watchdog && "cur_play_type=1" in watchdog)
+        assertEquals("Bearer T1", http.headers.last()["Authorization"])
+    }
 }

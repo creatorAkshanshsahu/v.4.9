@@ -246,6 +246,20 @@ class MainActivity : AppCompatActivity() {
     private val authRecovery = PlaybackAuthRecovery()
     private val freshCredentialProviders = HashSet<LiveProvider>()
     private val recovery = PlaybackRecovery()
+    /** maxTV / Fusion / StarShare: reconnect to the same subscription when its play token expires mid-watch. */
+    private val relink = SubscriptionRelink()
+    /** True once the current tune has shown a picture (or confirmed audio); gates [relink]. */
+    private var subscriptionPlayed = false
+    /** The portal session that issued the playing link; its watchdog keeps that link alive. */
+    @Volatile private var tunePortal: StalkerPortal? = null
+    private val portalWatchdog = object : Runnable {
+        override fun run() {
+            val portal = tunePortal ?: return
+            if (!playbackActive || layer.visibility != View.VISIBLE) return
+            playbackIo.submit { runCatching { portal.watchdog() } }
+            ui.postDelayed(this, StalkerPortal.WATCHDOG_INTERVAL_MS)
+        }
+    }
     /** A tune walks its candidates in order and never replays one: the tried-set only grows. */
     private val chainTried = mutableSetOf<String>()
     /** The channel the viewer tapped, kept while its portal twins play so it can go last. */
@@ -4147,8 +4161,11 @@ class MainActivity : AppCompatActivity() {
                 rememberPortalEndpoint(portal, endpointKey)
                 runOnUiThread {
                     if (token != playToken || layer.visibility != View.VISIBLE) return@runOnUiThread
-                    nativeSources = listOf(portalStream(url, portalName(ch.portalId)))
+                    nativeSources = listOf(portalStream(url, portalName(ch.portalId), account.origin))
                     serverIdx = 0
+                    // Keep the portal session alive the way a MAG box does while it plays.
+                    tunePortal = portal
+                    ui.removeCallbacks(portalWatchdog); ui.postDelayed(portalWatchdog, 20_000)
                     startNative()
                 }
             } catch (e: Exception) {
@@ -4165,7 +4182,7 @@ class MainActivity : AppCompatActivity() {
      * A portal stream is not a browser embed: it carries the set-top box user agent the portal expects and
      * suppresses browser Referer/Origin headers that CDNs behind a portal reject.
      */
-    private fun portalStream(url: String, name: String) = TgStream(
+    private fun portalStream(url: String, name: String, origin: String = stalkerAccount().origin) = TgStream(
         label = name,
         url = url,
         type = when {
@@ -4175,7 +4192,7 @@ class MainActivity : AppCompatActivity() {
             else -> "hls"
         },
         headers = mapOf("User-Agent" to StalkerProtocol.MAG_USER_AGENT),
-        requestOrigin = stalkerAccount().origin,
+        requestOrigin = origin,
         omitReferrer = true,
         omitOrigin = true
     )
@@ -4352,8 +4369,10 @@ class MainActivity : AppCompatActivity() {
     private fun attach(ms: MediaSource, trace: PlaybackDiagnostics.Attempt) {
         releasePlayer()
         stopPreview()
-        val profile = NativePlaybackPolicy.profile(television, lowEnd, compatiblePlayback, startCap())
         val channel = shown.getOrNull(current)
+        // A stale "compatible" flag saved by an older build must not put StarShare/portal TS on software decoding.
+        val singleRenditionLive = channel != null && (channel.portal || channel.xtream)
+        val profile = NativePlaybackPolicy.profile(television, lowEnd, compatiblePlayback && !singleRenditionLive, startCap())
         val stable = stablePicture(channel)
         val prefLang = prefs.getString("preferred_audio_lang", "hi").orEmpty().ifBlank { "hi" }
         val preferHindi = prefLang.startsWith("hi", true) || channel?.name?.contains("Hindi", true) == true
@@ -4470,6 +4489,8 @@ class MainActivity : AppCompatActivity() {
                 else spinner.visibility = View.GONE
                 Player.STATE_ENDED -> {
                     trace.failed(PlaybackDiagnostics.Problem(PlaybackDiagnostics.Family.PLAYER, detail = "StreamEnded"))
+                    val endedCh = shown.getOrNull(current)
+                    if (endedCh != null && relinkSubscription(endedCh, "The live stream ended")) return
                     if (!tryEdgeResync(owner)) advanceNative("The live stream ended")
                 }
             }
@@ -4477,6 +4498,7 @@ class MainActivity : AppCompatActivity() {
         override fun onRenderedFirstFrame() {
             if (player !== owner) return
             renderedFrame = true
+            subscriptionPlayed = true
             trace.frameRendered()
             playbackHealth?.firstFrame(SystemClock.elapsedRealtime())
             startupBudget.rendered(); providerWindow.rendered()
@@ -4514,12 +4536,44 @@ class MainActivity : AppCompatActivity() {
                 error.errorCode in 4000..4999 -> "This device couldn't decode this source (code ${error.errorCode})"
                 else -> "The live stream stopped responding (code ${error.errorCode})"
             }
+            // maxTV / Fusion / StarShare are not site providers: an expired play token (401/403/404/410)
+            // or dropped connection is answered by the same subscription with a fresh link. Before this,
+            // a 401/403 here ran the JioTV playlist refresh with the portal's channel number, which either
+            // played a different stream or fell through to another server after ~10 minutes.
+            val errCh = shown.getOrNull(current)
+            if (errCh != null && (errCh.portal || errCh.xtream)) {
+                if (relinkSubscription(errCh, message)) return
+                advanceNative(message)
+                return
+            }
             if (refreshNativeCredentials(code)) return
             if (retryRefusedProvider(code)) return
             if (code == null && PlaybackProblems.from(error, error.errorCode).family == PlaybackDiagnostics.Family.DECODER &&
                 retryCompatibleDecoder(message)) return
             advanceNative(message)
         }
+    }
+
+    /**
+     * Same channel, same subscription, fresh link: used when a maxTV / Fusion / StarShare stream that was
+     * playing drops (token expiry, server end, stall). Returns false when the channel never played or the
+     * relink budget is spent, so start-up failures and dead channels keep the normal fallback chain.
+     */
+    private fun relinkSubscription(ch: Channel, reason: String): Boolean {
+        if (!(ch.portal || ch.xtream) || !playbackActive || layer.visibility != View.VISIBLE) return false
+        val now = SystemClock.elapsedRealtime()
+        val delay = relink.next(now, subscriptionPlayed) ?: return false
+        val token = ++playToken
+        resolveJob?.cancel(true); releasePlayer()
+        recovery.reset()
+        startupBudget.start(now); providerWindow.clear()
+        spinner.visibility = View.VISIBLE
+        playMsg("Reconnecting to ${if (ch.xtream) "StarShare" else portalName(ch.portalId)}…")
+        diagnostics.metadataStatus("Relinked after: $reason")
+        ui.postDelayed({
+            if (token == playToken && playbackActive && layer.visibility == View.VISIBLE) resolveAndStart(ch, fresh = true)
+        }, delay)
+        return true
     }
 
     private var edgeResyncIdx = -1
@@ -4597,6 +4651,8 @@ class MainActivity : AppCompatActivity() {
         playbackActive = true
         diagnostics = PlaybackDiagnostics(); decoderRetries.clear(); authRecovery.reset(); freshCredentialProviders.clear(); providerWindow.clear()
         refusalRetryCount = 0; chainTried.clear(); tuneOrigin = null
+        relink.reset(); subscriptionPlayed = false
+        tunePortal = null; ui.removeCallbacks(portalWatchdog)
         compatiblePlayback = providerOrder(ch).firstOrNull()?.let { savedCompatibility(ch, it) } ?: false
         startupBudget.start(SystemClock.elapsedRealtime())
         ui.removeCallbacks(nativeHealthCheck); ui.postDelayed(nativeHealthCheck, 500)
@@ -4604,6 +4660,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun endNativeSession() {
         playbackActive = false; startupBudget.clear(); providerWindow.clear(); ui.removeCallbacks(nativeHealthCheck)
+        tunePortal = null; ui.removeCallbacks(portalWatchdog)
     }
 
     private val nativeHealthCheck = object : Runnable {
@@ -4640,6 +4697,7 @@ class MainActivity : AppCompatActivity() {
                     if (healthScanAudioStartedAt == 0L) {
                         healthScanAudioStartedAt = now; healthScanAudioStartPosition = p.currentPosition
                     } else if (now - healthScanAudioStartedAt >= 1_500 && p.currentPosition - healthScanAudioStartPosition >= 1_000) {
+                        subscriptionPlayed = true
                         shown.getOrNull(current)?.let { ch ->
                             if (channelPlaybackResults[ch.key]?.outcome != ChannelPlaybackOutcome.WORKING) {
                                 recordChannelPlayback(ch, ChannelPlaybackOutcome.WORKING, "Audio playback position advanced", providerName(currentNativeProvider), serverIdx + 1)
@@ -4657,6 +4715,11 @@ class MainActivity : AppCompatActivity() {
                     healthScanAudioStartedAt = 0L; healthScanAudioStartPosition = 0L
                 }
                 if (result.failure != null) activeAttempt?.timeout()
+                val healthCh = shown.getOrNull(current)
+                if (result.failure != null && healthCh != null && relinkSubscription(healthCh, relayStallReason())) {
+                    if (playbackActive) ui.postDelayed(this, 500)
+                    return
+                }
                 when (result.failure) {
                     PlaybackHealth.Failure.NO_PICTURE, PlaybackHealth.Failure.VIDEO_STOPPED -> {
                         val reason = if (surfaceWait != null) "The TV video surface is not ready" else relayStallReason()
@@ -4666,8 +4729,11 @@ class MainActivity : AppCompatActivity() {
                         advanceNative(relayStallReason())
                     null -> if (result.stable) {
                         recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); refusalRetryCount = 0
+                        relink.stable()
                         shown.getOrNull(current)?.let { ch ->
-                            prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
+                            // Single-rendition portal/StarShare streams never persist a decoder downgrade.
+                            if (!ch.portal && !ch.xtream)
+                                prefs.edit().putBoolean("native_compat_${ch.key}_${currentNativeProvider.name}", compatiblePlayback).apply()
                         }
                     }
                 }
@@ -4681,6 +4747,12 @@ class MainActivity : AppCompatActivity() {
      * The codec selector still enforces secure-decoder requirements. This does not bypass DRM.
      */
     private fun retryCompatibleDecoder(reason: String): Boolean {
+        // StarShare and portal channels are single-rendition HD MPEG-TS: the "compatible" profile would
+        // force a software decoder capped at 480p / 1.5 Mbps, which cannot keep up with these streams on a
+        // TV box - video stutters while audio plays on. Media3's decoder fallback already tries the next
+        // decoder when hardware truly fails to initialise.
+        val decoderCh = shown.getOrNull(current)
+        if (decoderCh != null && (decoderCh.portal || decoderCh.xtream)) return false
         if (compatiblePlayback || !expectsVideo() || nativeSources.getOrNull(serverIdx) == null ||
             startupBudget.expired(SystemClock.elapsedRealtime())) return false
         compatiblePlayback = true; decoderRetries.mark(currentNativeProvider)
@@ -4903,6 +4975,8 @@ class MainActivity : AppCompatActivity() {
         bindInfo(next)
         recovery.reset(); authRecovery.reset(); freshCredentialProviders.clear(); decoderRetries.clear()
         refusalRetryCount = 0
+        relink.reset(); subscriptionPlayed = false
+        tunePortal = null; ui.removeCallbacks(portalWatchdog)
         compatiblePlayback = providerOrder(next).firstOrNull()?.let { savedCompatibility(next, it) } ?: false
         // A new subscription means a new tuning budget; the provider window stays clear the way a
         // portal tune leaves it, since portals are not site providers.

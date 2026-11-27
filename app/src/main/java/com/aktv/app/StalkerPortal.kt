@@ -130,6 +130,8 @@ internal class StalkerPortal(
     companion object {
         /** The ceiling the portal transport is built with, exposed so a test can pin it. */
         const val MAX_CATALOGUE_BYTES = STALKER_CATALOGUE_BYTES
+        /** How often a MAG box reports while playing (the portal's default `watchdog_timeout`). */
+        const val WATCHDOG_INTERVAL_MS = 110_000L
     }
 
     private var token: String? = null
@@ -169,6 +171,20 @@ internal class StalkerPortal(
         return StalkerProtocol.streamUrl(StalkerProtocol.link(body).orEmpty())
             ?: StalkerProtocol.streamUrl(cmd)
             ?: throw StalkerException(portalDetail = StalkerProtocol.error(body) ?: "The portal returned no playable link for this channel")
+    }
+
+    /**
+     * The keep-alive a MAG box sends while it plays (`watchdog` / `get_events`). Portals use it to keep the
+     * device's session - and with it the play token behind the current `create_link` - alive; many expire
+     * the stream about ten minutes after the last one. Best effort: a refusal never interrupts playback.
+     */
+    fun watchdog() {
+        session()
+        request("watchdog", "get_events", linkedMapOf(
+            "init" to "0",
+            "cur_play_type" to "1",
+            "event_active_id" to "0"
+        ))
     }
 
     private fun session() {
