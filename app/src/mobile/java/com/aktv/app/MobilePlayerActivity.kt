@@ -529,14 +529,30 @@ class MobilePlayerActivity : AppCompatActivity() {
             .show()
     }
 
+    /** The TV's track menu: video quality, audio languages, subtitles, or jump to another source. */
     private fun pickTracks() {
         val player = player ?: return
-        runCatching {
-            androidx.media3.ui.TrackSelectionDialogBuilder(this, "Audio & subtitles", player, C.TRACK_TYPE_TEXT)
-                .build().show()
-        }.onFailure {
-            Toast.makeText(this, "No alternate tracks on this source.", Toast.LENGTH_SHORT).show()
-        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Tracks")
+            .setItems(arrayOf("Video quality", "🔊 Audio tracks", "💬 Subtitles", "⇄ Other source")) { _, index ->
+                if (index == 3) { pickSource(); return@setItems }
+                val type = when (index) { 0 -> C.TRACK_TYPE_VIDEO; 1 -> C.TRACK_TYPE_AUDIO; else -> C.TRACK_TYPE_TEXT }
+                if (player.currentTracks.groups.none { it.type == type }) {
+                    Toast.makeText(this, "This source has no selectable tracks of this type.", Toast.LENGTH_LONG).show()
+                    return@setItems
+                }
+                val label = when (index) { 0 -> "Video quality"; 1 -> "Audio"; else -> "Subtitles" }
+                runCatching {
+                    androidx.media3.ui.TrackSelectionDialogBuilder(this, label, player, type)
+                        .setAllowAdaptiveSelections(type == C.TRACK_TYPE_VIDEO)
+                        .setShowDisableOption(type == C.TRACK_TYPE_TEXT)
+                        .build().show()
+                }.onFailure {
+                    Toast.makeText(this, "Track list didn't open.", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun hopSource() {
