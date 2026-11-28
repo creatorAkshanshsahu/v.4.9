@@ -19,7 +19,13 @@ object Movies {
     ) { val isSeries get() = type == "series" }
 
     data class Episode(val season: Int, val episode: Int, val name: String, val overview: String, val thumb: String)
-    data class Shelf(val title: String, val type: String, val catalog: String, val genre: String?)
+    data class Shelf(
+        val title: String,
+        val type: String,
+        val catalog: String,
+        val genre: String?,
+        val discoverQuery: String? = null
+    )
 
     private const val TM = "https://api.themoviedb.org/3"
     private const val TMDB_KEY = "e86d249e1b4fc2dcd7d1f1cb09a004f8"   // TMDB v3 API key (catalogue, posters, search)
@@ -40,6 +46,22 @@ object Movies {
         Shelf("Top rated series", "series", "imdbRating", null)
     ) + listOf("Action", "Comedy", "Crime", "Drama", "Sci-Fi", "Animation", "Mystery", "Reality-TV")
         .map { Shelf("$it series", "series", "top", it) }
+
+    /** Streaming platform & regional shelves shown in the OG & Platforms hub (`tab = 8`). */
+    val PLATFORM_SHELVES: List<Shelf> = listOf(
+        Shelf("Netflix · Movies", "movie", "og_netflix_mv", null, "&with_watch_providers=8&watch_region=US&sort_by=popularity.desc"),
+        Shelf("Netflix · Series", "series", "og_netflix_tv", null, "&with_watch_providers=8&watch_region=US&sort_by=popularity.desc"),
+        Shelf("Prime Video · Movies", "movie", "og_prime_mv", null, "&with_watch_providers=9|119&watch_region=IN&sort_by=popularity.desc"),
+        Shelf("Prime Video · Series", "series", "og_prime_tv", null, "&with_watch_providers=9|119&watch_region=IN&sort_by=popularity.desc"),
+        Shelf("Disney+ Hotstar", "movie", "og_hotstar_mv", null, "&with_watch_providers=2336|122|337&watch_region=IN&sort_by=popularity.desc"),
+        Shelf("SonyLIV", "series", "og_sonyliv_tv", null, "&with_watch_providers=237&watch_region=IN&sort_by=popularity.desc"),
+        Shelf("ZEE5", "movie", "og_zee5_mv", null, "&with_watch_providers=232&watch_region=IN&sort_by=popularity.desc"),
+        Shelf("Apple TV+", "series", "og_apple_tv", null, "&with_watch_providers=350&watch_region=US&sort_by=popularity.desc"),
+        Shelf("Max · HBO", "series", "og_max_tv", null, "&with_watch_providers=1899&watch_region=US&sort_by=popularity.desc"),
+        Shelf("Crunchyroll · Anime", "series", "og_crunchyroll_tv", null, "&with_watch_providers=283&watch_region=US&sort_by=popularity.desc"),
+        Shelf("Indian Cinema", "movie", "og_regional_hi_mv", null, "&with_original_language=hi&sort_by=popularity.desc&vote_count.gte=5"),
+        Shelf("Korean Dramas", "series", "og_regional_ko_tv", null, "&with_original_language=ko&sort_by=popularity.desc&vote_count.gte=10")
+    )
 
     fun shelves(type: String) = if (type == "series") SERIES_SHELVES else MOVIE_SHELVES
 
@@ -140,14 +162,18 @@ object Movies {
         synchronized(cache) { cache[key] }?.let { timing("catalog-shelf", started, true); return it }
         val kind = if (sh.type == "series") "tv" else "movie"
         val path = when {
-            sh.genre != null -> "/discover/$kind"
+            sh.discoverQuery != null || sh.genre != null -> "/discover/$kind"
             sh.catalog == "imdbRating" -> "/$kind/top_rated"
             else -> "/trending/$kind/week"
         }
-        val extra = if (sh.genre != null) {
-            val gid = (if (sh.type == "series") TV_IDS else MOVIE_IDS)[sh.genre] ?: 0
-            "&with_genres=$gid&sort_by=popularity.desc&vote_count.gte=300"
-        } else ""
+        val extra = when {
+            sh.discoverQuery != null -> sh.discoverQuery
+            sh.genre != null -> {
+                val gid = (if (sh.type == "series") TV_IDS else MOVIE_IDS)[sh.genre] ?: 0
+                "&with_genres=$gid&sort_by=popularity.desc&vote_count.gte=300"
+            }
+            else -> ""
+        }
         val f = diskDir?.let { java.io.File(it, "tmdb_" + key.replace(Regex("[^A-Za-z0-9]"), "_") + ".json") }
         val fresh = f != null && f.exists() && System.currentTimeMillis() - f.lastModified() < 12 * 3600_000L
         if (fresh) {

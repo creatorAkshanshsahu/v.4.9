@@ -1,11 +1,55 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+
+// A stable signing key is what lets an in-app update install over the previous build. The key itself is
+// a sideload key (this app is distributed as an APK), not a Play Store upload key; the password is a
+// build property so a fork can supply its own. Without the file the build falls back to the local debug
+// key, which still produces an installable APK but cannot update an existing installation in place.
+val updateKeystore = rootProject.file("keystore/aktv-update.p12")
+val updateStorePassword = providers.gradleProperty("aktvUpdateStorePassword").orNull
+    ?: System.getenv("AKTV_UPDATE_STORE_PASSWORD")
+    ?: "aktv-update-key"
+
+fun quoteBuildConfig(raw: String): String =
+    "\"" + raw.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "").replace("\r", "") + "\""
+
+val starshareServer = (providers.gradleProperty("starshareServer").orNull
+    ?: System.getenv("STARSHARE_SERVER")
+    ?: "").trim()
+val starshareUser = (providers.gradleProperty("starshareUser").orNull
+    ?: System.getenv("STARSHARE_USER")
+    ?: "").trim()
+val starsharePass = (providers.gradleProperty("starsharePass").orNull
+    ?: System.getenv("STARSHARE_PASS")
+    ?: "").trim()
+
 android {
     namespace = "com.aktv.app"
     compileSdk = 35
-    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 62; versionName = "4.9.45"
+    buildFeatures { buildConfig = true }
+    defaultConfig { applicationId = "com.akshansh.aktv"; minSdk = 28; targetSdk = 33; versionCode = 182; versionName = "5.4.63"
         resValue("string", "build_run_id", System.getenv("GITHUB_RUN_ID")?.takeIf { it.matches(Regex("[0-9]{1,20}")) } ?: "local")
+        buildConfigField("String", "STARSHARE_SERVER", quoteBuildConfig(starshareServer))
+        buildConfigField("String", "STARSHARE_USER", quoteBuildConfig(starshareUser))
+        buildConfigField("String", "STARSHARE_PASS", quoteBuildConfig(starsharePass))
     }
-    buildTypes { release { isMinifyEnabled = false; signingConfig = signingConfigs.getByName("debug") } }   // optimised build, installable without a keystore
+    signingConfigs {
+        create("update") {
+            if (updateKeystore.exists()) {
+                storeFile = updateKeystore
+                storePassword = updateStorePassword
+                keyAlias = "aktv"
+                keyPassword = updateStorePassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            // Same key for every CI build, so "Update" in the app replaces the installed copy.
+            signingConfig = if (updateKeystore.exists()) signingConfigs.getByName("update") else signingConfigs.getByName("debug")
+        }
+    }
     lint { abortOnError = false; checkReleaseBuilds = false }
     testOptions {
         unitTests.isIncludeAndroidResources = true
@@ -13,11 +57,20 @@ android {
             it.systemProperty("aktv.ui.previewDir", project.layout.buildDirectory.dir("reports/ui-preview").get().asFile.absolutePath)
             it.systemProperty("aktv.live.tg", project.findProperty("liveTg")?.toString() ?: "false")
             it.systemProperty("aktv.live.frost", project.findProperty("liveFrost")?.toString() ?: "false")
+            it.systemProperty("aktv.live.jio", project.findProperty("liveJio")?.toString() ?: "false")
         }
     }
+    flavorDimensions += "edition"
     flavorDimensions += "abi"
-    productFlavors { create("arm32") { dimension = "abi" }; create("arm64") { dimension = "abi" } }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    productFlavors {
+        create("tv") { dimension = "edition"; buildConfigField("Boolean", "MOBILE", "false") }
+        create("mobile") {
+            dimension = "edition"; applicationIdSuffix = ".mobile"; buildConfigField("Boolean", "MOBILE", "true")
+        }
+        create("arm32") { dimension = "abi"; ndk { abiFilters.add("armeabi-v7a") } }
+        create("arm64") { dimension = "abi"; ndk { abiFilters.add("arm64-v8a") } }
+    }
+    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17; isCoreLibraryDesugaringEnabled = true }
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs { useLegacyPackaging = true } }
 }
@@ -29,10 +82,16 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
+    // Software AC-3/E-AC-3/DTS audio for phones without those licenses. Google publishes no
+    // FFmpeg binary, so this is Jellyfin's open-source build of Media3's own extension for 1.3.1.
+    // NOTE: this build is GPL-3.0 (its FFmpeg enables GPL components). If that ever matters,
+    // swap it for a self-built LGPL-configured AAR of the same extension; the wiring is unchanged.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.3.1+2")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation("io.coil-kt:coil:2.6.0")
     implementation("androidx.palette:palette:1.0.0")
     "arm32Implementation"("org.mozilla.geckoview:geckoview-armeabi-v7a:123.0.20240213221259")

@@ -38,7 +38,7 @@ internal object ChannelPlaybackScan {
         val failed = results.count { it.outcome == ChannelPlaybackOutcome.FAILED }
         val noFrame = results.count { it.outcome == ChannelPlaybackOutcome.NO_FRAME }
         val unchecked = results.count { it.outcome == ChannelPlaybackOutcome.NOT_CHECKED }
-        append("AK TV · on-device channel playback check\n")
+        append("STREAMR · on-device channel playback check\n")
         append(if (scanning) "Scan in progress" else if (completed) "Scan complete" else "Partial / incomplete scan")
         append(" · ${results.size} channels\n")
         append("Working: $working   Failed: $failed   No frame: $noFrame   Not checked: $unchecked\n")

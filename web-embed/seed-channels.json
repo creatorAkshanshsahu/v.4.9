@@ -1,0 +1,272 @@
+[
+  {
+    "id": "st:1001",
+    "rawId": "1001",
+    "source": "maxtv",
+    "name": "Star Sports 1 Hindi HD",
+    "category": "SPORTS | CRICKET",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1001"
+  },
+  {
+    "id": "st:1002",
+    "rawId": "1002",
+    "source": "maxtv",
+    "name": "Star Sports 2 HD",
+    "category": "SPORTS | CRICKET",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1002"
+  },
+  {
+    "id": "st:1003",
+    "rawId": "1003",
+    "source": "maxtv",
+    "name": "Sports18 1 HD",
+    "category": "SPORTS | INDIA",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1003"
+  },
+  {
+    "id": "st:1004",
+    "rawId": "1004",
+    "source": "maxtv",
+    "name": "Sony Sports Ten 1 HD",
+    "category": "SPORTS | CRICKET",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1004"
+  },
+  {
+    "id": "st:1005",
+    "rawId": "1005",
+    "source": "maxtv",
+    "name": "Sony Sports Ten 3 Hindi HD",
+    "category": "SPORTS | CRICKET",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1005"
+  },
+  {
+    "id": "st:1006",
+    "rawId": "1006",
+    "source": "maxtv",
+    "name": "Willow Cricket HD",
+    "category": "SPORTS | CRICKET",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1006"
+  },
+  {
+    "id": "st:1010",
+    "rawId": "1010",
+    "source": "maxtv",
+    "name": "Star Plus HD",
+    "category": "INDIA | ENTERTAINMENT",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1010"
+  },
+  {
+    "id": "st:1011",
+    "rawId": "1011",
+    "source": "maxtv",
+    "name": "Sony SET HD",
+    "category": "INDIA | ENTERTAINMENT",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1011"
+  },
+  {
+    "id": "st:1012",
+    "rawId": "1012",
+    "source": "maxtv",
+    "name": "Sony SAB HD",
+    "category": "INDIA | ENTERTAINMENT",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1012"
+  },
+  {
+    "id": "st:1013",
+    "rawId": "1013",
+    "source": "maxtv",
+    "name": "Colors HD",
+    "category": "INDIA | ENTERTAINMENT",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1013"
+  },
+  {
+    "id": "st:1014",
+    "rawId": "1014",
+    "source": "maxtv",
+    "name": "Zee TV HD",
+    "category": "INDIA | ENTERTAINMENT",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1014"
+  },
+  {
+    "id": "st:1015",
+    "rawId": "1015",
+    "source": "maxtv",
+    "name": "&TV HD",
+    "category": "INDIA | ENTERTAINMENT",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1015"
+  },
+  {
+    "id": "st:1020",
+    "rawId": "1020",
+    "source": "maxtv",
+    "name": "Sony Max HD",
+    "category": "INDIA | HINDI MOVIES",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1020"
+  },
+  {
+    "id": "st:1021",
+    "rawId": "1021",
+    "source": "maxtv",
+    "name": "Star Gold HD",
+    "category": "INDIA | HINDI MOVIES",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1021"
+  },
+  {
+    "id": "st:1022",
+    "rawId": "1022",
+    "source": "maxtv",
+    "name": "Zee Cinema HD",
+    "category": "INDIA | HINDI MOVIES",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1022"
+  },
+  {
+    "id": "st:1023",
+    "rawId": "1023",
+    "source": "maxtv",
+    "name": "Colors Cineplex HD",
+    "category": "INDIA | HINDI MOVIES",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1023"
+  },
+  {
+    "id": "st:1024",
+    "rawId": "1024",
+    "source": "maxtv",
+    "name": "&Pictures HD",
+    "category": "INDIA | HINDI MOVIES",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1024"
+  },
+  {
+    "id": "st:1025",
+    "rawId": "1025",
+    "source": "maxtv",
+    "name": "Goldmines",
+    "category": "INDIA | HINDI MOVIES",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1025"
+  },
+  {
+    "id": "st:1030",
+    "rawId": "1030",
+    "source": "maxtv",
+    "name": "Aaj Tak HD",
+    "category": "INDIA | NEWS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1030"
+  },
+  {
+    "id": "st:1031",
+    "rawId": "1031",
+    "source": "maxtv",
+    "name": "NDTV India",
+    "category": "INDIA | NEWS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1031"
+  },
+  {
+    "id": "st:1032",
+    "rawId": "1032",
+    "source": "maxtv",
+    "name": "India TV HD",
+    "category": "INDIA | NEWS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1032"
+  },
+  {
+    "id": "st:1033",
+    "rawId": "1033",
+    "source": "maxtv",
+    "name": "ABP News",
+    "category": "INDIA | NEWS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1033"
+  },
+  {
+    "id": "st:1040",
+    "rawId": "1040",
+    "source": "maxtv",
+    "name": "Discovery Channel India HD (Dual Audio)",
+    "category": "INDIA | DOCUMENTARY",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1040"
+  },
+  {
+    "id": "st:1041",
+    "rawId": "1041",
+    "source": "maxtv",
+    "name": "National Geographic HD India",
+    "category": "INDIA | DOCUMENTARY",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1041"
+  },
+  {
+    "id": "st:1042",
+    "rawId": "1042",
+    "source": "maxtv",
+    "name": "History TV18 HD",
+    "category": "INDIA | DOCUMENTARY",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1042"
+  },
+  {
+    "id": "st:1050",
+    "rawId": "1050",
+    "source": "maxtv",
+    "name": "Cartoon Network India (Hindi/Eng)",
+    "category": "INDIA | KIDS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1050"
+  },
+  {
+    "id": "st:1051",
+    "rawId": "1051",
+    "source": "maxtv",
+    "name": "Hungama TV",
+    "category": "INDIA | KIDS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1051"
+  },
+  {
+    "id": "st:1052",
+    "rawId": "1052",
+    "source": "maxtv",
+    "name": "Nick India",
+    "category": "INDIA | KIDS",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1052"
+  },
+  {
+    "id": "st:1060",
+    "rawId": "1060",
+    "source": "maxtv",
+    "name": "9XM",
+    "category": "INDIA | MUSIC",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1060"
+  },
+  {
+    "id": "st:1061",
+    "rawId": "1061",
+    "source": "maxtv",
+    "name": "MTV Beats HD",
+    "category": "INDIA | MUSIC",
+    "logo": "",
+    "cmd": "ffrt http://localhost/ch/1061"
+  }
+]

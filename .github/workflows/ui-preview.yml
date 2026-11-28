@@ -19,7 +19,7 @@ jobs:
         with: { gradle-version: 8.9 }
       - name: Render brand, home, entrance and player previews
         run: |
-          gradle testArm64DebugUnitTest --tests 'com.aktv.app.BrandPreviewTest' \
+          gradle testTvArm64DebugUnitTest --tests 'com.aktv.app.BrandPreviewTest' \
             --tests 'com.aktv.app.HomePreviewTest' --tests 'com.aktv.app.PlayerPreviewTest' --console=plain
       - name: Publish previews to this branch
         if: always()

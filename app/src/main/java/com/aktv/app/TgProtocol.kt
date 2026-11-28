@@ -20,7 +20,12 @@ data class TgStream(
     val cookie: String = "",
     // Non-secret browser origin stays consistent across redirects; source credentials do not.
     val requestOrigin: String = TgResolver.SITE,
-    val omitReferrer: Boolean = false
+    val omitReferrer: Boolean = false,
+    /**
+     * The media host is not a website that wants a browser origin: send neither `Origin` nor `Referer`,
+     * the way an IPTV player opens a signed CDN link. [headers] (the playlist's own user agent) still apply.
+     */
+    val omitOrigin: Boolean = false
 )
 
 /** TG's JSON / TanStack wire formats. Kept Android-free so protocol changes can be regression tested. */

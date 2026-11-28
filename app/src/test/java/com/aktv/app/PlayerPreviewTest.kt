@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -72,7 +71,8 @@ class PlayerPreviewTest {
             }, 0, FrameLayout.LayoutParams(-1, -1))
             layer.findViewById<PlayerView>(R.id.playerView).visibility = View.INVISIBLE
             layer.findViewById<View>(R.id.playerScrim).alpha = 0.72f
-            layer.findViewById<View>(R.id.playerBrand).alpha = 1f
+            layer.findViewById<View>(R.id.playerTopBar).alpha = 1f
+            layer.findViewById<TextView>(R.id.playerTopTitle).text = "1 · AK Sport HD"
             layer.findViewById<View>(R.id.playerClock).alpha = 1f
             val dock = layer.findViewById<View>(R.id.playerInfoDock)
             (dock.layoutParams as FrameLayout.LayoutParams).apply {
@@ -82,29 +82,28 @@ class PlayerPreviewTest {
             layer.findViewById<View>(R.id.infoActions).visibility = View.VISIBLE
             val card = layer.findViewById<LinearLayout>(R.id.infoCard)
             card.alpha = 1f
-            // Same wine gradient the player uses in production (0xF0120810 / 0xE00C0710).
-            // The earlier 0xE5080B11 / 0xD90D121A decoded to RGB (8,11,17)/(13,18,26) - dark
-            // cyan, not wine - which is where the live-player preview's teal came from.
-            card.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                intArrayOf(0xF0120810.toInt(), 0xE00C0710.toInt())).apply {
-                cornerRadius = 16f; setStroke(1, 0x59FF3448)
-            }
-            layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.aktv_logo_cinematic)
+            // Production floats the channel text straight on the picture — no panel, no border, no card.
+            // The preview paints exactly that, so the render cannot promise a box the app never draws.
+            card.background = null
+            layer.findViewById<ImageView>(R.id.infoLogo).setImageResource(R.drawable.streamr_mark)
             layer.findViewById<TextView>(R.id.infoCat).text = "SPORTS  ·  LIVE   1 OF 18"
             layer.findViewById<TextView>(R.id.infoName).text = "AK Sport HD"
             layer.findViewById<TextView>(R.id.infoNow).apply {
-                text = "NOW  ·  India v Australia  ·  2nd innings"
+                text = "India v Australia   14:00 – 18:00"
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoProgress).apply { visibility = View.VISIBLE }
+            // Production tints the live progress line with the electric cyan LIVE accent.
+            layer.findViewById<android.widget.ProgressBar>(R.id.infoProgress)
+                .progressTintList = android.content.res.ColorStateList.valueOf(Accent.LIVE)
             layer.findViewById<TextView>(R.id.infoScheduleNext).apply {
-                text = "NEXT  ·  Post-match coverage"
+                text = "Up next:  Post-match coverage"
                 visibility = View.VISIBLE
             }
             layer.findViewById<View>(R.id.infoHint).visibility = View.GONE
             val primary = layer.findViewById<TextView>(R.id.infoGuideAction)
-            primary.background = Ui.pill(1f, Color.WHITE, 16f)
-            primary.setTextColor(Color.BLACK)
+            primary.background = Ui.pill(1f, Accent.BRAND, 12f)
+            primary.setTextColor(Accent.TEXT)
             capture(root, 960, 540, file)
         } finally { controller.destroy() }
     }

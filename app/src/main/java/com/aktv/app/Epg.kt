@@ -64,4 +64,7 @@ object Epg {
 
     fun progress(p: Programme, nowSec: Long = System.currentTimeMillis() / 1000): Float =
         if (p.stop <= p.start) 0f else ((nowSec - p.start).toFloat() / (p.stop - p.start)).coerceIn(0f, 1f)
+
+    /** The tile caption for a now-playing programme: the title, or null when there is nothing to show. */
+    fun captionFor(now: Programme?): String? = now?.title?.trim()?.takeIf { it.isNotEmpty() }
 }

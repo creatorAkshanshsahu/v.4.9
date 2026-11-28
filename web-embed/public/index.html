@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STREAMR · maxTV Live TV API &amp; Embed Hub</title>
+  <style>
+    :root {
+      --abyss: #07060f;
+      --panel: #100e1f;
+      --panel-2: #16132b;
+      --border: rgba(255, 255, 255, 0.10);
+      --cyan: #00ecf7;
+      --brand: #ff2e63;
+      --text: #f6f7fc;
+      --dim: #9aa1b8;
+      --faint: #676e86;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: radial-gradient(circle at 80% 0%, rgba(0, 236, 247, 0.10) 0%, transparent 40%),
+                  radial-gradient(circle at 10% 10%, rgba(255, 46, 99, 0.12) 0%, transparent 42%),
+                  var(--abyss);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      min-height: 100vh;
+    }
+    header {
+      position: sticky; top: 0; z-index: 30;
+      display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+      padding: 16px 26px;
+      background: rgba(7, 6, 15, 0.86);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-dot {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--brand), #ff6b4a);
+      display: grid; place-items: center; font-weight: 900; font-size: 15px;
+      box-shadow: 0 6px 20px rgba(255, 46, 99, 0.35);
+    }
+    .brand h1 { font-size: 18px; letter-spacing: 0.04em; font-weight: 800; }
+    .brand span { display: block; font-size: 11px; color: var(--cyan); letter-spacing: 0.14em; font-weight: 700; }
+    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .pill-group {
+      display: inline-flex; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 999px; padding: 3px; gap: 3px;
+    }
+    .pill {
+      background: transparent; color: var(--dim); border: 0;
+      padding: 6px 13px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: all 0.16s ease;
+    }
+    .pill.active {
+      background: #fff; color: #07060f;
+    }
+    input[type="search"] {
+      background: var(--panel); border: 1px solid var(--border); color: var(--text);
+      border-radius: 999px; padding: 8px 16px; font-size: 13px; min-width: 240px; outline: none;
+    }
+    input[type="search"]:focus { border-color: var(--cyan); }
+    .layout {
+      max-width: 1440px; margin: 0 auto; padding: 22px 24px 48px;
+      display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr); gap: 22px;
+    }
+    @media (max-width: 1024px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+    .card {
+      background: rgba(16, 14, 31, 0.88);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+    .player-wrap {
+      width: 100%; aspect-ratio: 16 / 9; background: #000; position: relative;
+    }
+    .player-wrap iframe { width: 100%; height: 100%; border: 0; display: block; }
+    .embed-panel { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+    .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .kicker { font-size: 10px; font-weight: 800; letter-spacing: 0.16em; color: var(--cyan); text-transform: uppercase; }
+    .active-title { font-size: 20px; font-weight: 800; margin-top: 2px; }
+    .code-box {
+      background: #090814; border: 1px solid rgba(255,255,255,0.09); border-radius: 12px;
+      padding: 11px 13px; display: flex; flex-direction: column; gap: 7px;
+    }
+    .code-box label {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 11px; font-weight: 700; color: var(--dim);
+    }
+    .code-box pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11.5px; color: #d8f9ff; white-space: pre-wrap; word-break: break-all; line-height: 1.45;
+    }
+    .copy-btn {
+      background: rgba(0, 236, 247, 0.13); color: var(--cyan);
+      border: 1px solid rgba(0, 236, 247, 0.35);
+      border-radius: 999px; padding: 4px 11px; font-size: 11px; font-weight: 700; cursor: pointer;
+    }
+    .copy-btn:hover { background: var(--cyan); color: #05040b; }
+    .cats-strip {
+      display: flex; gap: 7px; overflow-x: auto; padding: 14px 16px;
+      border-bottom: 1px solid var(--border); scrollbar-width: thin;
+    }
+    .cat-chip {
+      flex: 0 0 auto;
+      background: var(--panel-2); color: var(--dim);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 6px 12px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    }
+    .cat-chip.active { border-color: var(--cyan); color: #fff; background: rgba(0,236,247,0.14); }
+    .ch-grid {
+      padding: 16px;
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 10px;
+      max-height: 700px; overflow-y: auto;
+    }
+    .ch-tile {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 13px;
+      padding: 12px; cursor: pointer; text-align: left; color: var(--text);
+      display: flex; flex-direction: column; gap: 6px; transition: all 0.15s ease;
+    }
+    .ch-tile:hover { border-color: rgba(0,236,247,0.5); transform: translateY(-1px); }
+    .ch-tile.active { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset; background: rgba(0,236,247,0.09); }
+    .ch-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .src-badge {
+      font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 999px;
+      background: rgba(255, 46, 99, 0.18); color: #ff8aa6;
+    }
+    .src-badge.star { background: rgba(0, 236, 247, 0.16); color: var(--cyan); }
+    .ch-tile-name { font-size: 13px; font-weight: 700; line-height: 1.3; }
+    .ch-tile-cat { font-size: 11px; color: var(--dim); }
+    .banner-note {
+      margin: 0 24px; max-width: 1392px; margin-inline: auto; margin-top: 16px;
+      padding: 11px 16px; border-radius: 12px;
+      background: rgba(0, 236, 247, 0.08); border: 1px solid rgba(0, 236, 247, 0.25);
+      font-size: 12.5px; color: #d5f7fa; display: none;
+    }
+    .toast {
+      position: fixed; bottom: 22px; right: 22px; z-index: 99;
+      background: #00ecf7; color: #06050d; font-weight: 800; font-size: 12.5px;
+      padding: 10px 18px; border-radius: 999px; box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+      opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-dot">S</div>
+      <div>
+        <span>MAXTV + STARSHARE GATEWAY</span>
+        <h1>STREAMR Live TV Embed Studio</h1>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="pill-group" id="sourcePills">
+        <button class="pill active" data-source="maxtv">maxTV</button>
+        <button class="pill" data-source="starshare">StarShare</button>
+        <button class="pill" data-source="all">Both</button>
+      </div>
+      <div class="pill-group" id="filterPills">
+        <button class="pill active" data-filter="hindi">Indian Hindi</button>
+        <button class="pill" data-filter="en_hi">India + English</button>
+        <button class="pill" data-filter="all">All</button>
+      </div>
+      <input id="searchInput" type="search" placeholder="Search channels (Star Sports, Sony, News…)" />
+    </div>
+  </header>
+
+  <div class="banner-note" id="seedBanner"></div>
+
+  <main class="layout">
+    <section class="card">
+      <div class="player-wrap">
+        <iframe id="previewFrame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+      </div>
+      <div class="embed-panel">
+        <div class="row-between">
+          <div>
+            <div class="kicker" id="activeCategory">LIVE EMBED PREVIEW</div>
+            <div class="active-title" id="activeName">Select a channel</div>
+          </div>
+          <a id="openStandaloneLink" target="_blank" rel="noopener" class="copy-btn" style="text-decoration:none;">Open Embed Tab ↗</a>
+        </div>
+
+        <div class="code-box">
+          <label>
+            <span>1. Channel &lt;iframe&gt; Embed Code (Paste into OG Website)</span>
+            <button class="copy-btn" data-copy="iframeCode">Copy &lt;iframe&gt;</button>
+          </label>
+          <pre id="iframeCode"></pre>
+        </div>
+
+        <div class="code-box">
+          <label>
+            <span>2. OG Website REST JSON API (Lists Channels + Embed URLs)</span>
+            <button class="copy-btn" data-copy="jsonApiCode">Copy API URL</button>
+          </label>
+          <pre id="jsonApiCode"></pre>
+        </div>
+
+        <div class="code-box">
+          <label>
+            <span>3. Dynamic maxTV M3U Playlist URL (Playlist for VLC / Web / IPTV)</span>
+            <button class="copy-btn" data-copy="m3uApiCode">Copy M3U URL</button>
+          </label>
+          <pre id="m3uApiCode"></pre>
+        </div>
+
+        <div class="code-box">
+          <label>
+            <span>4. Full Live TV Grid + Player Widget (1-Line Drop-In for OG Website)</span>
+            <button class="copy-btn" data-copy="sdkSnippetCode">Copy Widget</button>
+          </label>
+          <pre id="sdkSnippetCode"></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="display:flex;flex-direction:column;">
+      <div class="row-between" style="padding:16px 18px 0;">
+        <div>
+          <div class="kicker">CHANNEL DIRECTORY</div>
+          <strong id="channelCountLabel" style="font-size:15px;">Loading channels…</strong>
+        </div>
+        <button class="copy-btn" id="refreshBtn">Refresh Catalogue</button>
+      </div>
+      <div class="cats-strip" id="catsStrip"></div>
+      <div class="ch-grid" id="chGrid"></div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast">Copied to clipboard</div>
+
+  <script>
+    (function () {
+      const origin = location.origin;
+      let state = {
+        source: "maxtv",
+        filter: "hindi",
+        category: "",
+        query: "",
+        channels: [],
+        categories: [],
+        active: null
+      };
+
+      const previewFrame = document.getElementById("previewFrame");
+      const activeName = document.getElementById("activeName");
+      const activeCategory = document.getElementById("activeCategory");
+      const openStandaloneLink = document.getElementById("openStandaloneLink");
+      const iframeCode = document.getElementById("iframeCode");
+      const jsonApiCode = document.getElementById("jsonApiCode");
+      const m3uApiCode = document.getElementById("m3uApiCode");
+      const sdkSnippetCode = document.getElementById("sdkSnippetCode");
+      const channelCountLabel = document.getElementById("channelCountLabel");
+      const catsStrip = document.getElementById("catsStrip");
+      const chGrid = document.getElementById("chGrid");
+      const searchInput = document.getElementById("searchInput");
+      const seedBanner = document.getElementById("seedBanner");
+      const toast = document.getElementById("toast");
+
+      function flashToast(msg) {
+        toast.textContent = msg;
+        toast.classList.add("show");
+        setTimeout(() => toast.classList.remove("show"), 1800);
+      }
+
+      function updateIntegrationSnippets() {
+        const apiUrl = `${origin}/api/channels?source=${state.source}&filter=${state.filter}`;
+        const m3uUrl = `${origin}/api/playlist.m3u?source=${state.source}&filter=${state.filter}`;
+        jsonApiCode.textContent = apiUrl;
+        m3uApiCode.textContent = m3uUrl;
+        sdkSnippetCode.textContent =
+          `<div id="og-live-tv"></div>\n<script src="${origin}/embed-sdk.js" data-target="#og-live-tv" data-source="${state.source}" data-filter="${state.filter}"><\/script>`;
+
+        if (state.active) {
+          const embedUrl = `${origin}/embed/${encodeURIComponent(state.active.id)}`;
+          iframeCode.textContent =
+            `<iframe src="${embedUrl}" width="100%" height="100%" frameborder="0" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+          openStandaloneLink.href = embedUrl;
+        }
+      }
+
+      function selectChannel(ch) {
+        state.active = ch;
+        activeName.textContent = ch.name;
+        activeCategory.textContent = `${ch.source.toUpperCase()} · ${ch.category}`;
+        previewFrame.src = `embed/${encodeURIComponent(ch.id)}?muted=1`;
+        updateIntegrationSnippets();
+        renderGrid();
+      }
+
+      function renderCategories() {
+        catsStrip.innerHTML = "";
+        const allChip = document.createElement("button");
+        allChip.className = "cat-chip" + (state.category === "" ? " active" : "");
+        allChip.textContent = "All Genres";
+        allChip.onclick = () => { state.category = ""; renderCategories(); renderGrid(); };
+        catsStrip.appendChild(allChip);
+
+        state.categories.forEach((cat) => {
+          const btn = document.createElement("button");
+          btn.className = "cat-chip" + (state.category === cat ? " active" : "");
+          btn.textContent = cat;
+          btn.onclick = () => { state.category = cat; renderCategories(); renderGrid(); };
+          catsStrip.appendChild(btn);
+        });
+      }
+
+      function renderGrid() {
+        const q = state.query.trim().toLowerCase();
+        const visible = state.channels.filter((ch) => {
+          if (state.category && ch.category !== state.category) return false;
+          if (!q) return true;
+          return `${ch.name} ${ch.category}`.toLowerCase().includes(q);
+        });
+
+        channelCountLabel.textContent = `${visible.length} Live Channels`;
+        chGrid.innerHTML = "";
+        visible.slice(0, 300).forEach((ch) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "ch-tile" + (state.active && state.active.id === ch.id ? " active" : "");
+          btn.innerHTML = `
+            <div class="ch-tile-top">
+              <span class="src-badge ${ch.source === "starshare" ? "star" : ""}">${ch.source}</span>
+              <span style="font-size:10px;color:var(--faint);">${ch.id}</span>
+            </div>
+            <div class="ch-tile-name"></div>
+            <div class="ch-tile-cat"></div>
+          `;
+          btn.querySelector(".ch-tile-name").textContent = ch.name;
+          btn.querySelector(".ch-tile-cat").textContent = ch.category;
+          btn.onclick = () => selectChannel(ch);
+          chGrid.appendChild(btn);
+        });
+      }
+
+      async function loadChannels(forceRefresh) {
+        channelCountLabel.textContent = "Loading channels…";
+        updateIntegrationSnippets();
+        try {
+          const url = `api/channels?source=${encodeURIComponent(state.source)}&filter=${encodeURIComponent(state.filter)}${forceRefresh ? "&refresh=1" : ""}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          state.channels = data.channels || [];
+          state.categories = data.categories || [];
+          state.category = "";
+          if (data.usingPreviewSeed) {
+            seedBanner.style.display = "block";
+            seedBanner.textContent =
+              "Preview Mode: Showing sample Indian Hindi channels because this cloud build sandbox blocks outbound port 80/8080 IPTV traffic. Deploy `web-embed/` to Render, Railway, Fly.io, or any VPS to stream the full live maxTV & StarShare catalogues automatically.";
+          } else {
+            seedBanner.style.display = "none";
+          }
+          renderCategories();
+          if (state.channels.length > 0) {
+            const keep = state.active && state.channels.find((c) => c.id === state.active.id);
+            selectChannel(keep || state.channels[0]);
+          } else {
+            renderGrid();
+          }
+        } catch (e) {
+          channelCountLabel.textContent = "Failed to load channels";
+        }
+      }
+
+      document.querySelectorAll("#sourcePills .pill").forEach((btn) => {
+        btn.onclick = () => {
+          document.querySelectorAll("#sourcePills .pill").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          state.source = btn.dataset.source;
+          loadChannels(false);
+        };
+      });
+
+      document.querySelectorAll("#filterPills .pill").forEach((btn) => {
+        btn.onclick = () => {
+          document.querySelectorAll("#filterPills .pill").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          state.filter = btn.dataset.filter;
+          loadChannels(false);
+        };
+      });
+
+      searchInput.addEventListener("input", () => {
+        state.query = searchInput.value;
+        renderGrid();
+      });
+
+      document.getElementById("refreshBtn").onclick = () => loadChannels(true);
+
+      document.querySelectorAll("[data-copy]").forEach((btn) => {
+        btn.onclick = () => {
+          const el = document.getElementById(btn.dataset.copy);
+          if (!el) return;
+          navigator.clipboard.writeText(el.textContent).then(() => flashToast("Copied to clipboard!"));
+        };
+      });
+
+      loadChannels(false);
+    })();
+  </script>
+</body>
+</html>

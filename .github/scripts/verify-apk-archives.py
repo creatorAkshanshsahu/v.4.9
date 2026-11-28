@@ -10,8 +10,10 @@ import zipfile
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("out")
 EXPECTED = {
-    "AK-TV-arm32.apk": ("armeabi-v7a", "arm64-v8a"),
-    "AK-TV-arm64.apk": ("arm64-v8a", "armeabi-v7a"),
+    "STREAMR-arm32.apk": ("armeabi-v7a", "arm64-v8a"),
+    "STREAMR-arm64.apk": ("arm64-v8a", "armeabi-v7a"),
+    "STREAMR-mobile-arm32.apk": ("armeabi-v7a", "arm64-v8a"),
+    "STREAMR-mobile-arm64.apk": ("arm64-v8a", "armeabi-v7a"),
 }
 
 

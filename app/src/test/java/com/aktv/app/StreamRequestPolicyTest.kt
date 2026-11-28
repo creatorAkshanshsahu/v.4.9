@@ -7,6 +7,23 @@ class StreamRequestPolicyTest {
     private val token = "st=1~exp=4102444800~acl=/*~hmac=fixture"
     private val url = "https://media.example/live/a.mpd?channel=872&__hdnea__=$token"
 
+    @Test fun `a signed CDN stream is never handed a browser origin`() {
+        val cdn = "https://jiotvmblive.cdn.jio.com/bpk-tv/SonySAB_MOB/WDVLive/index.mpd?__hdnea__=$token"
+        val policy = StreamRequestPolicy(
+            TgStream("JioTV Play", cdn, "dash", headers = mapOf("User-Agent" to "@allinone_reborn"), omitOrigin = true)
+        )
+        val manifest = policy.request(cdn)
+        assertFalse("a Jio CDN refusal follows a foreign Origin", manifest.headers.containsKey("Origin"))
+        assertFalse("a Jio CDN refusal follows a foreign Referer", manifest.headers.containsKey("Referer"))
+        assertEquals("@allinone_reborn", manifest.headers["User-Agent"])
+        // Segments carry the same user agent, and the token follows them as before.
+        val segment = policy.request("https://jiotvmblive.cdn.jio.com/bpk-tv/SonySAB_MOB/WDVLive/seg-1.m4s")
+        assertFalse(segment.headers.containsKey("Origin"))
+        assertFalse(segment.headers.containsKey("Referer"))
+        assertEquals("@allinone_reborn", segment.headers["User-Agent"])
+        assertTrue(segment.url.endsWith("__hdnea__=$token"))
+    }
+
     @Test fun `manifest token follows HLS playlists and DASH segments on the same origin`() {
         val policy = StreamRequestPolicy(TgStream("TG", url, "dash"))
         for (path in listOf("variant.m3u8", "video.m4s", "init.mp4", "key.bin")) {

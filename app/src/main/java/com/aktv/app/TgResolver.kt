@@ -12,10 +12,32 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal data class TgResponse(val code: Int, val body: ByteArray, val contentType: String = "application/json", val serverTimeMs: Long? = null)
+internal data class TgResponse(
+    val code: Int,
+    val body: ByteArray,
+    val contentType: String = "application/json",
+    val serverTimeMs: Long? = null,
+    /** URL after every redirect, when the transport followed one. Null when the request was not redirected. */
+    val finalUrl: String? = null
+)
 internal fun interface TgTransport { fun get(url: String, headers: Map<String, String>): TgResponse }
 
-internal class TgHttp : TgTransport {
+internal class TgHttp(
+    /** A playlist on a slow TV link needs far longer than a channel lookup, so the caller sets this. */
+    readTimeoutSeconds: Long = 6,
+    callTimeoutSeconds: Long = 12,
+    /**
+     * The largest body this transport will read. Site player responses are small; a Stalker portal's
+     * catalogue is not, because it lists every channel the subscription carries in one document.
+     */
+    maxBodyBytes: Int = TgProtocol.MAX_BODY
+) : TgTransport {
+    private val limit: Int = maxBodyBytes
+    private val client: OkHttpClient =
+        if (readTimeoutSeconds == 6L && callTimeoutSeconds == 12L && limit == TgProtocol.MAX_BODY) shared else
+        OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(readTimeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS).build()
+
     override fun get(url: String, headers: Map<String, String>): TgResponse {
         checkInterrupted()
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT)
@@ -31,18 +53,20 @@ internal class TgHttp : TgTransport {
                     checkInterrupted()
                     val count = input.read(buffer)
                     if (count < 0) break
-                    if (output.size() + count > TgProtocol.MAX_BODY) throw IOException("Player response too large")
+                    if (output.size() + count > limit) throw IOException("Player response too large")
                     output.write(buffer, 0, count)
                 }
                 output.toByteArray()
             } ?: ByteArray(0)
-            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime)
+            // The signed CDN address behind a playlist redirector is the useful part of a manifest probe.
+            val finalUrl = response.request.url.toString().takeIf { it != url }
+            return TgResponse(response.code, body, response.header("Content-Type").orEmpty(), serverTime, finalUrl)
         }
     }
 
     companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-        private val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
+        private val shared = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(6, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
     }
 }
