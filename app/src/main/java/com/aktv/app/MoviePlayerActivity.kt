@@ -1071,10 +1071,6 @@ class MoviePlayerActivity : Activity() {
     private fun showQuickAudioMenu() {
         val owner = player ?: run { showSources(); return }
         val audioGroups = owner.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
-        if (audioGroups.isEmpty()) {
-            Toast.makeText(this, "No selectable audio tracks yet.", Toast.LENGTH_SHORT).show()
-            return
-        }
         val items = ArrayList<Pair<String, () -> Unit>>()
         var counter = 0
         for (group in audioGroups) {
@@ -1100,7 +1096,27 @@ class MoviePlayerActivity : Activity() {
                 counter++
             }
         }
-        showDialog(AlertDialog.Builder(this).setTitle("Audio track")
+        // Frost serves dubs as separate sources, not tracks: a Hindi dub never appears in the
+        // track list above. List the sibling sources by language so Hindi et al switch from Audio
+        // directly instead of only from the source menu. One entry per language; the full list
+        // with every quality stays in the source menu.
+        (ogCache + sources).distinctBy { it.identity }
+            .filter { it.identity != currentSource?.identity }
+            .sortedByDescending { it.language.isNotBlank() }
+            .distinctBy { it.language.ifBlank { it.identity } }
+            .take(8)
+            .forEach { sibling ->
+                items += "🌐 ${sibling.label}" to {
+                    desiredPlay = true
+                    pinnedOg = (sibling.provider == FrostProvider.OG)
+                    begin(sibling.provider, sibling)
+                }
+            }
+        if (items.isEmpty()) {
+            Toast.makeText(this, "No selectable audio tracks yet.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        showDialog(AlertDialog.Builder(this).setTitle("Audio track / language")
             .setItems(items.map { it.first }.toTypedArray()) { _, idx -> items[idx].second() }
             .setNegativeButton("Close", null).create())
     }
